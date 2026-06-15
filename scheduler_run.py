@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import random
 from datetime import datetime
@@ -8,19 +9,50 @@ from daily_compass import parse_args, run, save_results
 from task_status import write_status
 
 LOCK_PATH = Path(__file__).parent / "output" / "daily_job.lock"
+LOCK_EXPIRE_SECONDS = 3 * 3600  # 3 小时过期
+
+
+def is_lock_stale():
+    """检查 lock 文件是否过期"""
+    if not LOCK_PATH.exists():
+        return False
+
+    try:
+        lock_data = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+        started_at = datetime.fromisoformat(lock_data.get("started_at", ""))
+        elapsed = (datetime.now() - started_at).total_seconds()
+        return elapsed > LOCK_EXPIRE_SECONDS
+    except (json.JSONDecodeError, ValueError, KeyError):
+        # lock 文件格式错误，视为过期
+        return True
+
+
+def remove_lock():
+    """删除 lock 文件"""
+    try:
+        LOCK_PATH.unlink()
+    except FileNotFoundError:
+        pass
 
 
 async def main():
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     if LOCK_PATH.exists():
-        write_status(
-            state="skipped",
-            message="已有采集任务在运行，跳过本次执行",
-        )
-        return
+        if is_lock_stale():
+            remove_lock()
+        else:
+            write_status(
+                state="skipped",
+                message="已有采集任务在运行，跳过本次执行",
+            )
+            return
 
-    LOCK_PATH.write_text(str(os.getpid()), encoding="utf-8")
+    lock_data = {
+        "pid": os.getpid(),
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    LOCK_PATH.write_text(json.dumps(lock_data), encoding="utf-8")
 
     try:
         delay = random.randint(0, 3600)
@@ -55,10 +87,7 @@ async def main():
         )
         raise
     finally:
-        try:
-            LOCK_PATH.unlink()
-        except FileNotFoundError:
-            pass
+        remove_lock()
 
 
 if __name__ == "__main__":

@@ -35,6 +35,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# 设置环境变量（必须在安装 Playwright 浏览器之前）
+ENV DISPLAY=:99
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # 复制依赖文件
 COPY requirements.txt .
 COPY pyproject.toml .
@@ -69,10 +73,6 @@ RUN chmod +x /start.sh
 # 8501: Streamlit 看板
 # 5900: VNC 直连（可选）
 EXPOSE 6080 8501 5900
-
-# 设置环境变量
-ENV DISPLAY=:99
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # 数据卷
 VOLUME ["/app/output", "/app/session"]

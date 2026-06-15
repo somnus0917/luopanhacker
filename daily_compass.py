@@ -182,17 +182,40 @@ async def wait_for_manual_login(page, timeout_minutes):
 
     print(f"检测到登录页，请在 {timeout_minutes} 分钟内手动完成登录。")
 
-    await page.wait_for_url(
-        lambda url: "login" not in url.lower(),
-        timeout=timeout_minutes * 60 * 1000,
-    )
+    # 等待登录完成：检查明确的可见业务元素
+    business_markers = ("近1天", "经营概况")
+    deadline = asyncio.get_event_loop().time() + timeout_minutes * 60
+    screenshot_interval = 30  # 每 30 秒刷新一次截图
+    last_screenshot_time = asyncio.get_event_loop().time()
 
-    write_status(
-        state="running",
-        message="登录完成，继续采集",
-    )
+    while asyncio.get_event_loop().time() < deadline:
+        # 检查是否出现可见的业务页面元素
+        for marker in business_markers:
+            try:
+                locator = page.get_by_text(marker, exact=False).first
+                await locator.wait_for(state="visible", timeout=2000)
+                write_status(
+                    state="running",
+                    message="登录完成，继续采集",
+                )
+                await human_pause(6.0, 12.0)
+                return
+            except Exception:
+                continue
 
-    await human_pause(6.0, 12.0)
+        # 定期刷新截图
+        now = asyncio.get_event_loop().time()
+        if now - last_screenshot_time >= screenshot_interval:
+            try:
+                await page.screenshot(path=str(LOGIN_SCREENSHOT), full_page=True)
+                last_screenshot_time = now
+            except Exception:
+                pass
+
+        await asyncio.sleep(2)
+
+    # 超时
+    raise TimeoutError(f"登录超时：{timeout_minutes} 分钟内未完成登录")
 
 
 async def choose_near_day(page):
