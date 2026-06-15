@@ -1,0 +1,11 @@
+[project]
+name = "luopan-demo"
+version = "0.1.0"
+description = "Douyin Compass scraper demo"
+requires-python = ">=3.9"
+dependencies = [
+    "apscheduler",
+    "pandas",
+    "playwright",
+    "streamlit",
+]
