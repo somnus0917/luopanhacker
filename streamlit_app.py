@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 
 import pandas as pd
@@ -16,6 +17,7 @@ from dashboard import (
     percent,
     shop_list,
 )
+from task_status import LOGIN_SCREENSHOT, read_status
 
 
 CORE_COLUMNS = [
@@ -296,6 +298,8 @@ st.set_page_config(
     layout="wide",
 )
 
+NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
+
 st.markdown(
     """
     <style>
@@ -320,6 +324,33 @@ st.markdown(
 )
 
 st.title("罗盘经营看板")
+
+with st.expander("采集状态", expanded=True):
+    status = read_status()
+    state = status.get("state", "unknown")
+    message = status.get("message", "暂无采集状态")
+
+    st.write(f"状态：**{state}**")
+    st.write(message)
+
+    if status.get("updated_at"):
+        st.caption(f"更新时间：{status['updated_at']}")
+
+    if status.get("last_success_at"):
+        st.success(f"最近成功采集：{status['last_success_at']}")
+
+    if status.get("last_error"):
+        st.error(status["last_error"])
+
+    if state == "login_required":
+        st.warning("当前需要扫码登录。请扫描下方截图中的二维码，或打开 noVNC 远程浏览器完成登录。")
+
+        if LOGIN_SCREENSHOT.exists():
+            st.image(str(LOGIN_SCREENSHOT), caption="登录页面截图")
+        else:
+            st.info("暂未生成登录截图，请稍后刷新页面。")
+
+    st.link_button("打开远程浏览器 noVNC", NOVNC_URL)
 
 records = get_dashboard_records()
 if not records:

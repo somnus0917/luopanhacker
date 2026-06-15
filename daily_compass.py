@@ -19,6 +19,7 @@ from scraper import (
     switch_shop,
     wait_network_quiet,
 )
+from task_status import LOGIN_SCREENSHOT, write_status
 
 
 OUTPUT_ROOT = Path(__file__).parent / "output" / "daily"
@@ -160,6 +161,7 @@ async def wait_for_manual_login(page, timeout_minutes):
         "打开 抖店App 扫码登录",
         "商家入口",
     )
+
     marker_visible = False
     for marker in login_markers:
         if await page.get_by_text(marker, exact=False).count():
@@ -169,11 +171,27 @@ async def wait_for_manual_login(page, timeout_minutes):
     if "login" not in page.url.lower() and not marker_visible:
         return
 
+    LOGIN_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+    await page.screenshot(path=str(LOGIN_SCREENSHOT), full_page=True)
+
+    write_status(
+        state="login_required",
+        message=f"检测到登录页，请在 {timeout_minutes} 分钟内扫码登录",
+        login_screenshot=str(LOGIN_SCREENSHOT),
+    )
+
     print(f"检测到登录页，请在 {timeout_minutes} 分钟内手动完成登录。")
+
     await page.wait_for_url(
         lambda url: "login" not in url.lower(),
         timeout=timeout_minutes * 60 * 1000,
     )
+
+    write_status(
+        state="running",
+        message="登录完成，继续采集",
+    )
+
     await human_pause(6.0, 12.0)
 
 

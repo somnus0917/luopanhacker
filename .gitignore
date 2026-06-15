@@ -53,6 +53,7 @@ Thumbs.db
 
 # Output
 output/
+!output/.gitkeep
 
 # UV
 .uv-cache/
@@ -63,3 +64,7 @@ uv.lock
 
 # Metrics
 metrics.db
+
+# Docker
+logs/
+docker-compose.override.yml

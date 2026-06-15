@@ -1,20 +1,56 @@
 # Douyin Compass Daily Runner
 
-这个目录用于低频获取抖音电商罗盘店铺页的“近1天”可见数据。
+这个目录用于低频获取抖音电商罗盘店铺页的"近1天"可见数据。
 
-## 首次准备
+## 快速部署（Docker）
+
+### 1. 构建并启动服务
 
 ```bash
-cd /Users/somnus/Documents/luopanhacker/luopan_demo
+docker-compose build
+docker-compose up -d
+```
+
+### 2. 首次登录
+
+1. 打开 noVNC 网页远程桌面: `http://YOUR_SERVER_IP:6080`
+2. 进入容器执行抓取:
+   ```bash
+   docker exec -it douyin-compass bash
+   ./docker/run_daily.sh
+   ```
+3. 当浏览器出现登录页面时，在 noVNC 中扫码登录
+4. 登录状态会保存，后续可复用
+
+### 3. 访问服务
+
+- **Streamlit 看板**: `http://YOUR_SERVER_IP:8501`
+- **noVNC 远程桌面**: `http://YOUR_SERVER_IP:6080`
+
+### 4. 定时任务
+
+- 每天 9:00 自动触发采集任务
+- 任务内部随机等待 0-60 分钟，避免固定时间访问
+- 如果登录失效，看板会显示登录截图和 noVNC 入口
+- 登录完成后任务会自动继续执行
+
+详细部署说明请参考 [DEPLOY.md](./DEPLOY.md)
+
+---
+
+## 本地运行
+
+### 首次准备
+
+```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m playwright install chromium
 ```
 
-## 每日运行
+### 每日运行
 
 ```bash
-cd /Users/somnus/Documents/luopanhacker/luopan_demo
 ./run_daily.sh
 ```
 

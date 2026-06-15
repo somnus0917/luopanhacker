@@ -1,0 +1,16 @@
+.git
+.gitignore
+.playwright-browsers
+.playwright-cli
+.venv
+__pycache__
+*.pyc
+*.pyo
+output
+session
+logs
+metrics.db
+*.db
+.DS_Store
+docker-compose.yml
+README.md

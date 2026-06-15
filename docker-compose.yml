@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  compass-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: douyin-compass
+    ports:
+      - "6080:6080"   # noVNC 网页远程桌面
+      - "8501:8501"   # Streamlit 看板
+      # - "5900:5900" # VNC 直连（可选，需要 VNC 客户端）
+    volumes:
+      - ./output:/app/output        # 数据输出目录
+      - ./session:/app/session      # 浏览器会话（登录状态）
+      - ./logs:/app/logs            # 日志目录
+      - ./metrics.db:/app/metrics.db # 数据库（可选）
+    environment:
+      - TZ=Asia/Shanghai            # 时区设置
+      - DISPLAY=:99
+      - NOVNC_URL=http://YOUR_SERVER_IP:6080  # noVNC 访问地址
+    restart: unless-stopped
+    # 资源限制（可选）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 4G
