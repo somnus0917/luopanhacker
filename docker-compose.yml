@@ -14,10 +14,12 @@ services:
       - ./output:/app/output        # 数据输出目录
       - ./session:/app/session      # 浏览器会话（登录状态）
       - ./logs:/app/logs            # 日志目录
+      - ./config:/app/config        # 用户配置目录
     environment:
       - TZ=Asia/Shanghai            # 时区设置
       - DISPLAY=:99
       - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}  # 从 .env 读取或使用默认值
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}       # 管理员密码
     restart: unless-stopped
     # 资源限制（可选）
     # deploy:

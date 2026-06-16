@@ -7,6 +7,15 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from auth import (
+    add_user,
+    change_password,
+    delete_user,
+    get_user_role,
+    list_users,
+    logout,
+    require_auth,
+)
 from dashboard import (
     CONTENT_LABELS,
     MONEY_METRICS,
@@ -330,6 +339,9 @@ st.set_page_config(
     layout="wide",
 )
 
+current_user = require_auth()
+current_role = get_user_role(current_user)
+
 NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
 
 st.markdown(
@@ -414,6 +426,53 @@ with st.sidebar:
         default=[shop["shop_name"] for shop in shops],
     )
     st.caption(f"最后刷新：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    st.markdown("---")
+    st.markdown(f"**当前用户：** {current_user}")
+    st.markdown(f"**角色：** {current_role}")
+
+    with st.expander("修改密码"):
+        with st.form("change_password_form"):
+            old_password = st.text_input("当前密码", type="password")
+            new_password = st.text_input("新密码", type="password")
+            confirm_password = st.text_input("确认新密码", type="password")
+            if st.form_submit_button("保存"):
+                if new_password != confirm_password:
+                    st.error("两次输入的新密码不一致")
+                elif change_password(current_user, old_password, new_password):
+                    st.success("密码修改成功")
+                else:
+                    st.error("当前密码错误")
+
+    if current_role == "admin":
+        with st.expander("用户管理"):
+            st.markdown("**添加用户**")
+            with st.form("add_user_form"):
+                new_username = st.text_input("用户名")
+                new_user_password = st.text_input("密码", type="password")
+                new_user_role = st.selectbox("角色", ["viewer", "admin"])
+                if st.form_submit_button("添加"):
+                    if add_user(new_username, new_user_password, new_user_role):
+                        st.success(f"用户 {new_username} 添加成功")
+                        st.rerun()
+                    else:
+                        st.error("用户名已存在")
+
+            st.markdown("**用户列表**")
+            users = list_users()
+            for user in users:
+                col1, col2, col3 = st.columns([2, 1, 1])
+                with col1:
+                    st.write(f"{user['username']} ({user['role']})")
+                with col2:
+                    if user["username"] != "admin":
+                        if st.button("删除", key=f"del_{user['username']}"):
+                            if delete_user(user["username"]):
+                                st.success(f"用户 {user['username']} 已删除")
+                                st.rerun()
+
+    if st.button("退出登录"):
+        logout()
 
 filtered_records = [
     record

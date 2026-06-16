@@ -13,19 +13,17 @@ docker-compose up -d
 
 ### 2. 首次登录
 
-1. 打开 noVNC 网页远程桌面: `http://YOUR_SERVER_IP:6080`
-2. 进入容器执行抓取:
-   ```bash
-   docker exec -it douyin-compass bash
-   ./docker/run_daily.sh
-   ```
-3. 当浏览器出现登录页面时，在 noVNC 中扫码登录
-4. 登录状态会保存，后续可复用
+1. 打开 Streamlit 看板: `http://YOUR_SERVER_IP:8501`
+2. 使用默认管理员账户登录：
+   - 用户名：`admin`
+   - 密码：`admin123`
+3. **首次登录后请立即修改默认密码**（在侧边栏"修改密码"）
+4. 如需添加其他用户，管理员可在侧边栏"用户管理"中添加
 
 ### 3. 访问服务
 
-- **Streamlit 看板**: `http://YOUR_SERVER_IP:8501`
-- **noVNC 远程桌面**: `http://YOUR_SERVER_IP:6080`
+- **Streamlit 看板**: `http://YOUR_SERVER_IP:8501`（需要登录）
+- **noVNC 远程桌面**: `http://YOUR_SERVER_IP:6080`（用于扫码登录抖音）
 
 ### 4. 定时任务
 
@@ -93,6 +91,12 @@ output/daily/2026-06-11/compass_daily_2026-06-11_143000.csv
 ```text
 http://127.0.0.1:8501
 ```
+
+首次访问需要登录：
+- 用户名：`admin`
+- 密码：`admin123`
+
+登录后可以在侧边栏修改密码和管理用户。
 
 Streamlit 会直接读取 `output/daily/**/*.json`，新跑出的每日数据会自动进入看板。
 

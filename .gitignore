@@ -68,3 +68,6 @@ metrics.db
 # Docker
 logs/
 docker-compose.override.yml
+
+# Auth config
+config/users.json
