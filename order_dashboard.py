@@ -131,7 +131,7 @@ def render(orders):
         for b in brands
     )
 
-    payload = html_module.escape(json.dumps(orders, ensure_ascii=False))
+    orders_json = json.dumps(orders, ensure_ascii=False)
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -369,51 +369,25 @@ def render(orders):
           </tr>
         </thead>
         <tbody id="tableBody">
-          {"".join(table_rows)}
         </tbody>
       </table>
     </div>
   </main>
 
   <script>
-    const allOrders = JSON.parse(document.getElementById('tableBody').parentElement.querySelector('script')?.textContent || '[]');
+    const allOrders = {orders_json};
     let filteredOrders = [...allOrders];
 
-    function getFilters() {{
-      return {{
-        shop: document.getElementById('filterShop').value,
-        brand: document.getElementById('filterBrand').value,
-        status: document.getElementById('filterStatus').value,
-        search: document.getElementById('filterSearch').value.toLowerCase(),
-      }};
+    function escapeHtml(text) {{
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }}
 
-    function applyFilters() {{
-      const filters = getFilters();
-      filteredOrders = allOrders.filter(o => {{
-        if (filters.shop && o.shop_name !== filters.shop) return false;
-        if (filters.brand && o.brand !== filters.brand) return false;
-        if (filters.status && o.order_status !== filters.status) return false;
-        if (filters.search) {{
-          const searchStr = filters.search;
-          const match = o.order_no.includes(searchStr) ||
-                       o.product_name.toLowerCase().includes(searchStr) ||
-                       o.sku_code.includes(searchStr) ||
-                       o.model.toLowerCase().includes(searchStr);
-          if (!match) return false;
-        }}
-        return true;
-      }});
-      renderTable();
-    }}
-
-    function resetFilters() {{
-      document.getElementById('filterShop').value = '';
-      document.getElementById('filterBrand').value = '';
-      document.getElementById('filterStatus').value = '';
-      document.getElementById('filterSearch').value = '';
-      filteredOrders = [...allOrders];
-      renderTable();
+    function formatMoney(value) {{
+      if (!value && value !== 0) return '-';
+      return '¥' + value.toLocaleString('zh-CN', {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
     }}
 
     function renderTable() {{
@@ -433,17 +407,41 @@ def render(orders):
           <td class="model" title="${{escapeHtml(o.model)}}">${{escapeHtml(o.model)}}</td>
           <td><span class="status-badge status-${{o.order_status}}">${{escapeHtml(o.order_status)}}</span></td>
           <td class="num">${{o.quantity}}</td>
-          <td class="money">¥${{o.product_price.toLocaleString('zh-CN', {{minimumFractionDigits: 2}})}}</td>
-          <td class="money">¥${{o.order_amount.toLocaleString('zh-CN', {{minimumFractionDigits: 2}})}}</td>
+          <td class="money">${{formatMoney(o.product_price)}}</td>
+          <td class="money">${{formatMoney(o.order_amount)}}</td>
         </tr>
       `).join('');
     }}
 
-    function escapeHtml(text) {{
-      if (!text) return '';
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
+    function applyFilters() {{
+      const shop = document.getElementById('filterShop').value;
+      const brand = document.getElementById('filterBrand').value;
+      const status = document.getElementById('filterStatus').value;
+      const search = document.getElementById('filterSearch').value.toLowerCase();
+
+      filteredOrders = allOrders.filter(o => {{
+        if (shop && o.shop_name !== shop) return false;
+        if (brand && o.brand !== brand) return false;
+        if (status && o.order_status !== status) return false;
+        if (search) {{
+          const match = o.order_no.includes(search) ||
+                       (o.product_name && o.product_name.toLowerCase().includes(search)) ||
+                       (o.sku_code && o.sku_code.includes(search)) ||
+                       (o.model && o.model.toLowerCase().includes(search));
+          if (!match) return false;
+        }}
+        return true;
+      }});
+      renderTable();
+    }}
+
+    function resetFilters() {{
+      document.getElementById('filterShop').value = '';
+      document.getElementById('filterBrand').value = '';
+      document.getElementById('filterStatus').value = '';
+      document.getElementById('filterSearch').value = '';
+      filteredOrders = [...allOrders];
+      renderTable();
     }}
 
     function exportCSV() {{
@@ -453,12 +451,12 @@ def render(orders):
         o.sku_code, o.model, o.order_status, o.quantity,
         o.product_price.toFixed(2), o.order_amount.toFixed(2)
       ]);
-      const csv = [headers, ...rows].map(row => row.map(cell => `"${{String(cell).replace(/"/g, '""')}}"`).join(',')).join('\\n');
+      const csv = [headers, ...rows].map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(',')).join('\\n');
       const blob = new Blob(['\\uFEFF' + csv], {{ type: 'text/csv;charset=utf-8;' }});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `orders_${{new Date().toISOString().slice(0, 10)}}.csv`;
+      a.download = 'orders_' + new Date().toISOString().slice(0, 10) + '.csv';
       a.click();
       URL.revokeObjectURL(url);
     }}
@@ -466,6 +464,8 @@ def render(orders):
     document.getElementById('filterSearch').addEventListener('keyup', function(e) {{
       if (e.key === 'Enter') applyFilters();
     }});
+
+    renderTable();
   </script>
 </body>
 </html>"""
