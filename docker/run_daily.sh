@@ -16,7 +16,8 @@ echo "========================================"
 echo ""
 
 # 运行抓取脚本
-python daily_compass.py "$@"
+PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python}"
+"$PYTHON_BIN" daily_compass.py "$@"
 
 echo ""
 echo "========================================"

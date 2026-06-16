@@ -5,7 +5,9 @@ cd /app
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] start scheduled compass scrape"
 
-PYTHONUNBUFFERED=1 python scheduler_run.py \
+PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python}"
+
+PYTHONUNBUFFERED=1 "$PYTHON_BIN" scheduler_run.py \
   --login-timeout-minutes 30
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] finished scheduled compass scrape"

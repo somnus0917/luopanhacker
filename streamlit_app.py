@@ -1,5 +1,8 @@
 import os
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -17,7 +20,12 @@ from dashboard import (
     percent,
     shop_list,
 )
-from task_status import LOGIN_SCREENSHOT, read_status
+from task_status import LOGIN_SCREENSHOT, read_status, write_status
+
+
+APP_DIR = Path(__file__).parent
+DAILY_LOCK = APP_DIR / "output" / "daily_job.lock"
+MANUAL_LOG = APP_DIR / "logs" / "manual_scrape.log"
 
 
 CORE_COLUMNS = [
@@ -218,6 +226,30 @@ def display_table(df):
     return pd.DataFrame(rows)
 
 
+def start_manual_scrape():
+    MANUAL_LOG.parent.mkdir(parents=True, exist_ok=True)
+    write_status(
+        state="manual_requested",
+        message="已收到手动补采请求，正在启动采集任务",
+        last_error="",
+    )
+    with MANUAL_LOG.open("ab") as log_file:
+        subprocess.Popen(
+            [
+                sys.executable,
+                "scheduler_run.py",
+                "--random-delay-seconds",
+                "0",
+                "--login-timeout-minutes",
+                "30",
+            ],
+            cwd=str(APP_DIR),
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+
+
 def content_table(content_df):
     rows = []
     for _, row in content_df.sort_values(["date", "shop_name"], ascending=[False, True]).iterrows():
@@ -341,6 +373,19 @@ with st.expander("采集状态", expanded=True):
 
     if status.get("last_error"):
         st.error(status["last_error"])
+
+    job_running = DAILY_LOCK.exists()
+    button_label = "手动补采今天数据"
+    if st.button(button_label, type="primary", disabled=job_running):
+        try:
+            start_manual_scrape()
+            st.success("已启动手动补采任务，请稍后刷新状态；如需要登录，请打开 noVNC 扫码。")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"手动补采启动失败：{exc!r}")
+
+    if job_running:
+        st.info("已有采集任务在运行，暂时不能重复启动。")
 
     if state == "login_required":
         st.warning("当前需要扫码登录。请扫描下方截图中的二维码，或打开 noVNC 远程浏览器完成登录。")

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import csv
 import json
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -329,12 +330,16 @@ async def run(args):
     results = []
 
     async with async_playwright() as playwright:
-        context = await playwright.chromium.launch_persistent_context(
-            user_data_dir=str(SESSION_DIR),
-            headless=False,
-            slow_mo=args.slow_mo,
-            viewport={"width": 1440, "height": 1000},
-        )
+        browser_options = {
+            "user_data_dir": str(SESSION_DIR),
+            "headless": False,
+            "slow_mo": args.slow_mo,
+            "viewport": {"width": 1440, "height": 1000},
+        }
+        chromium_path = os.getenv("CHROMIUM_EXECUTABLE_PATH")
+        if chromium_path:
+            browser_options["executable_path"] = chromium_path
+        context = await playwright.chromium.launch_persistent_context(**browser_options)
         context.set_default_timeout(60000)
         page = context.pages[0] if context.pages else await context.new_page()
 

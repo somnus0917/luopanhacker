@@ -1,9 +1,20 @@
-FROM python:3.11-slim
+FROM mirror.ccs.tencentyun.com/library/python:3.11-slim
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# 腾讯云服务器访问官方 Debian 源可能较慢，构建时改用腾讯云镜像源。
+RUN sed -i \
+    -e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g' \
+    -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
+    /etc/apt/sources.list.d/debian.sources
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
+    chromium \
+    fonts-noto-cjk \
+    fonts-wqy-zenhei \
     xvfb \
     x11vnc \
     novnc \
@@ -37,18 +48,17 @@ WORKDIR /app
 
 # 设置环境变量（必须在安装 Playwright 浏览器之前）
 ENV DISPLAY=:99
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # 复制依赖文件
 COPY requirements.txt .
 COPY pyproject.toml .
 
 # 安装 Python 依赖
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 安装 Playwright 浏览器
-RUN playwright install chromium
-RUN playwright install-deps chromium
+RUN pip install --no-cache-dir \
+    -i https://mirrors.cloud.tencent.com/pypi/simple \
+    --trusted-host mirrors.cloud.tencent.com \
+    -r requirements.txt
 
 # 复制应用代码
 COPY . .

@@ -1,7 +1,9 @@
 import asyncio
+import argparse
 import json
 import os
 import random
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -35,7 +37,16 @@ def remove_lock():
         pass
 
 
+def parse_scheduler_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--random-delay-seconds", type=int)
+    scheduler_args, remaining_args = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *remaining_args]
+    return scheduler_args
+
+
 async def main():
+    scheduler_args = parse_scheduler_args()
     LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     if LOCK_PATH.exists():
@@ -55,7 +66,11 @@ async def main():
     LOCK_PATH.write_text(json.dumps(lock_data), encoding="utf-8")
 
     try:
-        delay = random.randint(0, 3600)
+        delay = (
+            scheduler_args.random_delay_seconds
+            if scheduler_args.random_delay_seconds is not None
+            else random.randint(0, 3600)
+        )
         write_status(
             state="waiting_random",
             message=f"随机等待 {delay} 秒后开始采集",

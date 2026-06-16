@@ -1,2 +1,3 @@
 # 每天 9 点触发，脚本内部随机等待 0-60 分钟
+PATH=/usr/local/bin:/usr/bin:/bin
 0 9 * * * /app/docker/cron_scrape.sh >> /app/logs/cron_scrape.log 2>&1

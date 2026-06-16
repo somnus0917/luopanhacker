@@ -313,11 +313,15 @@ async def scrape_once(target_shops=None):
     }
 
     async with async_playwright() as p:
-        context = await p.chromium.launch_persistent_context(
-            user_data_dir=str(SESSION_DIR),
-            headless=False,
-            slow_mo=random.randint(250, 650),
-        )
+        browser_options = {
+            "user_data_dir": str(SESSION_DIR),
+            "headless": False,
+            "slow_mo": random.randint(250, 650),
+        }
+        chromium_path = os.getenv("CHROMIUM_EXECUTABLE_PATH")
+        if chromium_path:
+            browser_options["executable_path"] = chromium_path
+        context = await p.chromium.launch_persistent_context(**browser_options)
         context.set_default_timeout(45000)
         page = context.pages[0] if context.pages else await context.new_page()
 
