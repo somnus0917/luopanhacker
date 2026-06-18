@@ -40,6 +40,13 @@ def extract_price(text):
     return float(match.group()) if match else 0
 
 
+def normalize_order_status(status):
+    status = re.sub(r"\s+", " ", status or "").strip()
+    if "待发货" in status:
+        return "待发货"
+    return status
+
+
 def load_all_orders():
     orders = []
     seen_order_keys = set()
@@ -71,7 +78,7 @@ def load_all_orders():
                         "order_no": order_no,
                         "sku_code": order.get("merchant_sku_code", ""),
                         "model": order.get("sku_spec", ""),
-                        "order_status": order.get("order_status", ""),
+                        "order_status": normalize_order_status(order.get("order_status", "")),
                         "quantity": extract_quantity(order.get("price_quantity", "")),
                         "product_price": extract_price(order.get("price_quantity", "")),
                         "order_amount": extract_price(order.get("merchant_income", "")),

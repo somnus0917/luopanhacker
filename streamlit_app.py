@@ -30,7 +30,7 @@ from dashboard import (
     percent,
     shop_list,
 )
-from order_dashboard import load_all_orders
+from order_dashboard import load_all_orders, normalize_order_status
 from task_status import LOGIN_SCREENSHOT, read_status, write_status
 
 
@@ -318,7 +318,9 @@ def orders_to_frame(orders):
     df["product_price"] = pd.to_numeric(df["product_price"], errors="coerce").fillna(0)
     df["order_amount"] = pd.to_numeric(df["order_amount"], errors="coerce").fillna(0)
     df["brand"] = df["brand"].fillna("").replace("", "未识别")
-    df["order_status"] = df["order_status"].fillna("").replace("", "未知")
+    df["order_status"] = (
+        df["order_status"].fillna("").map(normalize_order_status).replace("", "未知")
+    )
     df["shop_name"] = df["shop_name"].fillna("").replace("", "未知店铺")
     df["sku_code"] = df["sku_code"].fillna("").replace("", "未填写")
     return df
