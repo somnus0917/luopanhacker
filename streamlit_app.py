@@ -320,6 +320,7 @@ def orders_to_frame(orders):
     df["brand"] = df["brand"].fillna("").replace("", "未识别")
     df["order_status"] = df["order_status"].fillna("").replace("", "未知")
     df["shop_name"] = df["shop_name"].fillna("").replace("", "未知店铺")
+    df["sku_code"] = df["sku_code"].fillna("").replace("", "未填写")
     return df
 
 
@@ -646,9 +647,13 @@ def render_order_dashboard(novnc_url):
     date_options = sorted([date for date in df["pay_date"].dropna().unique() if date])
     shop_options = sorted([shop for shop in df["shop_name"].dropna().unique() if shop])
     brand_options = sorted([brand for brand in df["brand"].dropna().unique() if brand])
+    sku_options = sorted([sku for sku in df["sku_code"].dropna().unique() if sku])
     status_options = sorted([status for status in df["order_status"].dropna().unique() if status])
+    default_statuses = [status for status in status_options if status != "已关闭"]
+    if not default_statuses:
+        default_statuses = status_options
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         selected_order_dates = st.multiselect("下单日期", date_options, default=date_options)
     with col2:
@@ -656,13 +661,18 @@ def render_order_dashboard(novnc_url):
     with col3:
         selected_brands = st.multiselect("品牌", brand_options, default=brand_options)
     with col4:
-        selected_statuses = st.multiselect("订单状态", status_options, default=status_options)
+        selected_skus = st.multiselect("商品编码", sku_options, default=sku_options)
+    with col5:
+        selected_statuses = st.multiselect("订单状态", status_options, default=default_statuses)
+    if "已关闭" in status_options and "已关闭" not in selected_statuses:
+        st.caption("订单看板默认忽略“已关闭”订单；如需查看，可在订单状态筛选中勾选。")
     search = st.text_input("搜索订单号 / 商品 / SKU / 型号")
 
     filtered = df[
         df["pay_date"].isin(selected_order_dates)
         & df["shop_name"].isin(selected_order_shops)
         & df["brand"].isin(selected_brands)
+        & df["sku_code"].isin(selected_skus)
         & df["order_status"].isin(selected_statuses)
     ].copy()
     if search:
@@ -712,6 +722,31 @@ def render_order_dashboard(novnc_url):
         shop_summary["订单金额"] = shop_summary["订单金额"].map(yuan)
         st.subheader("店铺汇总")
         st.dataframe(shop_summary, width="stretch", hide_index=True)
+
+    sku_summary = (
+        filtered.groupby("sku_code", dropna=False)
+        .agg(
+            销量=("quantity", "sum"),
+            订单数=("order_no", "count"),
+            订单金额=("order_amount", "sum"),
+            店铺=("shop_name", lambda values: " / ".join(sorted(set(values)))),
+            品牌=("brand", lambda values: " / ".join(sorted(set(values)))),
+            型号=("model", "first"),
+            商品名称=("product_name", "first"),
+        )
+        .sort_values(["销量", "订单金额"], ascending=[False, False])
+        .reset_index()
+        .rename(columns={"sku_code": "商品编码"})
+    )
+    if not sku_summary.empty:
+        sku_summary["订单金额"] = sku_summary["订单金额"].map(yuan)
+        st.subheader("商品编码销量汇总")
+        st.dataframe(
+            sku_summary,
+            width="stretch",
+            hide_index=True,
+            column_config=order_table_column_config(sku_summary),
+        )
 
     table_df = filtered.sort_values("pay_time_dt", ascending=False)[
         [
