@@ -44,6 +44,8 @@ def normalize_order_status(status):
     status = re.sub(r"\s+", " ", status or "").strip()
     if "待发货" in status:
         return "待发货"
+    if "已发货" in status:
+        return "已发货"
     return status
 
 
