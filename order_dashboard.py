@@ -42,25 +42,33 @@ def extract_price(text):
 
 def load_all_orders():
     orders = []
+    seen_order_keys = set()
     if not ORDERS_ROOT.exists():
         return orders
 
     for date_dir in sorted(ORDERS_ROOT.iterdir()):
-        if not date_dir.is_dir():
+        if not date_dir.is_dir() or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_dir.name):
             continue
-        for json_file in sorted(date_dir.glob("douyin_orders_*.json")):
+        for json_file in sorted(date_dir.rglob("douyin_orders_*.json")):
             if "_table_rows" in json_file.name or "_visible_text" in json_file.name:
                 continue
             try:
                 data = json.loads(json_file.read_text(encoding="utf-8"))
-                shop_name = data.get("shop_name", "")
-                for order in data.get("orders", []):
+                shop_name = data.get("shop_name") or (
+                    json_file.parent.name if json_file.parent != date_dir else ""
+                )
+                for index, order in enumerate(data.get("orders", [])):
+                    order_no = order.get("order_no", "")
+                    dedupe_key = (shop_name, order_no) if order_no else (str(json_file), index)
+                    if dedupe_key in seen_order_keys:
+                        continue
+                    seen_order_keys.add(dedupe_key)
                     orders.append({
                         "pay_time": order.get("order_time", ""),
                         "brand": extract_brand(order.get("product_name", "")),
                         "platform": "抖音",
                         "shop_name": shop_name,
-                        "order_no": order.get("order_no", ""),
+                        "order_no": order_no,
                         "sku_code": order.get("merchant_sku_code", ""),
                         "model": order.get("sku_spec", ""),
                         "order_status": order.get("order_status", ""),

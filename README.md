@@ -102,13 +102,15 @@ Streamlit 会直接读取 `output/daily/**/*.json`，新跑出的每日数据会
 
 ## 订单数据看板
 
-订单看板用于展示 `output/orders/` 目录下的订单数据：
+Streamlit 主看板中已经集成“订单数据看板”页签，用于展示 `output/orders/` 目录下的订单数据，并支持在网页上手动采集昨日订单。
+
+也可以继续生成独立 HTML：
 
 ```bash
 ./run_order_dashboard.sh
 ```
 
-生成的 `order_dashboard.html` 会自动在浏览器中打开，支持：
+订单看板支持：
 - 按店铺、品牌、订单状态筛选
 - 搜索订单号/商品关键词
 - 导出 CSV
