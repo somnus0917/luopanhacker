@@ -30,7 +30,7 @@ from dashboard import (
     percent,
     shop_list,
 )
-from order_dashboard import load_all_orders, normalize_order_status
+from order_dashboard import load_all_orders, load_tmall_msd_orders, normalize_order_status
 from task_status import LOGIN_SCREENSHOT, read_status, write_status
 
 
@@ -667,7 +667,7 @@ def render_order_dashboard(novnc_url):
     with col5:
         selected_statuses = st.multiselect("订单状态", status_options, default=default_statuses)
     if "已关闭" in status_options and "已关闭" not in selected_statuses:
-        st.caption("订单看板默认忽略“已关闭”订单；如需查看，可在订单状态筛选中勾选。")
+        st.caption('订单看板默认忽略"已关闭"订单；如需查看，可在订单状态筛选中勾选。')
     search = st.text_input("搜索订单号 / 商品 / SKU / 型号")
 
     filtered = df[
@@ -803,6 +803,168 @@ def render_order_dashboard(novnc_url):
         st.code(str(APP_DIR / "output" / "orders"))
 
 
+def render_tmall_msd_dashboard():
+    st.header("天猫MSD订单看板")
+
+    orders = load_tmall_msd_orders()
+    df = orders_to_frame(orders)
+    if df.empty:
+        st.info("还没有天猫MSD订单数据。请先运行采集脚本获取数据。")
+        return
+
+    date_options = sorted([date for date in df["pay_date"].dropna().unique() if date])
+    brand_options = sorted([brand for brand in df["brand"].dropna().unique() if brand])
+    sku_options = sorted([sku for sku in df["sku_code"].dropna().unique() if sku])
+    status_options = sorted([status for status in df["order_status"].dropna().unique() if status])
+    default_statuses = [status for status in status_options if status != "已关闭"]
+    if not default_statuses:
+        default_statuses = status_options
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        selected_dates = st.multiselect("下单日期", date_options, default=date_options, key="tmall_dates")
+    with col2:
+        selected_brands = st.multiselect("品牌", brand_options, default=brand_options, key="tmall_brands")
+    with col3:
+        selected_skus = st.multiselect("商品编码", sku_options, default=sku_options, key="tmall_skus")
+    with col4:
+        selected_statuses = st.multiselect("订单状态", status_options, default=default_statuses, key="tmall_statuses")
+    if "已关闭" in status_options and "已关闭" not in selected_statuses:
+        st.caption('默认忽略"已关闭"订单；如需查看，可在订单状态筛选中勾选。')
+    search = st.text_input("搜索订单号 / 商品 / SKU / 型号", key="tmall_search")
+
+    filtered = df[
+        df["pay_date"].isin(selected_dates)
+        & df["brand"].isin(selected_brands)
+        & df["sku_code"].isin(selected_skus)
+        & df["order_status"].isin(selected_statuses)
+    ].copy()
+    if search:
+        search_lower = search.lower()
+        searchable = (
+            filtered["order_no"].astype(str)
+            + " "
+            + filtered["product_name"].astype(str)
+            + " "
+            + filtered["sku_code"].astype(str)
+            + " "
+            + filtered["model"].astype(str)
+        ).str.lower()
+        filtered = filtered[searchable.str.contains(search_lower, regex=False)]
+
+    total_count = len(filtered)
+    total_amount = filtered["order_amount"].sum()
+    avg_amount = total_amount / total_count if total_count else 0
+    shipped_count = filtered["order_status"].astype(str).str.contains("待发货|已发货", regex=True).sum()
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("订单总数", f"{total_count:,}")
+    metric_cols[1].metric("订单总金额", yuan(total_amount))
+    metric_cols[2].metric("平均订单金额", yuan(avg_amount))
+    metric_cols[3].metric("待处理/已发货", f"{int(shipped_count):,}")
+
+    chart_left, chart_right = st.columns(2)
+    with chart_left:
+        if not filtered.empty:
+            daily_amount = filtered.groupby("pay_date")["order_amount"].sum().sort_index()
+            st.subheader("订单金额趋势")
+            st.line_chart(daily_amount, height=260)
+    with chart_right:
+        if not filtered.empty:
+            status_counts = filtered["order_status"].replace("", "未知").value_counts()
+            st.subheader("订单状态分布")
+            st.bar_chart(status_counts, height=260)
+
+    brand_summary = (
+        filtered.groupby("brand", dropna=False)
+        .agg(订单数=("order_no", "count"), 订单金额=("order_amount", "sum"))
+        .sort_values("订单金额", ascending=False)
+        .reset_index()
+        .rename(columns={"brand": "品牌"})
+    )
+    if not brand_summary.empty:
+        brand_summary["订单金额"] = brand_summary["订单金额"].map(yuan)
+        st.subheader("品牌汇总")
+        st.dataframe(brand_summary, width="stretch", hide_index=True)
+
+    sku_summary = (
+        filtered.groupby("sku_code", dropna=False)
+        .agg(
+            销量=("quantity", "sum"),
+            订单数=("order_no", "count"),
+            订单金额=("order_amount", "sum"),
+            品牌=("brand", lambda values: " / ".join(sorted(set(values)))),
+            型号=("model", "first"),
+            商品名称=("product_name", "first"),
+        )
+        .sort_values(["销量", "订单金额"], ascending=[False, False])
+        .reset_index()
+        .rename(columns={"sku_code": "商品编码"})
+    )
+    if not sku_summary.empty:
+        sku_summary["订单金额"] = sku_summary["订单金额"].map(yuan)
+        st.subheader("商品编码销量汇总")
+        st.dataframe(
+            sku_summary,
+            width="stretch",
+            hide_index=True,
+            column_config=order_table_column_config(sku_summary),
+        )
+
+    table_df = filtered.sort_values("pay_time_dt", ascending=False)[
+        [
+            "pay_time",
+            "brand",
+            "platform",
+            "shop_name",
+            "order_no",
+            "sku_code",
+            "model",
+            "order_status",
+            "quantity",
+            "product_price",
+            "order_amount",
+            "product_name",
+        ]
+    ].rename(
+        columns={
+            "pay_time": "支付完成时间",
+            "brand": "品牌",
+            "platform": "平台",
+            "shop_name": "店铺",
+            "order_no": "订单号",
+            "sku_code": "商品编码",
+            "model": "型号",
+            "order_status": "订单状态",
+            "quantity": "商品数量",
+            "product_price": "商品金额",
+            "order_amount": "订单金额",
+            "product_name": "商品名称",
+        }
+    )
+    for column in ("商品金额", "订单金额"):
+        table_df[column] = table_df[column].map(yuan)
+
+    st.subheader("订单明细")
+    st.dataframe(
+        table_df,
+        width="stretch",
+        hide_index=True,
+        column_config=order_table_column_config(table_df),
+    )
+    st.download_button(
+        "导出当前筛选 CSV",
+        filtered.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"tmall_msd_orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        mime="text/csv",
+        key="tmall_export",
+    )
+
+    with st.expander("数据来源"):
+        st.write("天猫MSD订单数据来自 `output/orders/**/tmall_msd/` 目录。")
+        st.code(str(APP_DIR / "output" / "orders"))
+
+
 st.set_page_config(
     page_title="抖店数据看板",
     page_icon="",
@@ -839,10 +1001,13 @@ st.markdown(
 render_account_sidebar(current_user, current_role)
 
 st.title("抖店数据看板")
-compass_tab, order_tab = st.tabs(["罗盘经营看板", "订单数据看板"])
+compass_tab, order_tab, tmall_tab = st.tabs(["罗盘经营看板", "订单数据看板", "天猫MSD订单"])
 
 with compass_tab:
     render_compass_dashboard(NOVNC_URL)
 
 with order_tab:
     render_order_dashboard(NOVNC_URL)
+
+with tmall_tab:
+    render_tmall_msd_dashboard()

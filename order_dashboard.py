@@ -49,13 +49,14 @@ def normalize_order_status(status):
     return status
 
 
-def load_all_orders():
+def load_douyin_orders(orders_root=None):
     orders = []
     seen_order_keys = set()
-    if not ORDERS_ROOT.exists():
+    root = orders_root or ORDERS_ROOT
+    if not root.exists():
         return orders
 
-    for date_dir in sorted(ORDERS_ROOT.iterdir()):
+    for date_dir in sorted(root.iterdir()):
         if not date_dir.is_dir() or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_dir.name):
             continue
         for json_file in sorted(date_dir.rglob("douyin_orders_*.json")):
@@ -90,6 +91,84 @@ def load_all_orders():
                 continue
 
     return sorted(orders, key=lambda x: x.get("pay_time", ""), reverse=True)
+
+
+def load_tmall_msd_orders(orders_root=None):
+    orders = []
+    seen_order_keys = set()
+    root = orders_root or ORDERS_ROOT
+    if not root.exists():
+        return orders
+
+    for date_dir in sorted(root.iterdir()):
+        if not date_dir.is_dir() or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_dir.name):
+            continue
+        for json_file in sorted(date_dir.rglob("tmall_msd_orders_*.json")):
+            if "_raw" in json_file.name:
+                continue
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                items_by_order_code = {}
+                for item in data.get("items", []):
+                    if not isinstance(item, dict):
+                        continue
+                    order_code = item.get("order_code", "")
+                    if order_code:
+                        items_by_order_code.setdefault(order_code, []).append(item)
+                for order in data.get("orders", []):
+                    order_code = order.get("order_code", "")
+                    items = items_by_order_code.get(order_code) or order.get("items") or []
+                    if not items:
+                        items = [{}]
+                    for index, item in enumerate(items):
+                        item_name = item.get("item_name", "")
+                        dedupe_key = (order_code, item.get("item_code", ""), index)
+                        if dedupe_key in seen_order_keys:
+                            continue
+                        seen_order_keys.add(dedupe_key)
+                        quantity = item.get("quantity") or ""
+                        if isinstance(quantity, str) and quantity.isdigit():
+                            quantity = int(quantity)
+                        elif not isinstance(quantity, int):
+                            quantity = 0
+                        sale_price = item.get("sale_price") or ""
+                        if isinstance(sale_price, (int, float)):
+                            product_price = float(sale_price)
+                        elif isinstance(sale_price, str) and sale_price:
+                            product_price = extract_price(sale_price)
+                        else:
+                            product_price = 0
+                        amount = order.get("amount") or ""
+                        if isinstance(amount, (int, float)):
+                            order_amount = float(amount)
+                        elif isinstance(amount, str) and amount:
+                            order_amount = extract_price(amount)
+                        else:
+                            order_amount = product_price * quantity if quantity else 0
+                        orders.append({
+                            "pay_time": order.get("pay_time") or order.get("create_time", ""),
+                            "brand": extract_brand(item_name),
+                            "platform": "天猫",
+                            "shop_name": "天猫MSD",
+                            "order_no": order_code,
+                            "sku_code": item.get("item_code") or item.get("sc_item_code", ""),
+                            "model": item.get("sku_id", ""),
+                            "order_status": normalize_order_status(order.get("status_desc") or order.get("order_status", "")),
+                            "quantity": quantity,
+                            "product_price": product_price,
+                            "order_amount": order_amount,
+                            "product_name": item_name,
+                        })
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    return sorted(orders, key=lambda x: x.get("pay_time", ""), reverse=True)
+
+
+def load_all_orders():
+    douyin = load_douyin_orders()
+    tmall = load_tmall_msd_orders()
+    return douyin + tmall
 
 
 def money(value):
