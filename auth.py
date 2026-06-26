@@ -163,6 +163,10 @@ def login_form():
         st.markdown('<h1 class="login-title">罗盘经营看板</h1>', unsafe_allow_html=True)
         st.markdown('<p class="login-subtitle">请登录以访问系统</p>', unsafe_allow_html=True)
 
+        from streamlit_cookies_controller import CookieController
+        controller = CookieController()
+        login_success = False
+
         with st.form("login_form"):
             username = st.text_input("用户名", placeholder="请输入用户名")
             password = st.text_input("密码", type="password", placeholder="请输入密码")
@@ -174,26 +178,22 @@ def login_form():
                     st.session_state.username = username
                     login_time = datetime.now().isoformat(timespec="seconds")
                     st.session_state.login_time = login_time
-
-                    # Persistent cookie write using streamlit-cookies-controller
-                    try:
-                        from streamlit_cookies_controller import CookieController
-                        expiry = int(time.time()) + SESSION_TIMEOUT_HOURS * 3600
-                        secret = get_session_secret()
-                        sig_data = f"{username}:{expiry}:{login_time}:{secret}".encode("utf-8")
-                        signature = hashlib.sha256(sig_data).hexdigest()
-                        token = f"{username}:{expiry}:{login_time}:{signature}"
-
-                        controller = CookieController()
-                        controller.set("compass_session", token, max_age=SESSION_TIMEOUT_HOURS * 3600)
-                        # Add a small delay for the browser to register the cookie
-                        time.sleep(0.5)
-                    except Exception as e:
-                        st.warning(f"无法保存登录 Cookie: {e}")
-
-                    st.rerun()
+                    login_success = True
                 else:
                     st.error("用户名或密码错误")
+
+        if login_success:
+            # Write persistent cookie outside of st.form context
+            try:
+                expiry = int(time.time()) + SESSION_TIMEOUT_HOURS * 3600
+                secret = get_session_secret()
+                sig_data = f"{username}:{expiry}:{login_time}:{secret}".encode("utf-8")
+                signature = hashlib.sha256(sig_data).hexdigest()
+                token = f"{username}:{expiry}:{login_time}:{signature}"
+                controller.set("compass_session", token, max_age=SESSION_TIMEOUT_HOURS * 3600)
+                st.success("登录成功！正在进入系统...")
+            except Exception as e:
+                st.warning(f"无法保存登录 Cookie: {e}")
 
 
 def logout():
@@ -205,10 +205,9 @@ def logout():
         from streamlit_cookies_controller import CookieController
         controller = CookieController()
         controller.remove("compass_session")
-        time.sleep(0.5)
     except Exception:
         pass
-    st.rerun()
+
 
 
 def require_auth():
