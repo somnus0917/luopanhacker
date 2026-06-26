@@ -69,5 +69,5 @@ metrics.db
 logs/
 docker-compose.override.yml
 
-# Auth config
-config/users.jsonorder_dashboard.html
+config/users.json
+order_dashboard.html
