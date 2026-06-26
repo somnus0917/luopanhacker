@@ -214,8 +214,10 @@ def require_auth():
     init_default_admin()
     if not check_session():
         login_form()
-        st.stop()
+        if not st.session_state.authenticated:
+            st.stop()
     return st.session_state.username
+
 
 
 
