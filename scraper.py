@@ -83,11 +83,11 @@ async def click_with_pacing(locator, label):
 
 
 async def wait_shop_modal(page, timeout=15000):
+    modal = page.locator('[role="dialog"]').filter(
+        has=page.get_by_text("请选择店铺", exact=True)
+    )
     try:
-        await page.get_by_text("请选择店铺", exact=True).wait_for(
-            state="visible",
-            timeout=timeout,
-        )
+        await modal.first.wait_for(state="visible", timeout=timeout)
         return True
     except Exception:
         return False
@@ -209,7 +209,7 @@ async def extract_shop_name(page):
 
 
 async def ensure_shop_modal(page):
-    if await page.get_by_text("请选择店铺", exact=True).count():
+    if await wait_shop_modal(page, timeout=1000):
         return
 
     async def click_visible_switch_entry():
@@ -249,12 +249,15 @@ async def visible_view_switch_entry(page):
 
 async def switch_shop(page, shop_name):
     await ensure_shop_modal(page)
-    await page.get_by_text("请选择店铺", exact=True).wait_for(state="visible", timeout=30000)
+    modal = page.locator('[role="dialog"]').filter(
+        has=page.get_by_text("请选择店铺", exact=True)
+    ).first
+    await modal.wait_for(state="visible", timeout=30000)
     await human_pause(2.0, 4.0)
 
-    target = page.get_by_text(shop_name, exact=True)
-    if not await target.count():
-        raise RuntimeError(f"未找到目标店铺: {shop_name}")
+    target = modal.get_by_text(shop_name, exact=True)
+    if await target.count() != 1:
+        raise RuntimeError(f"弹窗中未唯一匹配目标店铺: {shop_name}")
 
     await click_with_pacing(target, shop_name)
     await page.wait_for_load_state("domcontentloaded", timeout=30000)

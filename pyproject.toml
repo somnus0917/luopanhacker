@@ -8,4 +8,6 @@ dependencies = [
     "pandas",
     "playwright",
     "streamlit",
+    "streamlit-cookies-controller",
 ]
+

@@ -4,8 +4,9 @@ import csv
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from playwright.async_api import async_playwright
 
@@ -150,10 +151,49 @@ def value_after(lines, label, start=0, end=None):
     return None
 
 
-def near_day_range():
-    day = datetime.now().date() - timedelta(days=1)
-    formatted = day.strftime("%Y/%m/%d")
-    return formatted, formatted
+def date_range_from_url(url):
+    query = parse_qs(urlparse(url).query)
+    return date_range_from_fields(query)
+
+
+def date_range_from_fields(fields):
+    if str(fields.get("date_type", [None])[0]) != "20":
+        return None
+
+    begin_date = str(fields.get("begin_date", [""])[0]).split()[0]
+    end_date = str(fields.get("end_date", [""])[0]).split()[0]
+    if not begin_date or not end_date:
+        return None
+
+    try:
+        start = datetime.strptime(begin_date.replace("/", "-"), "%Y-%m-%d").strftime("%Y/%m/%d")
+        end = datetime.strptime(end_date.replace("/", "-"), "%Y-%m-%d").strftime("%Y/%m/%d")
+    except ValueError:
+        return None
+    return start, end
+
+
+def date_range_from_post_data(post_data):
+    if not post_data:
+        return None
+    try:
+        payload = json.loads(post_data)
+    except json.JSONDecodeError:
+        return date_range_from_fields(parse_qs(post_data))
+
+    pending = [payload]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            date_range = date_range_from_fields(
+                {key: [item] for key, item in value.items()}
+            )
+            if date_range:
+                return date_range
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return None
 
 
 async def wait_for_manual_login(page, timeout_minutes):
@@ -220,9 +260,35 @@ async def wait_for_manual_login(page, timeout_minutes):
 
 
 async def choose_near_day(page):
-    await click_with_pacing(page.get_by_text("近1天", exact=True), "近1天")
-    await wait_network_quiet(page, timeout=45000)
-    await human_pause(8.0, 14.0)
+    date_ranges = set()
+    core_urls = set()
+
+    def capture_date_range(response):
+        if response.status != 200 or "core_index_v3" not in response.url:
+            return
+        core_urls.add(response.url)
+        date_range = date_range_from_url(response.url)
+        if not date_range:
+            date_range = date_range_from_post_data(response.request.post_data)
+        if date_range:
+            date_ranges.add(date_range)
+
+    page.on("response", capture_date_range)
+    try:
+        await click_with_pacing(page.get_by_text("近1天", exact=True), "近1天")
+        await wait_network_quiet(page, timeout=45000)
+        await human_pause(8.0, 14.0)
+    finally:
+        page.remove_listener("response", capture_date_range)
+
+    if len(date_ranges) != 1:
+        raise RuntimeError(
+            "未能确认“近1天”的实际数据日期: "
+            f"{sorted(date_ranges)!r}; 接口: {sorted(core_urls)!r}"
+        )
+    date_range = date_ranges.pop()
+    print(f"近1天实际数据日期: {date_range[0]} 至 {date_range[1]}")
+    return date_range
 
 
 async def load_lazy_metric_sections(page):
@@ -233,7 +299,7 @@ async def load_lazy_metric_sections(page):
     await human_pause(1.5, 3.0)
 
 
-async def extract_visible_summary(page, shop_name):
+async def extract_visible_summary(page, shop_name, data_range):
     await load_lazy_metric_sections(page)
     text = await page.locator("body").inner_text(timeout=30000)
     lines = compact_lines(text)
@@ -241,7 +307,7 @@ async def extract_visible_summary(page, shop_name):
     traffic_start, traffic_end = section_bounds(lines, "全店流量", {"收支概况", "经营诊断", "配置"})
     finance_start, finance_end = section_bounds(lines, "收支概况", {"商家体验分"})
     score_start, score_end = section_bounds(lines, "商家体验分", {"经营诊断"})
-    data_start, data_end = near_day_range()
+    data_start, data_end = data_range
 
     metrics = {}
     for label in METRIC_LABELS:
@@ -270,8 +336,8 @@ async def extract_visible_summary(page, shop_name):
 async def collect_shop(page, shop_name):
     print(f"\n准备切换店铺: {shop_name}")
     await switch_shop(page, shop_name)
-    await choose_near_day(page)
-    summary = await extract_visible_summary(page, shop_name)
+    data_range = await choose_near_day(page)
+    summary = await extract_visible_summary(page, shop_name, data_range)
     print(f"{shop_name} 近1天数据已读取，指标数: {len(summary['metrics'])}")
     await human_pause(8.0, 14.0)
     return summary

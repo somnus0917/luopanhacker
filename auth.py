@@ -1,13 +1,51 @@
 import hashlib
+import hmac
 import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
+import time
 
 import streamlit as st
 
 USERS_FILE = Path(__file__).parent / "config" / "users.json"
+SESSION_SECRET_FILE = Path(__file__).parent / "config" / "session_secret.txt"
 SESSION_TIMEOUT_HOURS = 24
+
+
+def get_session_secret() -> str:
+    if not SESSION_SECRET_FILE.exists():
+        SESSION_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        secret = hashlib.sha256(os.urandom(32)).hexdigest()
+        SESSION_SECRET_FILE.write_text(secret, encoding="utf-8")
+        return secret
+    try:
+        return SESSION_SECRET_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "fallback_secret_key_123456"
+
+
+def verify_session_token(token: str) -> tuple[bool, str | None, str | None]:
+    if not token:
+        return False, None, None
+    try:
+        parts = token.split(":")
+        if len(parts) != 4:
+            return False, None, None
+        username, expiry_str, login_time, signature = parts
+        expiry = int(expiry_str)
+        if time.time() > expiry:
+            return False, None, None  # Expired
+
+        # Verify signature
+        secret = get_session_secret()
+        sig_data = f"{username}:{expiry}:{login_time}:{secret}".encode("utf-8")
+        expected_signature = hashlib.sha256(sig_data).hexdigest()
+        if hmac.compare_digest(signature, expected_signature):
+            return True, username, login_time
+    except Exception:
+        pass
+    return False, None, None
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -78,6 +116,20 @@ def check_session():
             st.session_state.username = None
             st.session_state.login_time = None
 
+    # If not authenticated, check browser cookies (fast path using st.context.cookies)
+    if not st.session_state.authenticated:
+        try:
+            cookies = st.context.cookies
+            if "compass_session" in cookies:
+                token = cookies["compass_session"]
+                is_valid, username, login_time = verify_session_token(token)
+                if is_valid:
+                    st.session_state.authenticated = True
+                    st.session_state.username = username
+                    st.session_state.login_time = login_time
+        except Exception:
+            pass
+
     return st.session_state.authenticated
 
 
@@ -120,7 +172,25 @@ def login_form():
                 if authenticate(username, password):
                     st.session_state.authenticated = True
                     st.session_state.username = username
-                    st.session_state.login_time = datetime.now().isoformat(timespec="seconds")
+                    login_time = datetime.now().isoformat(timespec="seconds")
+                    st.session_state.login_time = login_time
+
+                    # Persistent cookie write using streamlit-cookies-controller
+                    try:
+                        from streamlit_cookies_controller import CookieController
+                        expiry = int(time.time()) + SESSION_TIMEOUT_HOURS * 3600
+                        secret = get_session_secret()
+                        sig_data = f"{username}:{expiry}:{login_time}:{secret}".encode("utf-8")
+                        signature = hashlib.sha256(sig_data).hexdigest()
+                        token = f"{username}:{expiry}:{login_time}:{signature}"
+
+                        controller = CookieController()
+                        controller.set("compass_session", token, max_age=SESSION_TIMEOUT_HOURS * 3600)
+                        # Add a small delay for the browser to register the cookie
+                        time.sleep(0.5)
+                    except Exception as e:
+                        st.warning(f"无法保存登录 Cookie: {e}")
+
                     st.rerun()
                 else:
                     st.error("用户名或密码错误")
@@ -130,6 +200,14 @@ def logout():
     st.session_state.authenticated = False
     st.session_state.username = None
     st.session_state.login_time = None
+
+    try:
+        from streamlit_cookies_controller import CookieController
+        controller = CookieController()
+        controller.remove("compass_session")
+        time.sleep(0.5)
+    except Exception:
+        pass
     st.rerun()
 
 
@@ -139,6 +217,7 @@ def require_auth():
         login_form()
         st.stop()
     return st.session_state.username
+
 
 
 def change_password(username: str, old_password: str, new_password: str) -> bool:
