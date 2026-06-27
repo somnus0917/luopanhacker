@@ -5,12 +5,14 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 import time
+from urllib.parse import unquote
 
 import streamlit as st
 
 USERS_FILE = Path(__file__).parent / "config" / "users.json"
 SESSION_SECRET_FILE = Path(__file__).parent / "config" / "session_secret.txt"
 SESSION_TIMEOUT_HOURS = 24
+SESSION_COOKIE_NAME = "compass_session"
 
 
 def get_session_secret() -> str:
@@ -29,10 +31,14 @@ def verify_session_token(token: str) -> tuple[bool, str | None, str | None]:
     if not token:
         return False, None, None
     try:
+        token = unquote(str(token))
         parts = token.split(":")
-        if len(parts) != 4:
+        if len(parts) < 4:
             return False, None, None
-        username, expiry_str, login_time, signature = parts
+        username = parts[0]
+        expiry_str = parts[1]
+        login_time = ":".join(parts[2:-1])
+        signature = parts[-1]
         expiry = int(expiry_str)
         if time.time() > expiry:
             return False, None, None  # Expired
@@ -116,19 +122,28 @@ def check_session():
             st.session_state.username = None
             st.session_state.login_time = None
 
-    # If not authenticated, check browser cookies (fast path using st.context.cookies)
+    # If not authenticated, check browser cookies.
     if not st.session_state.authenticated:
+        token = None
         try:
             cookies = st.context.cookies
-            if "compass_session" in cookies:
-                token = cookies["compass_session"]
-                is_valid, username, login_time = verify_session_token(token)
-                if is_valid:
-                    st.session_state.authenticated = True
-                    st.session_state.username = username
-                    st.session_state.login_time = login_time
         except Exception:
-            pass
+            cookies = {}
+
+        token = cookies.get(SESSION_COOKIE_NAME)
+        if not token:
+            try:
+                from streamlit_cookies_controller import CookieController
+                controller = CookieController()
+                token = controller.get(SESSION_COOKIE_NAME)
+            except Exception:
+                token = None
+
+        is_valid, username, login_time = verify_session_token(token)
+        if is_valid:
+            st.session_state.authenticated = True
+            st.session_state.username = username
+            st.session_state.login_time = login_time
 
     return st.session_state.authenticated
 
@@ -190,8 +205,22 @@ def login_form():
                 sig_data = f"{username}:{expiry}:{login_time}:{secret}".encode("utf-8")
                 signature = hashlib.sha256(sig_data).hexdigest()
                 token = f"{username}:{expiry}:{login_time}:{signature}"
-                controller.set("compass_session", token, max_age=SESSION_TIMEOUT_HOURS * 3600)
+                controller.set(
+                    SESSION_COOKIE_NAME,
+                    token,
+                    max_age=SESSION_TIMEOUT_HOURS * 3600,
+                    same_site="lax",
+                )
                 st.success("登录成功！正在进入系统...")
+                st.components.v1.html(
+                    """
+                    <script>
+                      setTimeout(() => window.parent.location.reload(), 800);
+                    </script>
+                    """,
+                    height=0,
+                )
+                st.stop()
             except Exception as e:
                 st.warning(f"无法保存登录 Cookie: {e}")
 
@@ -204,7 +233,7 @@ def logout():
     try:
         from streamlit_cookies_controller import CookieController
         controller = CookieController()
-        controller.remove("compass_session")
+        controller.remove(SESSION_COOKIE_NAME, same_site="lax")
     except Exception:
         pass
 

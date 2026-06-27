@@ -6,10 +6,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: douyin-compass
-    ports:
-      - "6080:6080"   # noVNC 网页远程桌面
-      - "8501:8501"   # Streamlit 看板
-      # - "5900:5900" # VNC 直连（可选，需要 VNC 客户端）
     volumes:
       - ./output:/app/output        # 数据输出目录
       - ./session:/app/session      # 浏览器会话（登录状态）
@@ -21,9 +17,16 @@ services:
       - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}  # 从 .env 读取或使用默认值
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}       # 管理员密码
     restart: unless-stopped
+    networks:
+      - default
+      - proxy
     # 资源限制（可选）
     # deploy:
     #   resources:
     #     limits:
     #       cpus: '2'
     #       memory: 4G
+
+networks:
+  proxy:
+    external: true
