@@ -75,12 +75,14 @@ async def main():
             state="waiting_random",
             message=f"随机等待 {delay} 秒后开始采集",
         )
+        print(f"随机等待 {delay} 秒后开始采集", flush=True)
         await asyncio.sleep(delay)
 
         write_status(
             state="running",
             message="正在采集罗盘数据",
         )
+        print("正在采集罗盘数据", flush=True)
 
         args = parse_args()
         results = await run(args)

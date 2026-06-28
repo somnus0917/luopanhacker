@@ -3,6 +3,9 @@ set -euo pipefail
 
 cd /app
 
+mkdir -p /app/output
+exec > >(tee -a /app/output/progress.log) 2>&1
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] start scheduled compass scrape"
 
 PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python}"

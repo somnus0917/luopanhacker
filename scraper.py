@@ -59,9 +59,13 @@ os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(BROWSERS_DIR))
 from playwright.async_api import async_playwright
 
 
-async def human_pause(min_seconds=None, max_seconds=None):
+async def human_pause(min_seconds=None, max_seconds=None, reason=None):
     low, high = min_seconds or ACTION_DELAY_RANGE[0], max_seconds or ACTION_DELAY_RANGE[1]
-    await asyncio.sleep(random.uniform(low, high))
+    delay = random.uniform(low, high)
+    if reason:
+        print(f"{reason}，随机等待 {delay:.1f}s", flush=True)
+    await asyncio.sleep(delay)
+    return delay
 
 
 async def wait_network_quiet(page, timeout=30000):
@@ -74,12 +78,12 @@ async def wait_network_quiet(page, timeout=30000):
 async def click_with_pacing(locator, label):
     target = locator.first
     await target.wait_for(state="visible", timeout=30000)
-    await human_pause()
+    await human_pause(reason=f"正在点击 {label}")
     await target.hover()
     await human_pause(0.5, 1.4)
     await target.click(timeout=10000)
-    print(f"已点击: {label}")
-    await human_pause(*AFTER_CLICK_DELAY_RANGE)
+    print(f"已点击: {label}", flush=True)
+    await human_pause(*AFTER_CLICK_DELAY_RANGE, reason=f"等待 {label} 点击后的页面响应")
 
 
 async def wait_shop_modal(page, timeout=15000):
@@ -94,12 +98,12 @@ async def wait_shop_modal(page, timeout=15000):
 
 
 async def click_point_with_pacing(page, x, y, label):
-    await human_pause()
+    await human_pause(reason=f"正在点击 {label}")
     await page.mouse.move(x, y, steps=random.randint(8, 18))
     await human_pause(0.5, 1.4)
     await page.mouse.click(x, y)
-    print(f"已点击: {label}")
-    await human_pause(*AFTER_CLICK_DELAY_RANGE)
+    print(f"已点击: {label}", flush=True)
+    await human_pause(*AFTER_CLICK_DELAY_RANGE, reason=f"等待 {label} 点击后的页面响应")
 
 
 async def click_header_shop(page, shop_name):

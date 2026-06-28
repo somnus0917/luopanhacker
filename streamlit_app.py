@@ -36,7 +36,7 @@ from task_status import LOGIN_SCREENSHOT, read_status, write_status
 
 APP_DIR = Path(__file__).parent
 DAILY_LOCK = APP_DIR / "output" / "daily_job.lock"
-MANUAL_LOG = APP_DIR / "logs" / "manual_scrape.log"
+PROGRESS_LOG = APP_DIR / "output" / "progress.log"
 ORDER_LOCK = APP_DIR / "output" / "orders" / "order_job.lock"
 ORDER_STATUS = APP_DIR / "output" / "orders" / "order_job_status.json"
 ORDER_LOG = APP_DIR / "logs" / "order_scrape.log"
@@ -241,13 +241,19 @@ def display_table(df):
 
 
 def start_manual_scrape():
-    MANUAL_LOG.parent.mkdir(parents=True, exist_ok=True)
+    PROGRESS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    clear_progress_log()
     write_status(
         state="manual_requested",
         message="已收到手动补采请求，正在启动采集任务",
         last_error="",
     )
-    with MANUAL_LOG.open("ab") as log_file:
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    with PROGRESS_LOG.open("ab") as log_file:
+        started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_file.write(f"[{started_at}] start manual compass scrape\n".encode("utf-8"))
+        log_file.flush()
         subprocess.Popen(
             [
                 sys.executable,
@@ -260,8 +266,28 @@ def start_manual_scrape():
             cwd=str(APP_DIR),
             stdout=log_file,
             stderr=subprocess.STDOUT,
+            env=env,
             start_new_session=True,
         )
+
+
+def clear_progress_log():
+    PROGRESS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    PROGRESS_LOG.write_text("", encoding="utf-8")
+
+
+def read_recent_log(path, max_lines=80, max_bytes=60000):
+    if not path.exists():
+        return ""
+    try:
+        with path.open("rb") as file:
+            file.seek(0, os.SEEK_END)
+            size = file.tell()
+            file.seek(max(0, size - max_bytes), os.SEEK_SET)
+            text = file.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-max_lines:])
 
 
 def read_order_status():
@@ -469,44 +495,66 @@ def render_account_sidebar(current_user, current_role):
             logout()
 
 
+@st.fragment(run_every="2s")
+def render_compass_status_fragment(novnc_url):
+    status = read_status()
+    state = status.get("state", "unknown")
+    message = status.get("message", "暂无采集状态")
+
+    st.write(f"状态：**{state}**")
+    st.write(message)
+
+    if status.get("updated_at"):
+        st.caption(f"更新时间：{status['updated_at']}")
+
+    if status.get("last_success_at"):
+        st.success(f"最近成功采集：{status['last_success_at']}")
+
+    if status.get("last_error"):
+        st.error(status["last_error"])
+
+    job_running = DAILY_LOCK.exists()
+    if st.button("手动补采今天数据", type="primary", disabled=job_running):
+        try:
+            start_manual_scrape()
+            st.success("已启动手动补采任务，请稍后刷新状态；如需要登录，请打开 noVNC 扫码。")
+            st.rerun(scope="fragment")
+        except Exception as exc:
+            st.error(f"手动补采启动失败：{exc!r}")
+
+    if job_running:
+        st.info("已有采集任务在运行，暂时不能重复启动。")
+
+    st.button("刷新采集进度")
+
+    if st.button("清除终端进度日志"):
+        clear_progress_log()
+        st.success("已清除终端进度日志。")
+
+    if state == "success":
+        if st.button("刷新整个看板数据"):
+            st.rerun(scope="app")
+
+    progress_log = read_recent_log(PROGRESS_LOG)
+    if progress_log:
+        st.caption("最近终端进度日志（仅此区域每 2 秒自动更新）")
+        st.code(progress_log, language="text")
+    else:
+        st.caption("暂无终端进度日志。")
+
+    if state == "login_required":
+        st.warning("当前需要扫码登录。请扫描下方截图中的二维码，或打开 noVNC 远程浏览器完成登录。")
+        if LOGIN_SCREENSHOT.exists():
+            st.image(str(LOGIN_SCREENSHOT), caption="登录页面截图")
+        else:
+            st.info("暂未生成登录截图，请稍后刷新页面。")
+
+    st.link_button("打开远程浏览器 noVNC", novnc_url)
+
+
 def render_compass_status(novnc_url):
     with st.expander("采集状态", expanded=True):
-        status = read_status()
-        state = status.get("state", "unknown")
-        message = status.get("message", "暂无采集状态")
-
-        st.write(f"状态：**{state}**")
-        st.write(message)
-
-        if status.get("updated_at"):
-            st.caption(f"更新时间：{status['updated_at']}")
-
-        if status.get("last_success_at"):
-            st.success(f"最近成功采集：{status['last_success_at']}")
-
-        if status.get("last_error"):
-            st.error(status["last_error"])
-
-        job_running = DAILY_LOCK.exists()
-        if st.button("手动补采今天数据", type="primary", disabled=job_running):
-            try:
-                start_manual_scrape()
-                st.success("已启动手动补采任务，请稍后刷新状态；如需要登录，请打开 noVNC 扫码。")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"手动补采启动失败：{exc!r}")
-
-        if job_running:
-            st.info("已有采集任务在运行，暂时不能重复启动。")
-
-        if state == "login_required":
-            st.warning("当前需要扫码登录。请扫描下方截图中的二维码，或打开 noVNC 远程浏览器完成登录。")
-            if LOGIN_SCREENSHOT.exists():
-                st.image(str(LOGIN_SCREENSHOT), caption="登录页面截图")
-            else:
-                st.info("暂未生成登录截图，请稍后刷新页面。")
-
-        st.link_button("打开远程浏览器 noVNC", novnc_url)
+        render_compass_status_fragment(novnc_url)
 
 
 def render_compass_dashboard(novnc_url):
