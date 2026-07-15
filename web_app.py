@@ -6,6 +6,7 @@ modules so the presentation layer can evolve independently.
 """
 
 import hashlib
+import hmac
 import json
 import os
 import subprocess
@@ -63,11 +64,11 @@ def load_users():
 
 def verify_password(password, stored_hash):
     try:
-        salt, _ = stored_hash.split("$", 1)
+        salt, stored_digest = stored_hash.split("$", 1)
     except ValueError:
         return False
     calculated = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return calculated == stored_hash
+    return hmac.compare_digest(calculated, stored_digest)
 
 
 def current_user():
