@@ -384,16 +384,171 @@ def content_table(content_df):
     return pd.DataFrame(rows)
 
 
+def apply_dashboard_theme():
+    """Apply the shared dark data-center visual system to every dashboard page."""
+    st.markdown(
+        """
+        <style>
+          :root {
+            --ink: #f5f7ff;
+            --muted: #8d96b5;
+            --navy-950: #0a0c18;
+            --navy-900: #0f1222;
+            --navy-850: #15182d;
+            --navy-800: #1a1e36;
+            --navy-700: #202746;
+            --line: rgba(132, 151, 205, .18);
+            --pink: #f43f67;
+            --blue: #3ba7f5;
+            --green: #32d17a;
+            --orange: #ff931f;
+            --purple: #ad62d7;
+          }
+          .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+            background: var(--navy-950);
+            color: var(--ink);
+          }
+          .stApp:before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: .38;
+            background-image: radial-gradient(rgba(130, 148, 203, .10) .6px, transparent .6px);
+            background-size: 5px 5px;
+            z-index: 0;
+          }
+          [data-testid="stAppViewContainer"] > .main { position: relative; z-index: 1; }
+          .block-container { padding: 1rem 2.65rem 3.4rem !important; max-width: 1740px; }
+          [data-testid="stSidebar"] { background: #111426; border-right: 1px solid var(--line); }
+          [data-testid="stSidebar"] * { color: var(--ink); }
+          [data-testid="stSidebar"] [data-baseweb="input"] { background: var(--navy-800); }
+          h1, h2, h3, p, label, .stMarkdown, .stCaption, [data-testid="stWidgetLabel"] { color: var(--ink); }
+          h1, h2, h3 { letter-spacing: -.025em; }
+          h2 { font-size: 1.28rem !important; margin-top: .25rem !important; }
+          [data-testid="stCaptionContainer"] p, .stCaption { color: var(--muted) !important; }
+          [data-baseweb="tab-list"] {
+            gap: .55rem;
+            border-bottom: 2px solid #183258;
+            padding: 0 .1rem;
+          }
+          button[data-baseweb="tab"] {
+            height: 4.5rem;
+            padding: 0 1.45rem;
+            color: #9ba5c2 !important;
+            font-size: 1.02rem;
+            font-weight: 700;
+            border-radius: .72rem .72rem 0 0;
+            transition: background .2s ease, color .2s ease;
+          }
+          button[data-baseweb="tab"][aria-selected="true"] {
+            color: var(--pink) !important;
+            background: rgba(244, 63, 103, .13) !important;
+          }
+          button[data-baseweb="tab"]:hover { color: #f0f2fa !important; background: rgba(91, 104, 156, .13); }
+          [data-testid="stMetric"] {
+            background: linear-gradient(145deg, rgba(28, 32, 58, .98), rgba(20, 23, 43, .98));
+            border: 1px solid rgba(125, 146, 207, .12);
+            border-radius: .8rem;
+            min-height: 8.8rem;
+            padding: 1.35rem 1.45rem;
+            box-shadow: inset 3px 0 0 var(--blue), 0 14px 30px rgba(0, 0, 0, .16);
+          }
+          [data-testid="stMetricLabel"] p { color: #9da6c1 !important; font-size: .96rem; }
+          [data-testid="stMetricValue"] { color: #f7f8fd !important; font-size: clamp(1.7rem, 2.3vw, 2.55rem); font-variant-numeric: tabular-nums; }
+          [data-testid="stMetricDelta"] { color: var(--muted) !important; }
+          div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(24, 28, 51, .95);
+            border: 1px solid var(--line) !important;
+            border-radius: .8rem;
+            box-shadow: none !important;
+          }
+          [data-baseweb="select"] > div, [data-baseweb="input"] > div,
+          [data-baseweb="base-input"] { background: #17203b !important; border-color: #526389 !important; color: var(--ink) !important; }
+          [data-baseweb="select"] *, [data-baseweb="input"] input { color: var(--ink) !important; }
+          [data-baseweb="popover"] { background: #1a1e36 !important; }
+          [data-baseweb="menu"] { background: #1a1e36 !important; }
+          [data-baseweb="menu"] * { color: var(--ink) !important; }
+          .stButton > button, .stDownloadButton > button, [data-testid="stLinkButton"] a {
+            background: #1b2545 !important;
+            border: 1px solid #5d6f99 !important;
+            color: var(--ink) !important;
+            border-radius: .65rem !important;
+            font-weight: 700;
+          }
+          .stButton > button[kind="primary"] { background: var(--pink) !important; border-color: var(--pink) !important; }
+          .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); border-color: #91a4d6 !important; }
+          [data-testid="stDataFrame"] { border: 1px solid var(--line); border-radius: .8rem; overflow: hidden; }
+          [data-testid="stDataFrame"] [role="columnheader"] { background: #192747 !important; }
+          [data-testid="stDataFrame"] * { color: #e9ecf7 !important; }
+          [data-testid="stExpander"] { border: 1px solid var(--line); border-radius: .75rem; background: rgba(22, 26, 47, .92); }
+          [data-testid="stAlert"] { background: rgba(37, 50, 86, .58); color: var(--ink); border-color: var(--line); }
+          .dashboard-topline {
+            display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+            padding: .7rem 0 1rem;
+          }
+          .dashboard-brand { display: flex; align-items: center; gap: .75rem; font-size: 1.45rem; font-weight: 800; color: #fff; }
+          .dashboard-brand-mark { width: 2.15rem; height: 2.15rem; display: inline-grid; place-items: center; color: #071728; background: #2fd49a; border-radius: .65rem; font-size: 1.2rem; }
+          .dashboard-meta { color: var(--muted); font-size: .86rem; text-align: right; }
+          .page-kicker { color: #8f9abb; font-size: .82rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; margin-top: 1.5rem; }
+          .page-title { margin: .18rem 0 .4rem; font-size: clamp(1.55rem, 2.2vw, 2.15rem); font-weight: 800; }
+          .page-subtitle { color: var(--muted); font-size: .96rem; margin-bottom: 1.35rem; }
+          .empty-dashboard {
+            min-height: 18rem; display: grid; place-items: center; text-align: center;
+            border: 1px dashed rgba(126, 148, 211, .36); border-radius: .85rem;
+            background: linear-gradient(135deg, rgba(32, 38, 69, .7), rgba(20, 23, 42, .68));
+            margin-top: 1rem; padding: 2rem;
+          }
+          .empty-dashboard strong { display: block; font-size: 1.16rem; margin-bottom: .55rem; color: #f0f2fb; }
+          .empty-dashboard span { color: var(--muted); font-size: .92rem; }
+          .section-label { margin: 1.75rem 0 .78rem; color: #f4f5fb; font-size: 1.22rem; font-weight: 800; }
+          @media (max-width: 700px) {
+            .block-container { padding: .7rem 1rem 2.5rem !important; }
+            .dashboard-topline { align-items: flex-start; }
+            .dashboard-meta { display: none; }
+            button[data-baseweb="tab"] { padding: 0 .75rem; height: 3.6rem; font-size: .9rem; }
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_page_heading(kicker, title, subtitle):
+    st.markdown(
+        f'<div class="page-kicker">{kicker}</div>'
+        f'<div class="page-title">{title}</div>'
+        f'<div class="page-subtitle">{subtitle}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_empty_dashboard(title, subtitle, metrics):
+    """Render an intentional empty state instead of inventing business data."""
+    render_page_heading("数据看板", title, subtitle)
+    columns = st.columns(len(metrics))
+    for index, label in enumerate(metrics):
+        with columns[index]:
+            st.metric(label, "—", "等待数据接入")
+    st.markdown(
+        """
+        <div class="empty-dashboard">
+          <div><strong>该页暂未接入数据</strong><span>页面结构、筛选和指标口径已准备完成；数据到位后会自动展示。</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_kpis(kpis, totals, records):
     columns = st.columns(3)
     for index, (code, label) in enumerate(kpis):
         value = display_value(code, totals.get(code))
-        delta = format_delta(records, code) or "等待更多每日样本"
+        delta = format_delta(records, code)
         with columns[index % 3]:
-            with st.container(border=True):
-                st.caption(label)
-                st.markdown(f"**{value}**")
-                st.caption(f"较上一业务日 {delta}")
+            st.metric(label, value, delta=delta)
+            if delta is None:
+                st.caption("等待更多每日样本")
         if index == 2:
             columns = st.columns(3)
 
@@ -558,12 +713,20 @@ def render_compass_status(novnc_url):
 
 
 def render_compass_dashboard(novnc_url):
-    st.header("罗盘经营看板")
-    render_compass_status(novnc_url)
+    render_page_heading(
+        "抖店罗盘",
+        "罗盘数据",
+        "汇总已采集店铺的交易、流量、转化与结算指标。",
+    )
 
     records = get_dashboard_records()
     if not records:
-        st.info("还没有可展示的数据。先运行 ./run_daily.sh 获取每日数据。")
+        render_empty_dashboard(
+            "罗盘数据",
+            "尚未读取到罗盘采集结果。完成采集后，数据会直接显示在此页。",
+            ["成交金额", "支付金额", "结算金额", "成交订单", "退款率"],
+        )
+        render_compass_status(novnc_url)
         return
 
     all_dates = dates(records)
@@ -606,7 +769,7 @@ def render_compass_dashboard(novnc_url):
     ]
     render_kpis(kpis, latest_totals, filtered_records)
 
-    st.subheader("新增指标总览")
+    st.markdown('<div class="section-label">指标总览</div>', unsafe_allow_html=True)
     metric_tabs = st.tabs([title for title, _ in NEW_METRIC_GROUPS])
     for tab, (title, metrics) in zip(metric_tabs, NEW_METRIC_GROUPS):
         with tab:
@@ -622,7 +785,7 @@ def render_compass_dashboard(novnc_url):
         bar_chart(df, "income_amt", "最新日成交对比")
         bar_chart(df, "pay_cnt", "最新日订单对比")
 
-    st.subheader("店铺明细")
+    st.markdown('<div class="section-label">店铺明细</div>', unsafe_allow_html=True)
     detail_df = display_table(df)
     st.dataframe(
         detail_df,
@@ -631,7 +794,7 @@ def render_compass_dashboard(novnc_url):
         column_config=table_column_config(detail_df),
     )
 
-    st.subheader("内容来源拆分")
+    st.markdown('<div class="section-label">内容来源拆分</div>', unsafe_allow_html=True)
     content_display_df = content_table(content_df)
     st.dataframe(
         content_display_df,
@@ -653,6 +816,8 @@ def render_compass_dashboard(novnc_url):
             for source_file in source_files:
                 st.code(source_file)
         st.write("Streamlit 看板直接读取本地 `output/daily/**/*.json`，并兼容 `metrics.db` 中的历史接口数据。")
+
+    render_compass_status(novnc_url)
 
 
 def render_order_status(novnc_url):
@@ -1013,49 +1178,84 @@ def render_tmall_msd_dashboard():
         st.code(str(APP_DIR / "output" / "orders"))
 
 
+def render_inventory_dashboard():
+    render_empty_dashboard(
+        "库存周转",
+        "按品牌查看库存规模、库龄结构与近 7 天动销情况。",
+        ["总 SKU 数", "有库存 SKU", "总库存量", "总库存金额", "动销率", "平均周转天数"],
+    )
+
+
+def render_operations_dashboard():
+    render_empty_dashboard(
+        "经营看板",
+        "按日期、品牌和店铺查看成交、订单、退款与平台补贴。",
+        ["成交金额", "成交订单量", "退货金额", "退货订单量", "平台补贴", "客单价"],
+    )
+
+
+def render_settlement_dashboard():
+    render_empty_dashboard(
+        "结算看板",
+        "按月核对品牌结算、返利、国补及平台补贴。",
+        ["月度结算总额", "返利总额", "国补总额", "平台补贴总额"],
+    )
+
+
+def render_douyin_channel_dashboard():
+    render_empty_dashboard(
+        "抖音渠道",
+        "查看商品卡流量来源、点击率和商品成交表现。",
+        ["自然搜索", "推荐流量", "广告投放", "短视频引流"],
+    )
+
+
 st.set_page_config(
     page_title="抖店数据看板",
-    page_icon="",
+    page_icon="◈",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 current_user = require_auth()
 current_role = get_user_role(current_user)
 NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
 
+apply_dashboard_theme()
+
+render_account_sidebar(current_user, current_role)
+
 st.markdown(
-    """
-    <style>
-      .block-container {
-        padding-top: 1.4rem;
-        padding-left: 2rem;
-        padding-right: 2rem;
-        max-width: 1680px;
-      }
-      div[data-testid="stVerticalBlockBorderWrapper"] strong {
-        font-size: clamp(20px, 2vw, 30px);
-        line-height: 1.2;
-        overflow-wrap: anywhere;
-        white-space: normal;
-      }
-      [data-testid="stDataFrame"] {
-        width: 100%;
-      }
-    </style>
+    f"""
+    <div class="dashboard-topline">
+      <div class="dashboard-brand"><span class="dashboard-brand-mark">◈</span> 罗盘数据中心</div>
+      <div class="dashboard-meta">已登录：{current_user} · 数据按页面来源独立更新</div>
+    </div>
     """,
     unsafe_allow_html=True,
 )
 
-render_account_sidebar(current_user, current_role)
+inventory_tab, operations_tab, settlement_tab, douyin_tab, compass_tab = st.tabs(
+    ["📦 库存周转", "💰 经营看板", "🧾 结算看板", "🎬 抖音渠道", "◈ 罗盘数据"]
+)
 
-st.title("抖店数据看板")
-compass_tab, order_tab, tmall_tab = st.tabs(["罗盘经营看板", "订单数据看板", "天猫MSD订单"])
+with inventory_tab:
+    render_inventory_dashboard()
+
+with operations_tab:
+    render_operations_dashboard()
+
+with settlement_tab:
+    render_settlement_dashboard()
+
+with douyin_tab:
+    render_douyin_channel_dashboard()
 
 with compass_tab:
     render_compass_dashboard(NOVNC_URL)
-
-with order_tab:
-    render_order_dashboard(NOVNC_URL)
-
-with tmall_tab:
-    render_tmall_msd_dashboard()
+    with st.expander("其他数据看板（订单与天猫 MSD）"):
+        order_tab, tmall_tab = st.tabs(["订单数据", "天猫 MSD 订单"])
+        with order_tab:
+            render_order_dashboard(NOVNC_URL)
+        with tmall_tab:
+            render_tmall_msd_dashboard()

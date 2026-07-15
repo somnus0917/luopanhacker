@@ -151,31 +151,61 @@ def check_session():
 def login_form():
     st.markdown("""
     <style>
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+            background: #0a0c18;
+            color: #f5f7ff;
+        }
+        .stApp:before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            opacity: .3;
+            background-image: radial-gradient(rgba(130, 148, 203, .10) .6px, transparent .6px);
+            background-size: 5px 5px;
+        }
+        .block-container { padding-top: 5.5rem !important; }
         .login-container {
             max-width: 400px;
             margin: 0 auto;
             padding: 2rem;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background: linear-gradient(145deg, #1c203a, #15182d);
+            border: 1px solid rgba(132, 151, 205, .24);
+            border-radius: 14px;
+            box-shadow: inset 3px 0 0 #32d17a, 0 18px 42px rgba(0, 0, 0, .24);
         }
         .login-title {
             text-align: center;
-            color: #1f2937;
+            color: #f5f7ff;
             margin-bottom: 1.5rem;
         }
         .login-subtitle {
             text-align: center;
-            color: #6b7280;
+            color: #9da6c1;
             font-size: 0.9rem;
             margin-bottom: 2rem;
         }
+        [data-testid="stTextInputRootElement"] input {
+            background: #171c33 !important;
+            color: #f5f7ff !important;
+            border-color: #526389 !important;
+        }
+        [data-testid="stTextInputRootElement"] input::placeholder { color: #8994b4 !important; }
+        [data-testid="stWidgetLabel"] p { color: #dce1f1 !important; }
+        .stButton > button, [data-testid="stFormSubmitButton"] > button {
+            background: #f43f67 !important;
+            color: #fff !important;
+            border-color: #f43f67 !important;
+            border-radius: .65rem !important;
+            font-weight: 700;
+        }
+        .stButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover { background: #ff5477 !important; border-color: #ff5477 !important; }
     </style>
     """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown('<h1 class="login-title">罗盘经营看板</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 class="login-title">罗盘数据中心</h1>', unsafe_allow_html=True)
         st.markdown('<p class="login-subtitle">请登录以访问系统</p>', unsafe_allow_html=True)
 
         from streamlit_cookies_controller import CookieController
