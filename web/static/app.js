@@ -91,7 +91,7 @@ function lineChart(records, metricKey, title) {
   const labels = dates.map((date, index) => `<text class="chart-axis" text-anchor="middle" x="${point(0, index)[0]}" y="${height - 8}">${date.slice(5)}</text>`).join("");
   const series = values.map((line, index) => `<path class="chart-line" stroke="${COLORS[index % COLORS.length]}" d="${path(line)}"/>`).join("");
   const legend = shops.map((shop, index) => `<span><i style="background:${COLORS[index % COLORS.length]}"></i>${escapeHtml(shop)}</span>`).join("");
-  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/>${labels}<rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/>${labels}<rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
 }
 
 function bindLineChartHover(records) {
