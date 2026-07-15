@@ -70,4 +70,5 @@ logs/
 docker-compose.override.yml
 
 config/users.json
+config/session_secret.txt
 order_dashboard.html
