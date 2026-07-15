@@ -73,6 +73,7 @@ main { padding-top: 34px; }
 .chart-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 16px; }
 .chart-stack { display: grid; gap: 16px; }
 .panel { min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.chart-panel { position: relative; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
 .panel-head h3 { margin: 0; font-size: 16px; letter-spacing: -.025em; }
 .panel-head span { color: var(--muted); font-size: 12px; }
@@ -81,6 +82,14 @@ main { padding-top: 34px; }
 .chart-axis { fill: #8792b0; font-size: 10px; }
 .chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .chart-fill { opacity: .12; }
+.chart-hit-area { fill: transparent; cursor: crosshair; }
+.chart-hover-line { stroke: rgba(224, 232, 255, .58); stroke-width: 1; stroke-dasharray: 4 4; pointer-events: none; }
+.chart-tooltip { position: absolute; z-index: 2; width: min(250px, calc(100% - 20px)); padding: 10px 12px; border: 1px solid rgba(136, 159, 224, .42); border-radius: 8px; background: rgba(10, 13, 27, .97); box-shadow: 0 12px 30px rgba(0, 0, 0, .3); pointer-events: none; color: #f4f6ff; font-size: 12px; }
+.chart-tooltip b { display: block; margin-bottom: 7px; color: #aeb9d9; font-size: 11px; }
+.chart-tooltip div { display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; gap: 6px; align-items: center; min-height: 20px; }
+.chart-tooltip i { width: 8px; height: 8px; border-radius: 50%; }
+.chart-tooltip span { overflow: hidden; color: #cbd3ea; text-overflow: ellipsis; white-space: nowrap; }
+.chart-tooltip strong { color: #fff; font-variant-numeric: tabular-nums; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; color: var(--muted); font-size: 11px; }
 .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; }
 .bar-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(85px, 1.5fr) auto; gap: 10px; align-items: center; min-height: 34px; }

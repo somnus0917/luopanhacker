@@ -91,7 +91,47 @@ function lineChart(records, metricKey, title) {
   const labels = dates.map((date, index) => `<text class="chart-axis" text-anchor="middle" x="${point(0, index)[0]}" y="${height - 8}">${date.slice(5)}</text>`).join("");
   const series = values.map((line, index) => `<path class="chart-line" stroke="${COLORS[index % COLORS.length]}" d="${path(line)}"/>`).join("");
   const legend = shops.map((shop, index) => `<span><i style="background:${COLORS[index % COLORS.length]}"></i>${escapeHtml(shop)}</span>`).join("");
-  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>所选日期内按店铺对比</span></div></div><svg class="chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title}">${grid}${series}${labels}</svg><div class="legend">${legend}</div></section>`;
+  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/>${labels}<rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+}
+
+function bindLineChartHover(records) {
+  $$(".chart[data-metric]").forEach((chart) => {
+    const metricKey = chart.dataset.metric;
+    const panel = chart.closest(".chart-panel");
+    const tooltip = $(".chart-tooltip", panel);
+    const hoverLine = $(".chart-hover-line", chart);
+    const dates = [...new Set(records.map((item) => item.date))].sort();
+    const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+    const width = 760, leftPadding = 48, rightPadding = 16;
+
+    const hide = () => {
+      tooltip.classList.add("hidden");
+      hoverLine.setAttribute("visibility", "hidden");
+    };
+    const move = (event) => {
+      const bounds = chart.getBoundingClientRect();
+      const x = ((event.clientX - bounds.left) / bounds.width) * width;
+      const step = (width - leftPadding - rightPadding) / Math.max(dates.length - 1, 1);
+      const index = Math.max(0, Math.min(dates.length - 1, Math.round((x - leftPadding) / step)));
+      const date = dates[index];
+      const chartX = leftPadding + index * step;
+      const rows = shops.map((shop, shopIndex) => {
+        const record = records.find((item) => item.date === date && item.shop_name === shop);
+        return `<div><i style="background:${COLORS[shopIndex % COLORS.length]}"></i><span>${escapeHtml(shop)}</span><strong>${metricText(metricKey, record?.metrics?.[metricKey])}</strong></div>`;
+      }).join("");
+      tooltip.innerHTML = `<b>${date}</b>${rows}`;
+      tooltip.classList.remove("hidden");
+      const panelBounds = panel.getBoundingClientRect();
+      const desiredLeft = event.clientX - panelBounds.left + 14;
+      tooltip.style.left = `${Math.max(10, Math.min(desiredLeft, panel.clientWidth - tooltip.offsetWidth - 10))}px`;
+      tooltip.style.top = `${Math.max(48, event.clientY - panelBounds.top - 8)}px`;
+      hoverLine.setAttribute("x1", chartX);
+      hoverLine.setAttribute("x2", chartX);
+      hoverLine.setAttribute("visibility", "visible");
+    };
+    chart.addEventListener("mousemove", move);
+    chart.addEventListener("mouseleave", hide);
+  });
 }
 
 function barPanel(records, metricKey, title) {
@@ -132,6 +172,7 @@ async function renderCompass() {
   const cards = metricCards(records);
   $("#compass-summary").textContent = `最新业务日期：${cards.date} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺 · ${new Set(records.map((item) => item.date)).size} 个业务日`;
   target.innerHTML = `${cards.html}<h3 class="section-title">趋势与对比</h3><div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "product_click_pay_ucnt_ratio", "点击支付率趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "最新日成交对比")}${barPanel(records, "pay_cnt", "最新日订单对比")}</div></div><h3 class="section-title">店铺明细</h3>${renderTable(records)}<h3 class="section-title">内容来源拆分</h3>${renderTable(records, true)}<div id="status-slot"></div>`;
+  bindLineChartHover(records);
   $("#status-slot").innerHTML = await renderStatus();
   $("#scrape-button")?.addEventListener("click", startScrape);
 }
