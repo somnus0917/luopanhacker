@@ -13,7 +13,7 @@ docker-compose up -d
 
 ### 2. 首次登录
 
-1. 打开 Streamlit 看板: `http://YOUR_SERVER_IP:8501`
+1. 打开数据看板: `http://YOUR_SERVER_IP:8501`
 2. 使用默认管理员账户登录：
    - 用户名：`admin`
    - 密码：`admin123`
@@ -22,7 +22,7 @@ docker-compose up -d
 
 ### 3. 访问服务
 
-- **Streamlit 看板**: `http://YOUR_SERVER_IP:8501`（需要登录）
+- **数据看板**: `http://YOUR_SERVER_IP:8501`（需要登录）
 - **noVNC 远程桌面**: `http://YOUR_SERVER_IP:6080`（用于扫码登录抖音）
 
 ### 4. 定时任务
@@ -80,7 +80,7 @@ output/daily/2026-06-11/compass_daily_2026-06-11_143000.json
 output/daily/2026-06-11/compass_daily_2026-06-11_143000.csv
 ```
 
-脚本完成后可以启动 Streamlit 看板：
+脚本完成后可以启动数据看板：
 
 ```bash
 ./run_dashboard.sh
@@ -98,11 +98,11 @@ http://127.0.0.1:8501
 
 登录后可以在侧边栏修改密码和管理用户。
 
-Streamlit 会直接读取 `output/daily/**/*.json`，新跑出的每日数据会自动进入看板。
+网页看板会直接读取 `output/daily/**/*.json`，新跑出的每日数据会自动进入看板。
 
 ## 订单数据看板
 
-Streamlit 主看板中已经集成“订单数据看板”页签，用于展示 `output/orders/` 目录下的订单数据，并支持在网页上手动采集昨日订单。
+订单采集结果继续保存在 `output/orders/` 目录，可在后续版本接入独立订单页面。
 
 也可以继续生成独立 HTML：
 

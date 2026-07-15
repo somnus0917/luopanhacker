@@ -17,7 +17,7 @@ docker-compose up -d
 ### 3. 访问服务
 
 - **noVNC 网页远程桌面**: `http://YOUR_SERVER_IP:6080`
-- **Streamlit 看板**: `http://YOUR_SERVER_IP:8501`
+- **数据看板**: `http://YOUR_SERVER_IP:8501`
 
 ## 首次使用
 
@@ -65,7 +65,7 @@ docker exec -it douyin-compass bash
 当登录态失效时：
 
 1. 系统会自动截图保存到 `output/login.png`
-2. Streamlit 看板会显示登录截图
+2. 数据看板会显示采集状态和远程浏览器入口
 3. 看板提供 noVNC 远程浏览器入口
 4. 用户通过 noVNC 扫码登录后，任务会自动继续
 
@@ -157,7 +157,7 @@ rm -rf session/*
 ```
 
 或者通过看板查看登录截图：
-- 访问 Streamlit 看板
+- 访问数据看板
 - 查看"采集状态"区域
 - 如果显示"login_required"，会展示登录截图
 - 点击"打开远程浏览器 noVNC"按钮进行登录

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090b16" />
+    <title>罗盘数据中心</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <div id="login-layer" class="login-layer" aria-hidden="true">
+      <form id="login-form" class="login-card">
+        <div class="brand-mark">◈</div>
+        <p class="eyebrow">DOUYIN COMMERCE</p>
+        <h1>罗盘数据中心</h1>
+        <p class="login-copy">请登录以访问经营数据</p>
+        <label>用户名<input name="username" autocomplete="username" required /></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+        <p id="login-error" class="form-error" role="alert"></p>
+        <button class="button button-primary" type="submit">登录</button>
+      </form>
+    </div>
+
+    <div id="app-shell" class="app-shell hidden">
+      <header class="topbar">
+        <a class="brand" href="#compass" aria-label="罗盘数据中心首页"><span class="brand-mark">◈</span><span>罗盘数据中心</span></a>
+        <div class="account"><span id="account-name"></span><button id="logout-button" class="text-button" type="button">退出</button></div>
+      </header>
+
+      <nav class="nav-tabs" aria-label="数据看板导航">
+        <button class="nav-tab" data-page="inventory" type="button">📦 <span>库存周转</span></button>
+        <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
+        <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
+        <button class="nav-tab" data-page="channel" type="button">🎬 <span>抖音渠道</span></button>
+        <button class="nav-tab" data-page="compass" type="button">◈ <span>罗盘数据</span></button>
+      </nav>
+
+      <main>
+        <section class="dashboard-page placeholder-page" id="page-inventory" data-page="inventory">
+          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>库存周转</h2><p>按品牌查看库存规模、库龄结构与近 7 天动销情况。</p></div>
+          <div class="metric-grid six" data-placeholder="总 SKU 数|有库存 SKU|总库存量|总库存金额|动销率|平均周转天数"></div>
+          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>库存数据接入后，将自动在此展示品牌汇总、库龄和动销结构。</span></div>
+        </section>
+
+        <section class="dashboard-page placeholder-page" id="page-operations" data-page="operations">
+          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>经营看板</h2><p>按日期、品牌和店铺查看成交、订单、退款与平台补贴。</p></div>
+          <div class="metric-grid six" data-placeholder="成交金额|成交订单量|退货金额|退货订单量|平台补贴|客单价"></div>
+          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>经营数据到位后，会按品牌和店铺自动汇总。</span></div>
+        </section>
+
+        <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">
+          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>结算看板</h2><p>按月核对品牌结算、返利、国补及平台补贴。</p></div>
+          <div class="metric-grid four" data-placeholder="月度结算总额|返利总额|国补总额|平台补贴总额"></div>
+          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>接入结算数据后，可直接按品牌核对金额与补贴构成。</span></div>
+        </section>
+
+        <section class="dashboard-page placeholder-page" id="page-channel" data-page="channel">
+          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>抖音渠道</h2><p>查看商品卡流量来源、点击率和商品成交表现。</p></div>
+          <div class="metric-grid four" data-placeholder="自然搜索|推荐流量|广告投放|短视频引流"></div>
+          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>渠道数据接入后，将展示来源占比、点击率和商品表现。</span></div>
+        </section>
+
+        <section class="dashboard-page" id="page-compass" data-page="compass">
+          <div class="page-heading compass-heading"><p class="eyebrow">DOUYIN COMPASS</p><h2>罗盘数据</h2><p id="compass-summary">正在读取已采集店铺的交易、流量、转化与结算指标。</p></div>
+          <div id="filters" class="filters"></div>
+          <div id="compass-content"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

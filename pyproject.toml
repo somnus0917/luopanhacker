@@ -7,7 +7,6 @@ dependencies = [
     "apscheduler",
     "pandas",
     "playwright",
-    "streamlit",
-    "streamlit-cookies-controller",
+    "Flask",
+    "gunicorn",
 ]
-

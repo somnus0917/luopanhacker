@@ -1,5 +1,5 @@
 playwright
 apscheduler
-streamlit
 pandas
-streamlit-cookies-controller
+Flask
+gunicorn

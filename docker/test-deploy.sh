@@ -28,7 +28,7 @@ required_files=(
     "docker/supervisord.conf"
     "requirements.txt"
     "daily_compass.py"
-    "streamlit_app.py"
+    "web_app.py"
 )
 
 for file in "${required_files[@]}"; do

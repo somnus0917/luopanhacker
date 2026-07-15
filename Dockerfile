@@ -80,7 +80,7 @@ RUN chmod +x /start.sh
 
 # 暴露端口
 # 6080: noVNC 网页远程桌面
-# 8501: Streamlit 看板
+# 8501: 独立网页看板
 # 5900: VNC 直连（可选）
 EXPOSE 6080 8501 5900
 
