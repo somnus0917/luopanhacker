@@ -71,4 +71,5 @@ docker-compose.override.yml
 
 config/users.json
 config/session_secret.txt
+config/wdt.env
 order_dashboard.html
