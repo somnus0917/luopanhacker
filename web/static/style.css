@@ -173,6 +173,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .status-panel { margin-top: 20px; }
 .status-panel summary { cursor: pointer; color: #dfe5f8; font-weight: 750; }
 .status-body { padding-top: 16px; color: var(--muted); font-size: 13px; }
+.status-log { margin-top: 14px; overflow: hidden; border: 1px solid rgba(125, 148, 211, .24); border-radius: 8px; background: #0a0e1d; }
+.status-log-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 0 10px; border-bottom: 1px solid rgba(125, 148, 211, .17); color: #cdd6ed; font-size: 11px; font-weight: 750; }
+.status-log-head small { color: var(--faint); font-size: 10px; font-weight: 600; }
+.status-log pre { max-height: 300px; margin: 0; padding: 10px; overflow: auto; color: #b6c3e6; font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.status-log-empty { margin: 14px 0 0; color: var(--faint); font-size: 12px; }
 .status-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .button { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border: 1px solid #596d9d; border-radius: 7px; color: #eaf0ff; background: #1b2647; font-weight: 750; }
 .button:hover { border-color: #9eb3e9; }

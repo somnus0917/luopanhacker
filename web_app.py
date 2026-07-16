@@ -31,6 +31,8 @@ SESSION_SECRET_FILE = CONFIG_DIR / "session_secret.txt"
 DAILY_LOCK = APP_DIR / "output" / "daily_job.lock"
 PROGRESS_LOG = APP_DIR / "output" / "progress.log"
 NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
+STATUS_LOG_MAX_BYTES = 24 * 1024
+STATUS_LOG_MAX_LINES = 160
 
 app = Flask(__name__, static_folder=None)
 app.config.update(
@@ -111,6 +113,24 @@ def start_manual_scrape():
         )
 
 
+def read_progress_log_tail():
+    """Return a bounded tail of the scraper terminal output for the status UI."""
+    if not PROGRESS_LOG.exists():
+        return ""
+
+    try:
+        with PROGRESS_LOG.open("rb") as log_file:
+            log_file.seek(0, os.SEEK_END)
+            size = log_file.tell()
+            log_file.seek(max(0, size - STATUS_LOG_MAX_BYTES))
+            content = log_file.read().decode("utf-8", errors="replace")
+        if size > STATUS_LOG_MAX_BYTES:
+            content = "… 已省略较早输出 …\n" + content.split("\n", 1)[-1]
+        return "\n".join(content.splitlines()[-STATUS_LOG_MAX_LINES:])
+    except OSError:
+        return ""
+
+
 @app.get("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -172,6 +192,7 @@ def status():
     data = read_status()
     data["job_running"] = DAILY_LOCK.exists()
     data["novnc_url"] = NOVNC_URL
+    data["terminal_output"] = read_progress_log_tail()
     return jsonify(data)
 
 
