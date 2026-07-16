@@ -10,6 +10,27 @@ const whole = (value) => Math.round(number(value)).toLocaleString("zh-CN");
 const ratio = (value) => `${(number(value) * 100).toFixed(2)}%`;
 const metricText = (key, value) => key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
 
+function compactMoney(cents) {
+  const yuan = number(cents) / 100;
+  const abs = Math.abs(yuan);
+  if (abs >= 1e8) return `¥${(yuan / 1e8).toFixed(abs >= 1e9 ? 1 : 2)}亿`;
+  if (abs >= 1e4) return `¥${(yuan / 1e4).toFixed(abs >= 1e5 ? 1 : 2)}万`;
+  return `¥${Math.round(yuan).toLocaleString("zh-CN")}`;
+}
+
+function chartAxisValue(metricKey, value) {
+  return metricKey.endsWith("_amt") ? compactMoney(value) : Math.round(number(value)).toLocaleString("zh-CN");
+}
+
+function chartDateTicks(dates, maxLabels = 6) {
+  if (dates.length <= maxLabels) return dates.map((date, index) => ({ date, index }));
+  const indexes = new Set();
+  for (let step = 0; step < maxLabels; step += 1) {
+    indexes.add(Math.round(step * (dates.length - 1) / (maxLabels - 1)));
+  }
+  return [...indexes].sort((a, b) => a - b).map((index) => ({ date: dates[index], index }));
+}
+
 function aggregate(records) {
   const totals = {};
   const sumKeys = ["income_amt", "pay_amt", "settlement_amt_pay_time", "pay_cnt", "pay_ucnt", "refund_amt", "platform_subsidy_amt", "talent_subsidy_amt", "pay_item_cnt", "product_show_ucnt", "product_click_ucnt", "expense_amt"];
@@ -131,14 +152,16 @@ function lineChart(records, metricKey, title) {
   const values = shops.map((shop) => dates.map((date) => number(records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey])));
   const totals = dates.map((date) => values.reduce((sum, series) => sum + number(series[dates.indexOf(date)]), 0));
   const max = Math.max(...totals, ...values.flat(), 1) * 1.08;
-  const width = 760, height = 238, pad = { l: 48, r: 16, t: 15, b: 30 };
+  const width = 760, height = 252, pad = { l: 68, r: 16, t: 15, b: 38 };
   const point = (value, index) => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - (value / max) * (height - pad.t - pad.b)];
   const path = (series) => series.map((value, index) => `${index ? "L" : "M"}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`).join(" ");
-  const grid = [0.25, 0.5, 0.75, 1].map((level) => { const y = height - pad.b - level * (height - pad.t - pad.b); return `<line class="chart-gridline" x1="${pad.l}" y1="${y}" x2="${width - pad.r}" y2="${y}"/><text class="chart-axis" x="0" y="${y + 4}">${metricKey.endsWith("_amt") ? `¥${Math.round(max * level / 100).toLocaleString()}` : Math.round(max * level).toLocaleString()}</text>`; }).join("");
-  const labels = dates.map((date, index) => `<text class="chart-axis" text-anchor="middle" x="${point(0, index)[0]}" y="${height - 8}">${date.slice(5)}</text>`).join("");
+  const levels = [0.25, 0.5, 0.75, 1];
+  const grid = levels.map((level) => { const y = height - pad.b - level * (height - pad.t - pad.b); return `<line class="chart-gridline" x1="${pad.l}" y1="${y}" x2="${width - pad.r}" y2="${y}"/>`; }).join("");
+  const yAxis = levels.map((level) => { const y = height - pad.b - level * (height - pad.t - pad.b); return `<span style="top:${(y / height * 100).toFixed(3)}%">${chartAxisValue(metricKey, max * level)}</span>`; }).join("");
+  const xAxis = chartDateTicks(dates).map(({ date, index }) => `<span style="left:${(point(0, index)[0] / width * 100).toFixed(3)}%">${date.slice(5)}</span>`).join("");
   const series = values.map((line, index) => `<path class="chart-line" stroke="${COLORS[index % COLORS.length]}" d="${path(line)}"/>`).join("");
   const legend = shops.map((shop, index) => `<span><i style="background:${COLORS[index % COLORS.length]}"></i>${escapeHtml(shop)}</span>`).join("");
-  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/>${labels}<rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
 }
 
 function bindLineChartHover(records) {

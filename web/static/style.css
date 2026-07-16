@@ -77,9 +77,14 @@ main { padding-top: 34px; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
 .panel-head h3 { margin: 0; font-size: 16px; letter-spacing: -.025em; }
 .panel-head span { color: var(--muted); font-size: 12px; }
-.chart { width: 100%; height: 238px; display: block; }
+.chart-frame { position: relative; }
+.chart { width: 100%; height: 252px; display: block; }
 .chart-gridline { stroke: rgba(139, 155, 205, .15); stroke-width: 1; }
-.chart-axis { fill: #8792b0; font-size: 10px; }
+.chart-y-axis, .chart-x-axis { position: absolute; inset: 0; pointer-events: none; color: #8792b0; font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-y-axis span { position: absolute; left: 0; width: 59px; transform: translateY(-50%); text-align: right; white-space: nowrap; }
+.chart-x-axis span { position: absolute; bottom: 4px; transform: translateX(-50%); white-space: nowrap; }
+.chart-x-axis span:first-child { transform: none; }
+.chart-x-axis span:last-child { transform: translateX(-100%); }
 .chart-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
 .chart-fill { opacity: .12; }
 .chart-hit-area { fill: transparent; cursor: crosshair; }
@@ -158,4 +163,4 @@ tbody tr:last-child td { border-bottom: 0; }
 .login-card .button { width: 100%; margin-top: 19px; }
 .form-error { min-height: 18px; margin: 12px 0 0; color: #ff718b; font-size: 13px; }
 @media (max-width: 1350px) { .metric-grid.six { grid-template-columns: repeat(3, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 24px; } .filters { grid-template-columns: 1fr; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 210px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
+@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 24px; } .filters { grid-template-columns: 1fr; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
