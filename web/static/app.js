@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), page: "operations", inventory: null, inventoryView: "overview" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), tableDate: "", tableShop: "", page: "operations", inventory: null, inventoryView: "overview" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -83,6 +83,30 @@ function operatingRatio(value) {
   return value === null || value === undefined ? "—" : `${number(value).toFixed(2)}×`;
 }
 
+function detailTableRecords(records) {
+  return records.filter((item) =>
+    (!state.tableDate || item.date === state.tableDate) &&
+    (!state.tableShop || item.shop_name === state.tableShop)
+  );
+}
+
+function detailTableFilters(records) {
+  const dates = [...new Set(records.map((item) => item.date))].sort();
+  const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  if (state.tableDate && !dates.includes(state.tableDate)) state.tableDate = "";
+  if (state.tableShop && !shops.includes(state.tableShop)) state.tableShop = "";
+  const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
+  return `<section class="table-filter-panel" aria-label="明细筛选"><div><strong>明细筛选</strong><span>仅筛选下方两张明细表，不影响汇总和趋势</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+}
+
+function bindDetailTableFilters() {
+  $$('[data-table-filter]').forEach((select) => select.addEventListener("change", () => {
+    if (select.dataset.tableFilter === "date") state.tableDate = select.value;
+    else state.tableShop = select.value;
+    renderOperations();
+  }));
+}
+
 function renderOperations() {
   const records = operationFilteredRecords();
   const target = $("#operations-content");
@@ -104,8 +128,10 @@ function renderOperations() {
   ];
   const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
   const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板复用罗盘已采集的日维度数据，不新增浏览器采集或第三方接口调用。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
-  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div><h3 class="section-title">店铺经营明细 <small>按日期与店铺查看关键经营指标</small></h3>${renderTable(records)}<h3 class="section-title">内容成交来源 <small>用于判断直播、商品卡与内容贡献</small></h3>${renderTable(records, true)}`;
+  const detailRecords = detailTableRecords(records);
+  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${detailTableFilters(records)}<h3 class="section-title">店铺经营明细 <small>按日期与店铺查看关键经营指标</small></h3>${renderTable(detailRecords)}<h3 class="section-title">内容成交来源 <small>用于判断直播、商品卡与内容贡献</small></h3>${renderTable(detailRecords, true)}`;
   bindLineChartHover(records);
+  bindDetailTableFilters();
 }
 
 function lineChart(records, metricKey, title) {
@@ -134,7 +160,7 @@ function bindLineChartHover(records) {
     const hoverLine = $(".chart-hover-line", chart);
     const dates = [...new Set(records.map((item) => item.date))].sort();
     const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-    const width = 760, leftPadding = 48, rightPadding = 16;
+    const width = 760, leftPadding = 68, rightPadding = 16;
 
     const hide = () => {
       tooltip.classList.add("hidden");

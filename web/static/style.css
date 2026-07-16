@@ -78,6 +78,14 @@ main { padding-top: 20px; }
 .chip.selected { color: #fff; background: rgba(240, 70, 105, .2); border-color: rgba(240, 70, 105, .6); }
 .section-title { margin: 32px 0 14px; font-size: 19px; font-weight: 800; letter-spacing: -.035em; }
 .section-title small { margin-left: 8px; color: var(--faint); font-size: 12px; font-weight: 600; }
+.table-filter-panel { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 16px; margin-top: 28px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-quiet); }
+.table-filter-panel > div { min-width: 210px; margin-right: auto; }
+.table-filter-panel strong, .table-filter-panel span { display: block; }
+.table-filter-panel strong { color: #e6ebfa; font-size: 13px; }
+.table-filter-panel span { margin-top: 4px; color: var(--faint); font-size: 11px; }
+.table-filter-panel label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.table-filter-panel select { min-width: 150px; height: 34px; padding: 0 28px 0 9px; overflow: hidden; color: #e8edfc; background: #1a213b; border: 1px solid var(--line-strong); border-radius: 6px; outline: none; text-overflow: ellipsis; }
+.table-filter-panel select:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240, 70, 105, .12); }
 .chart-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 16px; }
 .chart-stack { display: grid; gap: 16px; }
 .panel { min-width: 0; padding: 20px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
@@ -171,4 +179,4 @@ tbody tr:last-child td { border-bottom: 0; }
 .login-card .button { width: 100%; margin-top: 19px; }
 .form-error { min-height: 18px; margin: 12px 0 0; color: #ff718b; font-size: 13px; }
 @media (max-width: 1350px) { .metric-grid.six { grid-template-columns: repeat(3, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 18px; } .filter-accordion { grid-template-columns: 1fr; gap: 9px; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
+@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 18px; } .filter-accordion { grid-template-columns: 1fr; gap: 9px; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .table-filter-panel { align-items: stretch; } .table-filter-panel > div { width: 100%; } .table-filter-panel label, .table-filter-panel select { width: 100%; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
