@@ -36,7 +36,7 @@ button { cursor: pointer; }
 .nav-tab:hover { color: #e9edfb; background: rgba(117, 138, 197, .09); }
 .nav-tab.active { color: var(--pink); background: rgba(240, 70, 105, .13); }
 .nav-tab.active::after { content: ""; position: absolute; bottom: -2px; left: 0; right: 0; height: 3px; background: var(--pink); border-radius: 3px 3px 0 0; }
-main { padding-top: 34px; }
+main { padding-top: 20px; }
 .dashboard-page { display: none; animation: fade-in .24s ease; }
 .dashboard-page.active { display: block; }
 @keyframes fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
@@ -61,9 +61,17 @@ main { padding-top: 34px; }
 .empty-panel { display: grid; min-height: 300px; place-items: center; padding: 32px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 13px; background: linear-gradient(135deg, rgba(28, 35, 64, .68), rgba(16, 21, 41, .68)); }
 .empty-panel strong { display: block; margin-bottom: 9px; font-size: 17px; }
 .empty-panel span { color: var(--muted); font-size: 14px; }
-.filters { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 16px; margin-bottom: 24px; }
-.filter-group { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-quiet); }
-.filter-title { display: block; margin-bottom: 11px; color: var(--muted); font-size: 12px; font-weight: 750; }
+.collection-status { margin-bottom: 22px; }
+.collection-status .status-panel { margin-top: 0; }
+.filter-accordion { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.filter-disclosure { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-quiet); }
+.filter-disclosure summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 0 15px; cursor: pointer; color: #dfe6f9; font-size: 13px; font-weight: 750; list-style: none; }
+.filter-disclosure summary::-webkit-details-marker { display: none; }
+.filter-disclosure summary::after { content: "⌄"; margin-left: 3px; color: var(--muted); font-size: 15px; transition: transform .16s ease; }
+.filter-disclosure[open] summary { border-bottom: 1px solid var(--line); }
+.filter-disclosure[open] summary::after { transform: rotate(180deg); }
+.filter-disclosure summary small { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 650; }
+.filter-disclosure .chip-list { padding: 13px 15px 15px; }
 .chip-list { display: flex; flex-wrap: wrap; gap: 7px; }
 .chip { padding: 6px 9px; color: var(--muted); background: #1a213b; border: 1px solid transparent; border-radius: 6px; font-size: 12px; transition: .16s ease; }
 .chip:hover { border-color: var(--line-strong); color: var(--text); }
@@ -163,4 +171,4 @@ tbody tr:last-child td { border-bottom: 0; }
 .login-card .button { width: 100%; margin-top: 19px; }
 .form-error { min-height: 18px; margin: 12px 0 0; color: #ff718b; font-size: 13px; }
 @media (max-width: 1350px) { .metric-grid.six { grid-template-columns: repeat(3, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 24px; } .filters { grid-template-columns: 1fr; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
+@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 18px; } .filter-accordion { grid-template-columns: 1fr; gap: 9px; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }

@@ -1,4 +1,4 @@
-const state = { records: [], dates: new Set(), shops: new Set(), operationDates: new Set(), operationShops: new Set(), page: "compass", inventory: null, inventoryView: "overview" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), page: "operations", inventory: null, inventoryView: "overview" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -42,20 +42,10 @@ function aggregate(records) {
   return totals;
 }
 
-function filteredRecords() {
-  return state.records.filter((item) => state.dates.has(item.date) && state.shops.has(item.shop_name));
-}
-
 function latestRecords(records) {
   const dates = [...new Set(records.map((item) => item.date))].sort();
   const latest = dates.at(-1);
   return { date: latest, records: records.filter((item) => item.date === latest) };
-}
-
-function delta(current, previous, key) {
-  if (previous === undefined) return { text: "等待更多每日样本", kind: "" };
-  const amount = number(current) - number(previous);
-  return { text: `${amount >= 0 ? "+" : ""}${metricText(key, amount)}`, kind: amount > 0 ? "positive" : amount < 0 ? "negative" : "" };
 }
 
 function buildPlaceholders() {
@@ -71,20 +61,6 @@ function activatePage(name) {
   history.replaceState(null, "", `#${name}`);
 }
 
-function renderFilters() {
-  const dates = [...new Set(state.records.map((item) => item.date))].sort();
-  const shops = [...new Set(state.records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const buildGroup = (title, items, selected, kind) => `<div class="filter-group"><span class="filter-title">${title}</span><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></div>`;
-  $("#filters").innerHTML = buildGroup("业务日期", dates, state.dates, "date") + buildGroup("店铺", shops, state.shops, "shop");
-  $$("[data-filter]").forEach((button) => button.addEventListener("click", () => {
-    const selected = button.dataset.filter === "date" ? state.dates : state.shops;
-    const value = button.dataset.value;
-    if (selected.has(value) && selected.size > 1) selected.delete(value); else selected.add(value);
-    renderFilters();
-    renderCompass();
-  }));
-}
-
 function operationFilteredRecords() {
   return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name));
 }
@@ -92,7 +68,7 @@ function operationFilteredRecords() {
 function renderOperationsFilters() {
   const dates = [...new Set(state.records.map((item) => item.date))].sort();
   const shops = [...new Set(state.records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const buildGroup = (title, items, selected, kind) => `<div class="filter-group"><span class="filter-title">${title}</span><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></div>`;
+  const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure"><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
   $("#operations-filters").innerHTML = buildGroup("业务日期", dates, state.operationDates, "date") + buildGroup("店铺", shops, state.operationShops, "shop");
   $$('[data-operation-filter]').forEach((button) => button.addEventListener("click", () => {
     const selected = button.dataset.operationFilter === "date" ? state.operationDates : state.operationShops;
@@ -130,20 +106,6 @@ function renderOperations() {
   const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板复用罗盘已采集的日维度数据，不新增浏览器采集或第三方接口调用。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
   target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div><h3 class="section-title">店铺经营明细 <small>按日期与店铺查看关键经营指标</small></h3>${renderTable(records)}<h3 class="section-title">内容成交来源 <small>用于判断直播、商品卡与内容贡献</small></h3>${renderTable(records, true)}`;
   bindLineChartHover(records);
-}
-
-function metricCards(records) {
-  const { date, records: currentRecords } = latestRecords(records);
-  const allDates = [...new Set(records.map((item) => item.date))].sort();
-  const previousDate = allDates.at(-2);
-  const current = aggregate(currentRecords);
-  const previous = previousDate ? aggregate(records.filter((item) => item.date === previousDate)) : null;
-  const metrics = [["income_amt", "全店成交金额"], ["pay_amt", "全店支付金额"], ["settlement_amt_pay_time", "全店结算金额"], ["pay_cnt", "成交订单"], ["pay_ucnt", "成交人数"], ["refund_amt_rate", "退款率"]];
-  const cards = metrics.map(([key, label]) => {
-    const change = delta(current[key], previous?.[key], key);
-    return `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${metricText(key, current[key])}</div><div class="metric-delta ${change.kind}">${change.text}</div></article>`;
-  }).join("");
-  return { date, html: `<div class="metric-grid six">${cards}</div>` };
 }
 
 function lineChart(records, metricKey, title) {
@@ -331,18 +293,10 @@ async function renderStatus() {
   } catch { return ""; }
 }
 
-async function renderCompass() {
-  const records = filteredRecords();
-  const target = $("#compass-content");
-  if (!records.length) {
-    target.innerHTML = `<div class="empty-panel"><strong>当前筛选条件没有数据</strong><span>请选择至少一个业务日期和店铺。</span></div>`;
-    return;
-  }
-  const cards = metricCards(records);
-  $("#compass-summary").textContent = `最新业务日期：${cards.date} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺 · ${new Set(records.map((item) => item.date)).size} 个业务日`;
-  target.innerHTML = `${cards.html}<h3 class="section-title">趋势与对比</h3><div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "product_click_pay_ucnt_ratio", "点击支付率趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "最新日成交对比")}${barPanel(records, "pay_cnt", "最新日订单对比")}</div></div><h3 class="section-title">店铺明细</h3>${renderTable(records)}<h3 class="section-title">内容来源拆分</h3>${renderTable(records, true)}<div id="status-slot"></div>`;
-  bindLineChartHover(records);
-  $("#status-slot").innerHTML = await renderStatus();
+async function refreshCollectionStatus() {
+  const slot = $("#collection-status");
+  if (!slot) return;
+  slot.innerHTML = await renderStatus();
   $("#scrape-button")?.addEventListener("click", startScrape);
 }
 
@@ -360,14 +314,11 @@ async function loadCompass() {
   if (response.status === 401) return showLogin();
   const payload = await response.json();
   state.records = payload.records || [];
-  state.dates = new Set(state.records.map((item) => item.date));
-  state.shops = new Set(state.records.map((item) => item.shop_name));
   state.operationDates = new Set(state.records.map((item) => item.date));
   state.operationShops = new Set(state.records.map((item) => item.shop_name));
-  renderFilters();
-  renderCompass();
   renderOperationsFilters();
   renderOperations();
+  refreshCollectionStatus();
 }
 
 function showLogin() { $("#login-layer").classList.remove("hidden"); $("#app-shell").classList.add("hidden"); }
@@ -376,7 +327,7 @@ function showApp(user) { $("#login-layer").classList.add("hidden"); $("#app-shel
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  activatePage(["inventory", "operations", "settlement", "channel", "compass"].includes(desired) ? desired : "compass");
+  activatePage(["inventory", "operations", "settlement", "channel"].includes(desired) ? desired : "operations");
   $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
   $("#logout-button").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); showLogin(); });
   $("#login-form").addEventListener("submit", async (event) => {

@@ -23,7 +23,7 @@
 
     <div id="app-shell" class="app-shell hidden">
       <header class="topbar">
-        <a class="brand" href="#compass" aria-label="罗盘数据中心首页"><span class="brand-mark">◈</span><span>罗盘数据中心</span></a>
+        <a class="brand" href="#operations" aria-label="罗盘数据中心首页"><span class="brand-mark">◈</span><span>罗盘数据中心</span></a>
         <div class="account"><span id="account-name"></span><button id="logout-button" class="text-button" type="button">退出</button></div>
       </header>
 
@@ -32,10 +32,10 @@
         <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
         <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
         <button class="nav-tab" data-page="channel" type="button">🎬 <span>抖音渠道</span></button>
-        <button class="nav-tab" data-page="compass" type="button">◈ <span>罗盘数据</span></button>
       </nav>
 
       <main>
+        <div id="collection-status" class="collection-status"></div>
         <section class="dashboard-page" id="page-inventory" data-page="inventory">
           <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><h2>库存周转</h2><p id="inventory-summary">正在读取本地库存快照。</p></div>
           <div id="inventory-content"><div class="empty-panel"><strong>正在读取库存快照</strong><span>页面只从服务器本地快照读取，不会在浏览器中调用旺店通。</span></div></div>
@@ -43,7 +43,7 @@
 
         <section class="dashboard-page" id="page-operations" data-page="operations">
           <div class="page-heading"><p class="eyebrow">OPERATIONS OVERVIEW</p><h2>经营看板</h2><p id="operations-summary">正在读取罗盘日维度经营数据。</p></div>
-          <div id="operations-filters" class="filters"></div>
+          <div id="operations-filters" class="filter-accordion"></div>
           <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将复用罗盘已采集的日维度数据。</span></div></div>
         </section>
 
@@ -57,12 +57,6 @@
           <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>抖音渠道</h2><p>查看商品卡流量来源、点击率和商品成交表现。</p></div>
           <div class="metric-grid four" data-placeholder="自然搜索|推荐流量|广告投放|短视频引流"></div>
           <div class="empty-panel"><strong>该页暂未接入数据</strong><span>渠道数据接入后，将展示来源占比、点击率和商品表现。</span></div>
-        </section>
-
-        <section class="dashboard-page" id="page-compass" data-page="compass">
-          <div class="page-heading compass-heading"><p class="eyebrow">DOUYIN COMPASS</p><h2>罗盘数据</h2><p id="compass-summary">正在读取已采集店铺的交易、流量、转化与结算指标。</p></div>
-          <div id="filters" class="filters"></div>
-          <div id="compass-content"></div>
         </section>
       </main>
     </div>
