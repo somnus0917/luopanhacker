@@ -131,6 +131,15 @@ def read_progress_log_tail():
         return ""
 
 
+def status_payload(include_terminal_output=True):
+    data = read_status()
+    data["job_running"] = DAILY_LOCK.exists()
+    data["novnc_url"] = NOVNC_URL
+    if include_terminal_output:
+        data["terminal_output"] = read_progress_log_tail()
+    return data
+
+
 @app.get("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -174,7 +183,13 @@ def me():
 @app.get("/api/compass")
 @require_login
 def compass_data():
-    return jsonify({"records": get_dashboard_records(), "generated_at": datetime.now().isoformat(timespec="seconds")})
+    return jsonify(
+        {
+            "records": get_dashboard_records(),
+            "status": status_payload(include_terminal_output=False),
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
 
 
 @app.get("/api/inventory")
@@ -189,11 +204,7 @@ def inventory_data():
 @app.get("/api/status")
 @require_login
 def status():
-    data = read_status()
-    data["job_running"] = DAILY_LOCK.exists()
-    data["novnc_url"] = NOVNC_URL
-    data["terminal_output"] = read_progress_log_tail()
-    return jsonify(data)
+    return jsonify(status_payload())
 
 
 @app.post("/api/scrape")

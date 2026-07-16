@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), tableDate: "", tableShop: "", page: "operations", inventory: null, inventoryView: "overview" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 
@@ -312,32 +312,43 @@ async function loadInventory() {
   }
 }
 
-async function renderStatus() {
-  const unavailable = (message) => ({
-    html: `<details class="panel status-panel"><summary>采集状态 · 暂不可用</summary><div class="status-body"><p>${escapeHtml(message)}</p></div></details>`,
-    shouldRefresh: false,
-  });
-  try {
-    const response = await fetch("/api/status");
-    if (!response.ok) return unavailable("暂时无法读取采集状态，请稍后刷新页面。");
-    const status = await response.json();
-    const message = status.message || "暂无采集状态";
-    const terminal = status.terminal_output
-      ? `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><small>最近 ${escapeHtml(String(status.terminal_output.split("\n").length))} 行</small></div><pre>${escapeHtml(terminal)}</pre></div>`
-      : `<p class="status-log-empty">等待采集终端输出。</p>`;
-    const html = `<details class="panel status-panel"><summary>采集状态 · ${escapeHtml(status.state || "unknown")}</summary><div class="status-body"><p>${escapeHtml(message)}</p><p>最近成功采集：${escapeHtml(status.last_success_at || "—")}</p>${terminal}<div class="status-actions"><button id="scrape-button" class="button button-primary" ${status.job_running ? "disabled" : ""}>${status.job_running ? "采集任务进行中" : "手动补采今天数据"}</button><a class="button" href="${escapeHtml(status.novnc_url || "#")}" target="_blank" rel="noreferrer">打开远程浏览器</a></div></div></details>`;
-    return { html, shouldRefresh: Boolean(status.job_running) || ["manual_requested", "waiting_random", "running"].includes(status.state) };
-  } catch { return unavailable("网络连接异常，暂时无法读取采集状态。"); }
+function statusTerminal(status, logMessage) {
+  if (typeof status.terminal_output === "string" && status.terminal_output) {
+    const lineCount = status.terminal_output.split("\n").length;
+    return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><small>最近 ${escapeHtml(String(lineCount))} 行</small></div><pre>${escapeHtml(status.terminal_output)}</pre></div>`;
+  }
+  return `<p class="status-log-empty">${escapeHtml(logMessage || "展开后读取本次采集终端输出。")}</p>`;
 }
 
-async function refreshCollectionStatus() {
+function placeCollectionStatus(status, { open = false, logMessage = "" } = {}) {
   const slot = $("#collection-status");
   if (!slot) return;
-  window.clearTimeout(statusRefreshTimer);
-  const result = await renderStatus();
-  slot.innerHTML = result.html;
+  state.status = status;
+  const message = status.message || "暂无采集状态";
+  const html = `<details class="panel status-panel"><summary>采集状态 · ${escapeHtml(status.state || "unknown")}</summary><div class="status-body"><p>${escapeHtml(message)}</p><p>最近成功采集：${escapeHtml(status.last_success_at || "—")}</p>${statusTerminal(status, logMessage)}<div class="status-actions"><button id="scrape-button" class="button button-primary" ${status.job_running ? "disabled" : ""}>${status.job_running ? "采集任务进行中" : "手动补采今天数据"}</button><a class="button" href="${escapeHtml(status.novnc_url || "#")}" target="_blank" rel="noreferrer">打开远程浏览器</a></div></div></details>`;
+  slot.innerHTML = html;
+  const details = $(".status-panel", slot);
+  if (open) details.open = true;
   $("#scrape-button")?.addEventListener("click", startScrape);
-  if (result.shouldRefresh) statusRefreshTimer = window.setTimeout(refreshCollectionStatus, 5000);
+  details.addEventListener("toggle", () => {
+    if (details.open && !Object.prototype.hasOwnProperty.call(state.status || {}, "terminal_output")) {
+      refreshCollectionStatus({ open: true });
+    }
+  });
+}
+
+async function refreshCollectionStatus({ open = false } = {}) {
+  window.clearTimeout(statusRefreshTimer);
+  try {
+    const response = await fetch("/api/status");
+    if (!response.ok) throw new Error("status unavailable");
+    const status = await response.json();
+    placeCollectionStatus(status, { open });
+    const shouldRefresh = Boolean(status.job_running) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+    if (shouldRefresh && open) statusRefreshTimer = window.setTimeout(() => refreshCollectionStatus({ open: true }), 5000);
+  } catch {
+    if (state.status) placeCollectionStatus(state.status, { open, logMessage: "暂时无法读取终端输出，稍后可再次展开重试。" });
+  }
 }
 
 async function startScrape() {
@@ -347,7 +358,7 @@ async function startScrape() {
   const response = await fetch("/api/scrape", { method: "POST" });
   const payload = await response.json().catch(() => ({}));
   button.textContent = payload.message || payload.error || "请求已发送";
-  window.setTimeout(refreshCollectionStatus, 700);
+  window.setTimeout(() => refreshCollectionStatus({ open: true }), 700);
 }
 
 async function loadCompass() {
@@ -355,11 +366,12 @@ async function loadCompass() {
   if (response.status === 401) return showLogin();
   const payload = await response.json();
   state.records = payload.records || [];
+  state.status = payload.status || state.status;
   state.operationDates = new Set(state.records.map((item) => item.date));
   state.operationShops = new Set(state.records.map((item) => item.shop_name));
   renderOperationsFilters();
   renderOperations();
-  refreshCollectionStatus();
+  if (state.status) placeCollectionStatus(state.status);
 }
 
 function showLogin() { $("#login-layer").classList.remove("hidden"); $("#app-shell").classList.add("hidden"); }
