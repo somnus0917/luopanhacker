@@ -313,9 +313,13 @@ async function loadInventory() {
 }
 
 async function renderStatus() {
+  const unavailable = (message) => ({
+    html: `<details class="panel status-panel"><summary>采集状态 · 暂不可用</summary><div class="status-body"><p>${escapeHtml(message)}</p></div></details>`,
+    shouldRefresh: false,
+  });
   try {
     const response = await fetch("/api/status");
-    if (!response.ok) return { html: "", shouldRefresh: false };
+    if (!response.ok) return unavailable("暂时无法读取采集状态，请稍后刷新页面。");
     const status = await response.json();
     const message = status.message || "暂无采集状态";
     const terminal = status.terminal_output
@@ -323,7 +327,7 @@ async function renderStatus() {
       : `<p class="status-log-empty">等待采集终端输出。</p>`;
     const html = `<details class="panel status-panel"><summary>采集状态 · ${escapeHtml(status.state || "unknown")}</summary><div class="status-body"><p>${escapeHtml(message)}</p><p>最近成功采集：${escapeHtml(status.last_success_at || "—")}</p>${terminal}<div class="status-actions"><button id="scrape-button" class="button button-primary" ${status.job_running ? "disabled" : ""}>${status.job_running ? "采集任务进行中" : "手动补采今天数据"}</button><a class="button" href="${escapeHtml(status.novnc_url || "#")}" target="_blank" rel="noreferrer">打开远程浏览器</a></div></div></details>`;
     return { html, shouldRefresh: Boolean(status.job_running) || ["manual_requested", "waiting_random", "running"].includes(status.state) };
-  } catch { return { html: "", shouldRefresh: false }; }
+  } catch { return unavailable("网络连接异常，暂时无法读取采集状态。"); }
 }
 
 async function refreshCollectionStatus() {
