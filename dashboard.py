@@ -13,6 +13,7 @@ from db import init_db
 DB_PATH = Path(__file__).parent / "metrics.db"
 OUTPUT_PATH = Path(__file__).parent / "dashboard.html"
 DAILY_OUTPUT_ROOT = Path(__file__).parent / "output" / "daily"
+EXTERNAL_ORDERS_PATH = Path(__file__).parent / "output" / "external_orders" / "orders_daily.json"
 
 METRIC_LABELS = {
     "income_amt": "成交金额",
@@ -293,6 +294,42 @@ def parse_daily_dashboard_data(payloads):
             }
 
     return sorted(records_by_key.values(), key=lambda item: (item["date"], item["shop_name"]))
+
+
+def load_external_order_records():
+    """Load privacy-safe daily aggregates created by import_external_orders.py."""
+    if not EXTERNAL_ORDERS_PATH.exists():
+        return []
+    try:
+        payload = json.loads(EXTERNAL_ORDERS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    captured_at = payload.get("generated_at", "")
+    records = []
+    for item in payload.get("records", []):
+        shop_id = str(item.get("shop_id") or "")
+        shop_name = str(item.get("shop_name") or "")
+        date = parse_daily_date(item.get("date"))
+        metrics = item.get("metrics") or {}
+        if not shop_id or not shop_name or not date or not metrics:
+            continue
+        records.append(
+            {
+                "shop_id": shop_id,
+                "shop_name": shop_name,
+                "date": date,
+                "captured_at": captured_at,
+                "metrics": metrics,
+                "content": {},
+                "trend": {},
+                "source": "external_orders",
+                "source_key": item.get("source_key", "external_orders"),
+                "source_label": item.get("source_label", "订单明细"),
+                "source_file": item.get("source_file", ""),
+            }
+        )
+    return records
 
 
 def merge_records(*record_groups):
@@ -810,6 +847,7 @@ def get_dashboard_records():
     return merge_records(
         parse_dashboard_data(load_rows()),
         parse_daily_dashboard_data(load_daily_payloads()),
+        load_external_order_records(),
     )
 
 

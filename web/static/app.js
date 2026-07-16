@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 
@@ -10,6 +10,14 @@ const money = (cents) => `¥${(number(cents) / 100).toLocaleString("zh-CN", { mi
 const whole = (value) => Math.round(number(value)).toLocaleString("zh-CN");
 const ratio = (value) => `${(number(value) * 100).toFixed(2)}%`;
 const metricText = (key, value) => key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
+const hasValue = (value) => value !== null && value !== undefined && value !== "";
+const moneyOrDash = (value) => hasValue(value) ? money(value) : "—";
+const wholeOrDash = (value) => hasValue(value) ? whole(value) : "—";
+const ratioOrDash = (value) => hasValue(value) ? ratio(value) : "—";
+
+function recordSourceLabel(item) {
+  return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
+}
 
 function compactMoney(cents) {
   const yuan = number(cents) / 100;
@@ -63,16 +71,17 @@ function activatePage(name) {
 }
 
 function operationFilteredRecords() {
-  return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name));
+  return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name) && state.operationSources.has(recordSourceLabel(item)));
 }
 
 function renderOperationsFilters() {
   const dates = [...new Set(state.records.map((item) => item.date))].sort();
   const shops = [...new Set(state.records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const sources = [...new Set(state.records.map(recordSourceLabel))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure"><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
-  $("#operations-filters").innerHTML = buildGroup("业务日期", dates, state.operationDates, "date") + buildGroup("店铺", shops, state.operationShops, "shop");
+  $("#operations-filters").innerHTML = buildGroup("业务日期", dates, state.operationDates, "date") + buildGroup("店铺", shops, state.operationShops, "shop") + buildGroup("数据来源", sources, state.operationSources, "source");
   $$('[data-operation-filter]').forEach((button) => button.addEventListener("click", () => {
-    const selected = button.dataset.operationFilter === "date" ? state.operationDates : state.operationShops;
+    const selected = button.dataset.operationFilter === "date" ? state.operationDates : button.dataset.operationFilter === "shop" ? state.operationShops : state.operationSources;
     const value = button.dataset.value;
     if (selected.has(value) && selected.size > 1) selected.delete(value); else selected.add(value);
     renderOperationsFilters();
@@ -118,7 +127,7 @@ function renderOperations() {
   const totals = aggregate(records);
   const returnOnSpend = totals.expense_amt ? totals.pay_amt / totals.expense_amt : null;
   const latestDate = [...new Set(records.map((item) => item.date))].sort().at(-1);
-  $("#operations-summary").textContent = `数据来源：罗盘日维度数据 · 最新业务日期：${latestDate || "—"} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺、${new Set(records.map((item) => item.date)).size} 个业务日`;
+  $("#operations-summary").textContent = `数据来源：${[...new Set(records.map(recordSourceLabel))].join("、")} · 最新业务日期：${latestDate || "—"} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺、${new Set(records.map((item) => item.date)).size} 个业务日`;
   const metrics = [
     ["成交金额", money(totals.income_amt), "按成交口径汇总"],
     ["用户支付金额", money(totals.pay_amt), "按支付口径汇总"],
@@ -128,7 +137,7 @@ function renderOperations() {
     ["退款率", ratio(totals.refund_amt_rate), "按成交金额加权汇总"],
   ];
   const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
-  const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板复用罗盘已采集的日维度数据，不新增浏览器采集或第三方接口调用。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
+  const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板同时使用已采集的罗盘日维度数据和外部订单明细汇总；筛选“数据来源”可分别查看。</p><p>外部订单仅按支付日期与店铺汇总已支付、未关闭订单，不保存原始订单、买家、地址或联系方式；其未提供的流量、结算与内容归因指标显示为“—”。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
   const detailRecords = detailTableRecords(records);
   const tableCount = whole(detailRecords.length);
   const detailTables = `<details class="detail-table-disclosure"><summary><span>店铺经营明细</span><small>按日期与店铺查看关键经营指标 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords, true)}</div></details>`;
@@ -204,10 +213,12 @@ function barPanel(records, metricKey, title) {
 }
 
 function renderTable(records, content = false) {
-  const headers = content ? ["日期", "店铺", "直播", "商品卡", "图文/短视频", "短视频", "其他内容"] : ["日期", "店铺", "成交金额", "支付金额", "结算金额", "成交订单", "成交人数", "客单价", "曝光人数", "点击人数", "点击支付率", "退款率"];
+  const headers = content ? ["日期", "店铺", "来源", "直播", "商品卡", "图文/短视频", "短视频", "其他内容"] : ["日期", "店铺", "来源", "成交金额", "支付金额", "结算金额", "成交订单", "成交人数", "客单价", "曝光人数", "点击人数", "点击支付率", "退款率"];
   const rows = [...records].sort((a, b) => `${b.date}${b.shop_name}`.localeCompare(`${a.date}${a.shop_name}`, "zh-CN")).map((item) => {
     const metrics = item.metrics || {}, source = item.content || {};
-    const cells = content ? [item.date, item.shop_name, money(source.live), money(source.product_card), money(source.artc_video), money(source.video), money(source.other_content)] : [item.date, item.shop_name, money(metrics.income_amt), money(metrics.pay_amt), money(metrics.settlement_amt_pay_time), whole(metrics.pay_cnt), whole(metrics.pay_ucnt), money(metrics.per_usr_pay_amt), whole(metrics.product_show_ucnt), whole(metrics.product_click_ucnt), ratio(metrics.product_click_pay_ucnt_ratio), ratio(metrics.refund_amt_rate)];
+    const cells = content
+      ? [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(source.live), moneyOrDash(source.product_card), moneyOrDash(source.artc_video), moneyOrDash(source.video), moneyOrDash(source.other_content)]
+      : [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(metrics.income_amt), moneyOrDash(metrics.pay_amt), moneyOrDash(metrics.settlement_amt_pay_time), wholeOrDash(metrics.pay_cnt), wholeOrDash(metrics.pay_ucnt), moneyOrDash(metrics.per_usr_pay_amt), wholeOrDash(metrics.product_show_ucnt), wholeOrDash(metrics.product_click_ucnt), ratioOrDash(metrics.product_click_pay_ucnt_ratio), ratioOrDash(metrics.refund_amt_rate)];
     return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
   return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
@@ -369,6 +380,7 @@ async function loadCompass() {
   state.status = payload.status || state.status;
   state.operationDates = new Set(state.records.map((item) => item.date));
   state.operationShops = new Set(state.records.map((item) => item.shop_name));
+  state.operationSources = new Set(state.records.map(recordSourceLabel));
   renderOperationsFilters();
   renderOperations();
   if (state.status) placeCollectionStatus(state.status);
