@@ -1,4 +1,4 @@
-const state = { records: [], dates: new Set(), shops: new Set(), page: "compass", inventory: null, inventoryView: "overview" };
+const state = { records: [], dates: new Set(), shops: new Set(), operationDates: new Set(), operationShops: new Set(), page: "compass", inventory: null, inventoryView: "overview" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -62,6 +62,53 @@ function renderFilters() {
     renderFilters();
     renderCompass();
   }));
+}
+
+function operationFilteredRecords() {
+  return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name));
+}
+
+function renderOperationsFilters() {
+  const dates = [...new Set(state.records.map((item) => item.date))].sort();
+  const shops = [...new Set(state.records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const buildGroup = (title, items, selected, kind) => `<div class="filter-group"><span class="filter-title">${title}</span><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></div>`;
+  $("#operations-filters").innerHTML = buildGroup("业务日期", dates, state.operationDates, "date") + buildGroup("店铺", shops, state.operationShops, "shop");
+  $$('[data-operation-filter]').forEach((button) => button.addEventListener("click", () => {
+    const selected = button.dataset.operationFilter === "date" ? state.operationDates : state.operationShops;
+    const value = button.dataset.value;
+    if (selected.has(value) && selected.size > 1) selected.delete(value); else selected.add(value);
+    renderOperationsFilters();
+    renderOperations();
+  }));
+}
+
+function operatingRatio(value) {
+  return value === null || value === undefined ? "—" : `${number(value).toFixed(2)}×`;
+}
+
+function renderOperations() {
+  const records = operationFilteredRecords();
+  const target = $("#operations-content");
+  if (!records.length) {
+    target.innerHTML = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请选择至少一个业务日期和店铺。</span></div>`;
+    return;
+  }
+  const totals = aggregate(records);
+  const returnOnSpend = totals.expense_amt ? totals.pay_amt / totals.expense_amt : null;
+  const latestDate = [...new Set(records.map((item) => item.date))].sort().at(-1);
+  $("#operations-summary").textContent = `数据来源：罗盘日维度数据 · 最新业务日期：${latestDate || "—"} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺、${new Set(records.map((item) => item.date)).size} 个业务日`;
+  const metrics = [
+    ["成交金额", money(totals.income_amt), "按成交口径汇总"],
+    ["用户支付金额", money(totals.pay_amt), "按支付口径汇总"],
+    ["结算金额", money(totals.settlement_amt_pay_time), "按支付时间结算口径"],
+    ["成交订单", whole(totals.pay_cnt), `成交件数：${whole(totals.pay_item_cnt)}`],
+    ["投产比", operatingRatio(returnOnSpend), totals.expense_amt ? `支付金额 ÷ 投放消耗 ${money(totals.expense_amt)}` : "暂无投放消耗数据"],
+    ["退款率", ratio(totals.refund_amt_rate), "按成交金额加权汇总"],
+  ];
+  const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+  const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板复用罗盘已采集的日维度数据，不新增浏览器采集或第三方接口调用。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
+  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div><h3 class="section-title">店铺经营明细 <small>按日期与店铺查看关键经营指标</small></h3>${renderTable(records)}<h3 class="section-title">内容成交来源 <small>用于判断直播、商品卡与内容贡献</small></h3>${renderTable(records, true)}`;
+  bindLineChartHover(records);
 }
 
 function metricCards(records) {
@@ -292,8 +339,12 @@ async function loadCompass() {
   state.records = payload.records || [];
   state.dates = new Set(state.records.map((item) => item.date));
   state.shops = new Set(state.records.map((item) => item.shop_name));
+  state.operationDates = new Set(state.records.map((item) => item.date));
+  state.operationShops = new Set(state.records.map((item) => item.shop_name));
   renderFilters();
   renderCompass();
+  renderOperationsFilters();
+  renderOperations();
 }
 
 function showLogin() { $("#login-layer").classList.remove("hidden"); $("#app-shell").classList.add("hidden"); }

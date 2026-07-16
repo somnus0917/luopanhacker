@@ -41,10 +41,10 @@
           <div id="inventory-content"><div class="empty-panel"><strong>正在读取库存快照</strong><span>页面只从服务器本地快照读取，不会在浏览器中调用旺店通。</span></div></div>
         </section>
 
-        <section class="dashboard-page placeholder-page" id="page-operations" data-page="operations">
-          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>经营看板</h2><p>按日期、品牌和店铺查看成交、订单、退款与平台补贴。</p></div>
-          <div class="metric-grid six" data-placeholder="成交金额|成交订单量|退货金额|退货订单量|平台补贴|客单价"></div>
-          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>经营数据到位后，会按品牌和店铺自动汇总。</span></div>
+        <section class="dashboard-page" id="page-operations" data-page="operations">
+          <div class="page-heading"><p class="eyebrow">OPERATIONS OVERVIEW</p><h2>经营看板</h2><p id="operations-summary">正在读取罗盘日维度经营数据。</p></div>
+          <div id="operations-filters" class="filters"></div>
+          <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将复用罗盘已采集的日维度数据。</span></div></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">

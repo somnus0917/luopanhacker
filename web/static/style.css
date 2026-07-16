@@ -136,6 +136,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .sales-column i { display: block; width: 100%; min-height: 3px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, #62b8ff, #287fcb); }
 .inventory-note h3 { margin: 0; font-size: 16px; }
 .inventory-note p { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.operations-note h3 { margin: 0; font-size: 16px; }
+.operations-note p { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 .status-panel { margin-top: 20px; }
 .status-panel summary { cursor: pointer; color: #dfe5f8; font-weight: 750; }
 .status-body { padding-top: 16px; color: var(--muted); font-size: 13px; }
