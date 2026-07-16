@@ -129,7 +129,9 @@ function renderOperations() {
   const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
   const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板复用罗盘已采集的日维度数据，不新增浏览器采集或第三方接口调用。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
   const detailRecords = detailTableRecords(records);
-  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${detailTableFilters(records)}<h3 class="section-title">店铺经营明细 <small>按日期与店铺查看关键经营指标</small></h3>${renderTable(detailRecords)}<h3 class="section-title">内容成交来源 <small>用于判断直播、商品卡与内容贡献</small></h3>${renderTable(detailRecords, true)}`;
+  const tableCount = whole(detailRecords.length);
+  const detailTables = `<details class="detail-table-disclosure"><summary><span>店铺经营明细</span><small>按日期与店铺查看关键经营指标 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords, true)}</div></details>`;
+  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${detailTableFilters(records)}<div class="detail-table-stack">${detailTables}</div>`;
   bindLineChartHover(records);
   bindDetailTableFilters();
 }
