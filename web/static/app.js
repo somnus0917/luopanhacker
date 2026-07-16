@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 
@@ -87,6 +87,80 @@ function renderOperationsFilters() {
     renderOperationsFilters();
     renderOperations();
   }));
+}
+
+function importTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function importDateRange(value) {
+  return Array.isArray(value) && value.length === 2 ? `${value[0]} 至 ${value[1]}` : "—";
+}
+
+function renderOrderImportPanel() {
+  const target = $("#order-import-panel");
+  if (!target) return;
+  const preview = state.orderPreview;
+  const batches = state.orderImports?.batches || [];
+  const summary = state.orderImports?.summary || {};
+  const message = state.orderImportMessage ? `<p class="order-import-message">${escapeHtml(state.orderImportMessage)}</p>` : "";
+  const previewBlock = preview ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
+  const history = batches.length ? `<div class="import-history"><div class="import-history-head"><strong>导入历史</strong><span>累计 ${whole(summary.orders)} 单 · ${money(summary.pay_amt)}</span></div>${batches.map((batch) => `<div class="import-history-row"><div><strong>${escapeHtml((batch.source_labels || []).join("、"))}</strong><span>${escapeHtml(importTime(batch.created_at))} · ${escapeHtml(importDateRange(batch.date_range))} · 新增 ${whole(batch.added_orders)} 单</span></div><button class="text-button import-delete" type="button" data-delete-order-import="${escapeHtml(batch.id)}">撤销</button></div>`).join("")}</div>` : `<p class="import-help">暂无线上导入批次。可上传喵速达、天猫订单明细；抖店罗盘继续由现有采集任务更新。</p>`;
+  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>上传 Excel → 预览去重 → 确认写入</small></summary><div class="order-import-body"><form id="order-upload-form" class="order-upload-form"><label class="file-picker"><span>选择订单明细（.xlsx，可多选）</span><input id="order-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${message}${previewBlock}${history}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>`;
+  $("#order-upload-form")?.addEventListener("submit", previewOrderImport);
+  $("[data-commit-order-import]")?.addEventListener("click", commitOrderImport);
+  $("[data-cancel-order-preview]")?.addEventListener("click", () => { state.orderPreview = null; state.orderImportMessage = "已取消本次预览，尚未写入任何数据。"; renderOrderImportPanel(); });
+  $$('[data-delete-order-import]').forEach((button) => button.addEventListener("click", () => deleteOrderImport(button.dataset.deleteOrderImport)));
+}
+
+async function loadOrderImports() {
+  const response = await fetch("/api/orders/imports");
+  if (response.status === 401) return showLogin();
+  state.orderImports = await response.json();
+  renderOrderImportPanel();
+}
+
+async function previewOrderImport(event) {
+  event.preventDefault();
+  const files = $("#order-upload-files")?.files;
+  if (!files?.length) return;
+  const button = $("#order-upload-form button");
+  button.disabled = true;
+  button.textContent = "正在解析…";
+  state.orderImportMessage = "";
+  const response = await fetch("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    state.orderImportMessage = payload.error || "文件解析失败，请检查格式后重试。";
+  } else {
+    state.orderPreview = payload;
+    state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
+  }
+  renderOrderImportPanel();
+}
+
+async function commitOrderImport() {
+  if (!state.orderPreview?.preview_token) return;
+  const response = await fetch("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    state.orderImportMessage = payload.error || "写入失败，请重新预览。";
+    renderOrderImportPanel();
+    return;
+  }
+  state.orderPreview = null;
+  state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
+  await Promise.all([loadCompass(), loadOrderImports()]);
+}
+
+async function deleteOrderImport(batchId) {
+  if (!batchId || !window.confirm("撤销后，该批次导入的数据将从经营看板移除。确定继续吗？")) return;
+  const response = await fetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+  const payload = await response.json().catch(() => ({}));
+  state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : (payload.error || "撤销失败，请稍后重试。");
+  await Promise.all([loadCompass(), loadOrderImports()]);
 }
 
 function operatingRatio(value) {
@@ -404,10 +478,11 @@ async function initialise() {
     $("#login-error").textContent = "";
     showApp(payload);
     loadCompass();
+    loadOrderImports();
     loadInventory();
   });
   const me = await fetch("/api/me").then((response) => response.json());
-  if (me.authenticated) { showApp(me); loadCompass(); loadInventory(); } else showLogin();
+  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); } else showLogin();
 }
 
 initialise();

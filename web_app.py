@@ -17,8 +17,16 @@ from functools import wraps
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, session
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from dashboard import get_dashboard_records
+from external_order_store import (
+    ImportValidationError,
+    commit_preview,
+    delete_batch,
+    preview_upload,
+    public_imports,
+)
 from inventory_data import load_inventory_dashboard
 from task_status import read_status, write_status
 
@@ -33,6 +41,7 @@ PROGRESS_LOG = APP_DIR / "output" / "progress.log"
 NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
 STATUS_LOG_MAX_BYTES = 24 * 1024
 STATUS_LOG_MAX_LINES = 160
+MAX_ORDER_UPLOAD_BYTES = 30 * 1024 * 1024
 
 app = Flask(__name__, static_folder=None)
 app.config.update(
@@ -41,6 +50,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.getenv("SESSION_COOKIE_SECURE", "false").lower() == "true",
+    MAX_CONTENT_LENGTH=MAX_ORDER_UPLOAD_BYTES,
 )
 
 
@@ -140,6 +150,11 @@ def status_payload(include_terminal_output=True):
     return data
 
 
+@app.errorhandler(RequestEntityTooLarge)
+def upload_too_large(_error):
+    return jsonify({"error": "上传文件总大小不能超过 30 MB"}), 413
+
+
 @app.get("/")
 def index():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -190,6 +205,43 @@ def compass_data():
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }
     )
+
+
+@app.get("/api/orders/imports")
+@require_login
+def order_imports():
+    return jsonify(public_imports())
+
+
+@app.post("/api/orders/preview")
+@require_login
+def preview_order_import():
+    try:
+        return jsonify(preview_upload(request.files.getlist("files")))
+    except ImportValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.post("/api/orders/imports")
+@require_login
+def commit_order_import():
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get("preview_token", "")).strip()
+    if not token:
+        return jsonify({"error": "缺少导入预览凭据，请重新选择文件"}), 400
+    try:
+        return jsonify(commit_preview(token)), 201
+    except ImportValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.delete("/api/orders/imports/<batch_id>")
+@require_login
+def remove_order_import(batch_id):
+    try:
+        return jsonify({"deleted": delete_batch(batch_id)})
+    except ImportValidationError as exc:
+        return jsonify({"error": str(exc)}), 404
 
 
 @app.get("/api/inventory")

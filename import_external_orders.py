@@ -63,7 +63,13 @@ def source_config(path):
     raise ValueError(f"无法识别订单来源文件：{path.name}")
 
 
-def parse_workbook(path):
+def parse_workbook_orders(path):
+    """Return de-duplicated order rows for one workbook.
+
+    Order identifiers are returned only in memory so the import ledger can
+    calculate an irreversible de-duplication digest.  They are never written
+    to the dashboard snapshot or returned by the web API.
+    """
     config = source_config(path)
     frame = pd.read_excel(path)
     columns = frame.columns
@@ -102,37 +108,63 @@ def parse_workbook(path):
         .agg(order_amount_yuan=("amount_yuan", "sum"), order_count=("order_id", "nunique"), item_count=("quantity", "sum"))
     )
 
-    records = []
-    for row in summary.to_dict("records"):
-        shop_name = row["shop"]
-        records.append(
+    orders = []
+    for row in deduplicated.to_dict("records"):
+        orders.append(
             {
-                "shop_id": f"external:{config['key']}:{shop_name}",
-                "shop_name": shop_name,
                 "date": row["date"],
-                "metrics": {
-                    "income_amt": round(float(row["order_amount_yuan"]) * 100, 2),
-                    "pay_amt": round(float(row["order_amount_yuan"]) * 100, 2),
-                    "pay_cnt": int(row["order_count"]),
-                    "pay_item_cnt": int(row["item_count"]),
-                },
-                "content": {},
-                "trend": {},
-                "source": "external_orders",
+                "shop_name": row["shop"],
+                "order_id": str(row["order_id"]),
+                "amount_cent": round(float(row["amount_yuan"]) * 100, 2),
+                "quantity": int(row["quantity"]),
                 "source_key": config["key"],
                 "source_label": config["label"],
                 "source_file": path.name,
             }
         )
 
-    return records, {
+    return orders, {
         "source_key": config["key"],
         "source_label": config["label"],
         "source_file": path.name,
         "input_rows": int(len(frame)),
         "accepted_order_rows": int(len(accepted)),
-        "daily_records": int(len(records)),
+        "accepted_orders": int(len(orders)),
+        "daily_records": int(len(summary)),
     }
+
+
+def daily_records_from_orders(orders):
+    """Aggregate in-memory order rows into the public daily dashboard shape."""
+    summary = {}
+    for order in orders:
+        key = (order["date"], order["shop_name"], order["source_key"])
+        item = summary.setdefault(
+            key,
+            {
+                "shop_id": f"external:{order['source_key']}:{order['shop_name']}",
+                "shop_name": order["shop_name"],
+                "date": order["date"],
+                "metrics": {"income_amt": 0, "pay_amt": 0, "pay_cnt": 0, "pay_item_cnt": 0},
+                "content": {},
+                "trend": {},
+                "source": "external_orders",
+                "source_key": order["source_key"],
+                "source_label": order["source_label"],
+                "source_file": order.get("source_file", ""),
+            },
+        )
+        metrics = item["metrics"]
+        metrics["income_amt"] += order["amount_cent"]
+        metrics["pay_amt"] += order["amount_cent"]
+        metrics["pay_cnt"] += 1
+        metrics["pay_item_cnt"] += order["quantity"]
+    return sorted(summary.values(), key=lambda item: (item["date"], item["shop_name"], item["source_key"]))
+
+
+def parse_workbook(path):
+    orders, metadata = parse_workbook_orders(path)
+    return daily_records_from_orders(orders), metadata
 
 
 def write_snapshot(records, imports, output_path):
