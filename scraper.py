@@ -77,13 +77,37 @@ async def wait_network_quiet(page, timeout=30000):
         pass
 
 
-async def click_with_pacing(locator, label):
-    target = locator.first
-    await target.wait_for(state="visible", timeout=30000)
+async def first_visible(locator, timeout=30000):
+    """返回 locator 中第一个真正可见的节点，跳过页面预渲染的隐藏副本。"""
+    deadline = asyncio.get_running_loop().time() + timeout / 1000
+    while True:
+        count = await locator.count()
+        for index in range(count):
+            candidate = locator.nth(index)
+            try:
+                if await candidate.is_visible():
+                    return candidate
+            except Exception:
+                # 页面切换时节点可能刚好被销毁，下一轮再试即可。
+                continue
+
+        if asyncio.get_running_loop().time() >= deadline:
+            break
+        await asyncio.sleep(0.25)
+
+    return None
+
+
+async def click_with_pacing(locator, label, *, hover=True, force=False):
+    target = await first_visible(locator)
+    if target is None:
+        raise RuntimeError(f"未找到可见的可点击元素: {label}")
+
     await human_pause(reason=f"正在点击 {label}")
-    await target.hover()
-    await human_pause(0.5, 1.4)
-    await target.click(timeout=10000)
+    if hover:
+        await target.hover()
+        await human_pause(0.5, 1.4)
+    await target.click(timeout=10000, force=force)
     print(f"已点击: {label}", flush=True)
     await human_pause(*AFTER_CLICK_DELAY_RANGE, reason=f"等待 {label} 点击后的页面响应")
 
@@ -97,6 +121,24 @@ async def wait_shop_modal(page, timeout=15000):
         return True
     except Exception:
         return False
+
+
+async def dismiss_transient_overlay(page):
+    """收起账号弹层或下拉菜单，避免它遮住店铺选择入口。"""
+    if await wait_shop_modal(page, timeout=500):
+        return
+
+    dialogs = page.locator('[role="dialog"]')
+    for index in range(await dialogs.count()):
+        dialog = dialogs.nth(index)
+        try:
+            if await dialog.is_visible():
+                print("检测到非店铺选择弹层，尝试收起后继续", flush=True)
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.8)
+                return
+        except Exception:
+            continue
 
 
 async def click_point_with_pacing(page, x, y, label):
@@ -218,10 +260,14 @@ async def ensure_shop_modal(page):
     if await wait_shop_modal(page, timeout=1000):
         return
 
+    await dismiss_transient_overlay(page)
+    if await wait_shop_modal(page, timeout=1000):
+        return
+
     async def click_visible_switch_entry():
         for text in VIEW_SWITCH_TEXTS:
             switch_entry = page.get_by_text(text, exact=False)
-            if await switch_entry.count():
+            if await first_visible(switch_entry, timeout=1000):
                 await click_with_pacing(switch_entry, text)
                 if await wait_shop_modal(page):
                     return True
@@ -244,12 +290,8 @@ async def ensure_shop_modal(page):
 async def visible_view_switch_entry(page):
     for text in VIEW_SWITCH_TEXTS:
         switch_entry = page.get_by_text(text, exact=False)
-        if await switch_entry.count():
-            try:
-                await switch_entry.first.wait_for(state="visible", timeout=1000)
-                return True
-            except Exception:
-                pass
+        if await first_visible(switch_entry, timeout=1000):
+            return True
     return False
 
 
@@ -265,7 +307,8 @@ async def switch_shop(page, shop_name):
     if await target.count() != 1:
         raise RuntimeError(f"弹窗中未唯一匹配目标店铺: {shop_name}")
 
-    await click_with_pacing(target, shop_name)
+    # 店铺名称在选择弹窗内无需 hover；hover 会在账号弹层残留时被遮罩拦截。
+    await click_with_pacing(target, shop_name, hover=False)
     await page.wait_for_load_state("domcontentloaded", timeout=30000)
     await wait_network_quiet(page)
     await human_pause(3.0, 6.0)
