@@ -12,6 +12,8 @@ SESSION_DIR = Path(__file__).parent / "session"
 BROWSERS_DIR = Path(__file__).parent / ".playwright-browsers"
 TARGET_SHOPS = (
     "华硕凡飞笔记本电脑专卖店",
+    "惠普办公设备旗舰店",
+    "HYPERX极度未知凡飞专卖店",
     "acer宏碁凡飞专卖店",
 )
 IGNORE_URL_PARTS = (
