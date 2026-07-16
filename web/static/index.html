@@ -36,10 +36,9 @@
       </nav>
 
       <main>
-        <section class="dashboard-page placeholder-page" id="page-inventory" data-page="inventory">
-          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>库存周转</h2><p>按品牌查看库存规模、库龄结构与近 7 天动销情况。</p></div>
-          <div class="metric-grid six" data-placeholder="总 SKU 数|有库存 SKU|总库存量|总库存金额|动销率|平均周转天数"></div>
-          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>库存数据接入后，将自动在此展示品牌汇总、库龄和动销结构。</span></div>
+        <section class="dashboard-page" id="page-inventory" data-page="inventory">
+          <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><h2>库存周转</h2><p id="inventory-summary">正在读取本地库存快照。</p></div>
+          <div id="inventory-content"><div class="empty-panel"><strong>正在读取库存快照</strong><span>页面只从服务器本地快照读取，不会在浏览器中调用旺店通。</span></div></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-operations" data-page="operations">

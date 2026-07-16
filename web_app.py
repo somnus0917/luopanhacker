@@ -19,6 +19,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, session
 
 from dashboard import get_dashboard_records
+from inventory_data import load_inventory_dashboard
 from task_status import read_status, write_status
 
 
@@ -154,6 +155,15 @@ def me():
 @require_login
 def compass_data():
     return jsonify({"records": get_dashboard_records(), "generated_at": datetime.now().isoformat(timespec="seconds")})
+
+
+@app.get("/api/inventory")
+@require_login
+def inventory_data():
+    payload = load_inventory_dashboard()
+    if payload is None:
+        return jsonify({"error": "暂无库存快照，请由服务器运行只读库存同步"}), 404
+    return jsonify(payload)
 
 
 @app.get("/api/status")

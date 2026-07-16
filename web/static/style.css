@@ -105,6 +105,37 @@ td { color: #dfe4f3; font-variant-numeric: tabular-nums; }
 td:first-child, th:first-child, td:nth-child(2), th:nth-child(2) { text-align: left; }
 tbody tr:hover { background: rgba(68, 91, 151, .12); }
 tbody tr:last-child td { border-bottom: 0; }
+.inventory-alert td { color: #ff9aae; }
+.inventory-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.inventory-tab { min-height: 34px; padding: 0 14px; color: var(--muted); background: #12182c; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; font-weight: 750; transition: .16s ease; }
+.inventory-tab:hover { color: var(--text); border-color: var(--line-strong); }
+.inventory-tab.active { color: #fff; background: rgba(240, 70, 105, .18); border-color: rgba(240, 70, 105, .65); }
+.inventory-first-title { margin-top: 0; }
+.health-panel { padding-bottom: 17px; }
+.health-row { display: grid; grid-template-columns: minmax(130px, 1.15fr) minmax(100px, 2fr) auto; gap: 12px; align-items: center; min-height: 37px; }
+.health-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.health-row-head strong { color: #dfe5f6; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.health-row > span { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.health-track { height: 7px; overflow: hidden; background: #0d1222; border-radius: 99px; }
+.health-track i { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+.health-track i.out_of_stock, .health-pill.out_of_stock { background: var(--pink); }
+.health-track i.urgent, .health-pill.urgent { background: #ff657f; }
+.health-track i.replenish, .health-pill.replenish { background: var(--orange); }
+.health-track i.healthy, .health-pill.healthy { background: var(--green); }
+.health-track i.high, .health-pill.high { background: var(--yellow); }
+.health-track i.overstock, .health-pill.overstock { background: var(--purple); }
+.health-track i.no_movement, .health-pill.no_movement { background: #7784a9; }
+.health-track i.unavailable, .health-pill.unavailable { background: #43506e; }
+.health-pill { display: inline-flex; align-items: center; max-width: 142px; min-height: 22px; padding: 0 7px; overflow: hidden; border-radius: 99px; color: #fff; font-size: 11px; font-weight: 800; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.sales-trend { min-height: 210px; }
+.sales-days { display: flex; align-items: end; min-height: 136px; gap: 12px; padding: 0 8px; }
+.sales-day { display: grid; grid-template-rows: auto 86px auto; flex: 1; min-width: 36px; gap: 7px; text-align: center; }
+.sales-day > span, .sales-day > strong { color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+.sales-day > strong { color: #dbe4f9; font-size: 11px; }
+.sales-column { display: flex; align-items: end; height: 86px; padding: 0 3px; border-bottom: 1px solid rgba(132, 151, 207, .18); }
+.sales-column i { display: block; width: 100%; min-height: 3px; border-radius: 5px 5px 0 0; background: linear-gradient(180deg, #62b8ff, #287fcb); }
+.inventory-note h3 { margin: 0; font-size: 16px; }
+.inventory-note p { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 .status-panel { margin-top: 20px; }
 .status-panel summary { cursor: pointer; color: #dfe5f8; font-weight: 750; }
 .status-body { padding-top: 16px; color: var(--muted); font-size: 13px; }
@@ -125,4 +156,4 @@ tbody tr:last-child td { border-bottom: 0; }
 .login-card .button { width: 100%; margin-top: 19px; }
 .form-error { min-height: 18px; margin: 12px 0 0; color: #ff718b; font-size: 13px; }
 @media (max-width: 1350px) { .metric-grid.six { grid-template-columns: repeat(3, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 24px; } .filters { grid-template-columns: 1fr; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 210px; } }
+@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 24px; } .filters { grid-template-columns: 1fr; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 210px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } }
