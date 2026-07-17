@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 
@@ -365,6 +365,91 @@ function coverageDays(value) {
   return value === null || value === undefined ? "—" : `${Math.ceil(number(value))} 天`;
 }
 
+const INVENTORY_HEALTH_ORDER = ["out_of_stock", "urgent", "replenish", "healthy", "high", "overstock", "no_movement", "unavailable"];
+const INVENTORY_HEALTH_NAMES = {
+  out_of_stock: "已缺货",
+  urgent: "紧急补货",
+  replenish: "需安排补货",
+  healthy: "库存健康",
+  high: "库存偏高",
+  overstock: "库存积压",
+  no_movement: "近 7 日未动销",
+  unavailable: "暂无可售",
+};
+
+function inventoryWarehouseOptions(payload) {
+  return [...new Set((payload.rows || []).map((item) => item.warehouse_name || "未命名仓库"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function inventoryFilteredRows(payload) {
+  const warehouses = inventoryWarehouseOptions(payload);
+  if (state.inventoryWarehouse && !warehouses.includes(state.inventoryWarehouse)) state.inventoryWarehouse = "";
+  return state.inventoryWarehouse
+    ? (payload.rows || []).filter((item) => (item.warehouse_name || "未命名仓库") === state.inventoryWarehouse)
+    : (payload.rows || []);
+}
+
+function inventoryGroup(rows, keyName) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const name = row[keyName] || "未归类";
+    const group = groups.get(name) || { name, sku_records: 0, stock_num: 0, available_num: 0, sales_7d: 0, inbound_30d: 0, negative_available: 0 };
+    group.sku_records += 1;
+    ["stock_num", "available_num", "sales_7d", "inbound_30d"].forEach((key) => group[key] += number(row[key]));
+    group.negative_available += number(row.available_num) < 0 ? 1 : 0;
+    groups.set(name, group);
+  });
+  return [...groups.values()].map((group) => ({
+    ...group,
+    turnover_days: group.sales_7d ? group.available_num / (group.sales_7d / 7) : null,
+  })).sort((a, b) => number(b.available_num) - number(a.available_num));
+}
+
+function inventoryHealth(rows) {
+  return INVENTORY_HEALTH_ORDER.map((key) => {
+    const members = rows.filter((row) => row.health_key === key);
+    return {
+      key,
+      name: INVENTORY_HEALTH_NAMES[key],
+      sku_records: members.length,
+      available_num: members.reduce((sum, row) => sum + number(row.available_num), 0),
+    };
+  });
+}
+
+function inventorySummary(rows) {
+  const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== undefined && number(row.sales_7d) > 0);
+  const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
+  const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);
+  return {
+    sku_records: rows.length,
+    distinct_skus: new Set(rows.map((row) => row.spec_no).filter(Boolean)).size,
+    salable_skus: new Set(rows.filter((row) => number(row.available_num) > 0).map((row) => row.spec_no).filter(Boolean)).size,
+    stock_num: rows.reduce((sum, row) => sum + number(row.stock_num), 0),
+    available_num: available,
+    sales_7d: sales7d,
+    inbound_30d: rows.reduce((sum, row) => sum + number(row.inbound_30d), 0),
+    negative_available: rows.filter((row) => number(row.available_num) < 0).length,
+    turnover_days: sales7d ? available / (sales7d / 7) : null,
+    average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
+    replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
+    no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
+    overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
+  };
+}
+
+function inventorySalesTrend(payload) {
+  return state.inventoryWarehouse
+    ? (payload.sales_trend_7d_by_warehouse?.[state.inventoryWarehouse] || [])
+    : (payload.sales_trend_7d || []);
+}
+
+function inventoryWarehouseFilter(payload) {
+  const warehouses = inventoryWarehouseOptions(payload);
+  const options = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
+  return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong><span>筛选总览、补货、积压与 SKU 明细</span></div><label>仓库<select data-inventory-filter="warehouse">${options}</select></label></section>`;
+}
+
 function inventoryBarPanel(items, title, key, formatter = whole) {
   const top = [...items].sort((a, b) => number(b[key]) - number(a[key])).slice(0, 10);
   const max = Math.max(...top.map((item) => number(item[key])), 1);
@@ -418,8 +503,13 @@ function inventoryNotes(payload) {
 function renderInventory(payload, view = state.inventoryView) {
   state.inventory = payload;
   state.inventoryView = view;
-  const summary = payload.summary || {}, rows = payload.rows || [];
-  $("#inventory-summary").textContent = `快照时间：${payload.captured_at || "—"} · 页面只读取服务器本地库存快照`;
+  const rows = inventoryFilteredRows(payload);
+  const summary = inventorySummary(rows);
+  const warehouses = inventoryGroup(rows, "warehouse_name");
+  const health = inventoryHealth(rows);
+  const salesTrend = inventorySalesTrend(payload);
+  const scopeLabel = state.inventoryWarehouse || "全部仓库";
+  $("#inventory-summary").textContent = `快照时间：${payload.captured_at || "—"} · 当前范围：${scopeLabel} · 页面只读取服务器本地库存快照`;
   const metrics = [
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
@@ -431,7 +521,7 @@ function renderInventory(payload, view = state.inventoryView) {
   const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
   const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
   const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
-  const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(payload.health || [])}${salesTrendPanel(payload.sales_trend_7d || [])}</div><div class="chart-stack">${inventoryBarPanel(payload.warehouses || [], "仓库可发库存排行", "available_num")}${inventoryNotes(payload)}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
+  const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}${inventoryNotes(payload)}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
   const content = view === "replenish"
     ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}${inventoryNotes(payload)}`
     : view === "overstock"
@@ -439,7 +529,11 @@ function renderInventory(payload, view = state.inventoryView) {
       : view === "detail"
         ? `<h3 class="section-title inventory-first-title">SKU 明细 <small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}${inventoryNotes(payload)}`
         : overview;
-  $("#inventory-content").innerHTML = `${inventoryTabs(view)}${content}`;
+  $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
+  $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
+    state.inventoryWarehouse = event.currentTarget.value;
+    renderInventory(payload);
+  });
   $$('[data-inventory-view]').forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView)));
 }
 

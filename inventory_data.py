@@ -147,6 +147,11 @@ def load_inventory_dashboard() -> dict[str, Any] | None:
         item["replenish_qty"] = replenish_qty
         rows.append(item)
 
+    warehouse_names = {
+        str(row.get("warehouse_no") or ""): str(row.get("warehouse_name") or row.get("warehouse_no") or "未命名仓库")
+        for row in rows
+    }
+
     def build_group(key_name: str) -> list[dict[str, Any]]:
         groups: dict[str, dict[str, Any]] = {}
         for row in rows:
@@ -182,10 +187,18 @@ def load_inventory_dashboard() -> dict[str, Any] | None:
         })
 
     sales_by_date = defaultdict(float)
+    sales_by_warehouse_date: dict[str, defaultdict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in snapshot.get("sales_7d", []):
         if row.get("date"):
-            sales_by_date[row["date"]] += number(row.get("quantity"))
+            quantity = number(row.get("quantity"))
+            sales_by_date[row["date"]] += quantity
+            warehouse_name = warehouse_names.get(str(row.get("warehouse_no") or ""), "未命名仓库")
+            sales_by_warehouse_date[warehouse_name][row["date"]] += quantity
     sales_trend_7d = [{"date": date, "quantity": rounded(quantity)} for date, quantity in sorted(sales_by_date.items())]
+    sales_trend_7d_by_warehouse = {
+        warehouse: [{"date": date, "quantity": rounded(quantity)} for date, quantity in sorted(values.items())]
+        for warehouse, values in sales_by_warehouse_date.items()
+    }
     coverage_rows = [row["coverage_days"] for row in rows if row["coverage_days"] is not None and row["sales_7d"] > 0]
     summary = {
         "sku_records": len(rows),
@@ -215,6 +228,7 @@ def load_inventory_dashboard() -> dict[str, Any] | None:
         "brands": build_group("brand_name"),
         "health": health,
         "sales_trend_7d": sales_trend_7d,
+        "sales_trend_7d_by_warehouse": sales_trend_7d_by_warehouse,
         "settings": {"target_cover_days": TARGET_COVER_DAYS, "safety_stock_days": SAFETY_STOCK_DAYS},
         "history": history,
         "rows": rows,

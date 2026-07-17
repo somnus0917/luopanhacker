@@ -179,6 +179,7 @@ tbody tr:hover { background: rgba(68, 91, 151, .12); }
 tbody tr:last-child td { border-bottom: 0; }
 .inventory-alert td { color: #ff9aae; }
 .inventory-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.inventory-filter { margin-top: 0; margin-bottom: 18px; }
 .inventory-tab { min-height: 34px; padding: 0 14px; color: var(--muted); background: #12182c; border: 1px solid var(--line); border-radius: 7px; font-size: 13px; font-weight: 750; transition: .16s ease; }
 .inventory-tab:hover { color: var(--text); border-color: var(--line-strong); }
 .inventory-tab.active { color: #fff; background: rgba(240, 70, 105, .18); border-color: rgba(240, 70, 105, .65); }
