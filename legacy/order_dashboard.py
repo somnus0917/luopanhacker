@@ -1,12 +1,16 @@
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import html as html_module
 
-ORDERS_ROOT = Path(__file__).parent / "output" / "orders"
-OUTPUT_PATH = Path(__file__).parent / "order_dashboard.html"
+APP_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(APP_DIR))
+
+ORDERS_ROOT = APP_DIR / "output" / "orders"
+OUTPUT_PATH = APP_DIR / "order_dashboard.html"
 
 BRAND_KEYWORDS = {
     "acer": "Acer/宏碁",

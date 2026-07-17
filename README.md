@@ -100,23 +100,27 @@ http://127.0.0.1:8501
 
 登录后可以在侧边栏修改密码和管理用户。
 
-网页看板会直接读取 `output/daily/**/*.json`，新跑出的每日数据会自动进入看板。
+当前生产看板走 Rust API sidecar 和 SQLite 优先读取；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。Flask 只负责登录、静态文件和代理 Rust API。前端源码位于 `apps/web/src/main.ts`，运行时静态产物仍提交在 `web/static/`。
 
-## 订单数据看板
-
-订单采集结果继续保存在 `output/orders/` 目录，可在后续版本接入独立订单页面。
-
-也可以继续生成独立 HTML：
+部署后可以用一条命令检查核心状态：
 
 ```bash
-./run_order_dashboard.sh
+docker exec -it douyin-compass luopan-worker-rs doctor
 ```
 
-订单看板支持：
-- 按店铺、品牌、订单状态筛选
-- 搜索订单号/商品关键词
-- 导出 CSV
-- 订单状态统计
+前端本地开发可以在 Flask 运行时启动 Vite：
+
+```bash
+cd apps/web
+pnpm install
+pnpm dev
+```
+
+## 订单数据
+
+订单明细上传、预览、确认写入和撤销都在当前数据看板中完成。Excel 解析仍由 Python 完成，确认写入与撤销默认优先走 Rust API。
+
+旧的独立 HTML/Streamlit 入口已归档到 `legacy/`，不再作为生产路径。
 
 ## 低频策略
 

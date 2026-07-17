@@ -26,6 +26,10 @@ venv/
 ENV/
 env/
 .env
+.env.backup.*
+dashboard.html
+order_dashboard.html
+node_modules/
 
 # Playwright
 .playwright-browsers/
@@ -57,6 +61,9 @@ output/
 
 # UV
 .uv-cache/
+
+# Rust
+target/
 
 # Streamlit
 .streamlit/
