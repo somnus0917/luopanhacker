@@ -58,7 +58,6 @@ ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
 ENV UV_PYTHON_DOWNLOADS=0
-ENV UV_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
 ENV PATH="/app/.venv/bin:${PATH}"
 
 # Lockfile-first dependency installation. `uv.lock` is committed, so a Docker
