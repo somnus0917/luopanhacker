@@ -1,0 +1,15 @@
+{
+  "name": "luopan-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc src/main.ts --target ES2022 --module none --lib ES2022,DOM,DOM.Iterable --skipLibCheck --outFile ../../web/static/app.js",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}
