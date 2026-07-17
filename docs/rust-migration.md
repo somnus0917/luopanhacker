@@ -132,8 +132,8 @@ ported to Rust.
 
 Manual and scheduled compass scraping can also enter through `luopan-worker-rs
 compass-scrape`. Rust owns the task entrypoint and the shared task-status
-writer used by `task_status.py`; Python still owns the Playwright browser
-automation.
+writer used by `apps/scraper_py/task_status.py`; Python still owns the
+Playwright browser automation.
 
 `luopan-worker-rs storage-sync` creates the Rust SQLite schema and syncs current
 JSON-derived operations records, order-import history, task status, and the

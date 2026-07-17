@@ -5,7 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-OUTPUT_DIR = Path(__file__).parent / "output"
+APP_DIR = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = APP_DIR / "output"
 STATE_PATH = OUTPUT_DIR / "task_status.json"
 LOGIN_SCREENSHOT = OUTPUT_DIR / "login.png"
 
@@ -52,10 +53,10 @@ def write_status_rust(**kwargs):
             command.extend(["--field", f"{key}={status_field_value(value)}"])
 
     environment = os.environ.copy()
-    environment.setdefault("LUOPAN_APP_DIR", str(Path(__file__).parent))
+    environment.setdefault("LUOPAN_APP_DIR", str(APP_DIR))
     completed = subprocess.run(
         command,
-        cwd=str(Path(__file__).parent),
+        cwd=str(APP_DIR),
         env=environment,
         text=True,
         capture_output=True,

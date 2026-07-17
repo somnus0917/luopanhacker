@@ -8,31 +8,33 @@ aggregation over time, while Python remains the Playwright scraper runtime.
 These files drive official Python Playwright browser automation or marketplace
 page capture. They should stay Python unless the scraper strategy changes.
 
-- `daily_compass.py`
-- `scraper.py`
-- `scheduler_run.py`
-- `douyin_orders.py`
-- `tmall_msd_orders.py`
-- `order_scheduler_run.py`
-- `discover_page.py`
-- `inspect_switch.py`
+- `apps/scraper_py/daily_compass.py`
+- `apps/scraper_py/scraper.py`
+- `apps/scraper_py/scheduler_run.py`
+- `apps/scraper_py/douyin_orders.py`
+- `apps/scraper_py/tmall_msd_orders.py`
+- `apps/scraper_py/order_scheduler_run.py`
+- `apps/scraper_py/discover_page.py`
+- `apps/scraper_py/inspect_switch.py`
 
 ## Port To Rust
 
 These files contain API, state, storage, dashboard aggregation, or import logic.
 They are good Rust migration candidates.
 
-- `web_app.py`: keep only login/static/proxy shell until the shell itself moves
-  to Rust or a standalone frontend host.
-- `task_status.py`: thin Python shim that writes through `crates/jobs`.
-- `inventory_data.py`: being replaced by `crates/inventory`.
-- `inventory_sync.py`: keep Python page/session dependency for now; move pure
+- `apps/dashboard_py/web_app.py`: keep only login/static/proxy shell until the
+  shell itself moves to Rust or a standalone frontend host.
+- `apps/scraper_py/task_status.py`: thin Python shim that writes through
+  `crates/jobs`.
+- `apps/legacy_metrics_py/inventory_data.py`: being replaced by
+  `crates/inventory`.
+- `apps/inventory_py/inventory_sync.py`: keep Python WDT sync for now; move pure
   validation and snapshot writing later.
-- `external_order_store.py`
-- `import_external_orders.py`
-- `dashboard.py`
-- `db.py`
-- `auth.py`
+- `apps/orders_py/external_order_store.py`
+- `apps/orders_py/import_external_orders.py`
+- `apps/legacy_metrics_py/dashboard.py`
+- `apps/legacy_metrics_py/db.py`
+- `apps/legacy_metrics_py/auth.py`
 
 ## Legacy UI Entrypoints
 

@@ -4,17 +4,22 @@ import csv
 import json
 import os
 import re
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
-from scraper import BROWSERS_DIR, human_pause, wait_network_quiet
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from apps.scraper_py.scraper import BROWSERS_DIR, human_pause, wait_network_quiet
 
 
 ORDER_LIST_URL = "https://fxg.jinritemai.com/ffa/morder/order/list"
-OUTPUT_ROOT = Path(__file__).parent / "output" / "orders"
+OUTPUT_ROOT = APP_DIR / "output" / "orders"
 DEFAULT_STORAGE_STATE = OUTPUT_ROOT / "playwright_storage_state.json"
 TARGET_SHOPS = (
     "华硕凡飞笔记本电脑专卖店",

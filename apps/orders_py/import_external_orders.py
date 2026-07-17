@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 
-APP_DIR = Path(__file__).parent
+APP_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = APP_DIR / "output" / "external_orders" / "orders_daily.json"
 CLOSED_STATUS_WORDS = ("关闭", "取消", "作废", "退款")
 

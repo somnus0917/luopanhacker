@@ -76,7 +76,7 @@ docker exec -it douyin-compass bash
 docker exec -it douyin-compass bash
 
 # 手动执行采集（带随机延迟）
-python scheduler_run.py --login-timeout-minutes 30
+python apps/scraper_py/scheduler_run.py --login-timeout-minutes 30
 
 # 或直接执行（无随机延迟）
 ./docker/run_daily.sh
@@ -128,7 +128,7 @@ docker-compose up -d
 
 ### 修改抓取店铺
 
-编辑 `scraper.py` 中的 `TARGET_SHOPS` 变量：
+编辑 `apps/scraper_py/scraper.py` 中的 `TARGET_SHOPS` 变量：
 
 ```python
 TARGET_SHOPS = (

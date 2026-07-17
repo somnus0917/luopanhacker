@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 
-SNAPSHOT_PATH = Path(__file__).parent / "output" / "inventory" / "inventory_snapshot.json"
+APP_DIR = Path(__file__).resolve().parents[2]
+SNAPSHOT_PATH = APP_DIR / "output" / "inventory" / "inventory_snapshot.json"
 HISTORY_DIR = SNAPSHOT_PATH.parent / "history"
 ACTUAL_TURNOVER_WINDOW_DAYS = 30
 

@@ -17,10 +17,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from import_external_orders import daily_records_from_orders, parse_workbook_orders
+from apps.orders_py.import_external_orders import daily_records_from_orders, parse_workbook_orders
 
 
-APP_DIR = Path(__file__).parent
+APP_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = APP_DIR / "output" / "external_orders"
 LEDGER_PATH = OUTPUT_DIR / "import_ledger.json"
 SNAPSHOT_PATH = OUTPUT_DIR / "orders_daily.json"

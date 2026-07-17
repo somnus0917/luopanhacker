@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import Mock, patch
 
-import task_status
+from apps.scraper_py import task_status
 
 
 class TaskStatusTest(unittest.TestCase):

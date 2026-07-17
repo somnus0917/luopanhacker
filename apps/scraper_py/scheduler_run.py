@@ -7,10 +7,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from daily_compass import parse_args, run, save_results
-from task_status import write_status
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
-LOCK_PATH = Path(__file__).parent / "output" / "daily_job.lock"
+from apps.scraper_py.daily_compass import parse_args, run, save_results
+from apps.scraper_py.task_status import write_status
+
+LOCK_PATH = APP_DIR / "output" / "daily_job.lock"
 LOCK_EXPIRE_SECONDS = 3 * 3600  # 3 小时过期
 
 

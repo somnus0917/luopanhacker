@@ -9,8 +9,9 @@ from urllib.parse import unquote
 
 import streamlit as st
 
-USERS_FILE = Path(__file__).parent / "config" / "users.json"
-SESSION_SECRET_FILE = Path(__file__).parent / "config" / "session_secret.txt"
+APP_DIR = Path(__file__).resolve().parents[2]
+USERS_FILE = APP_DIR / "config" / "users.json"
+SESSION_SECRET_FILE = APP_DIR / "config" / "session_secret.txt"
 SESSION_TIMEOUT_HOURS = 24
 SESSION_COOKIE_NAME = "compass_session"
 

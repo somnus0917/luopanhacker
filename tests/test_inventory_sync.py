@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import inventory_data
-import inventory_sync
+from apps.inventory_py import inventory_sync
+from apps.legacy_metrics_py import inventory_data
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")

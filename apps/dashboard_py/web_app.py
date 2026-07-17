@@ -11,6 +11,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from functools import wraps
@@ -22,13 +23,16 @@ from urllib.request import Request, urlopen
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from external_order_store import (
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from apps.orders_py.external_order_store import (
     ImportValidationError,
     preview_upload,
 )
 
 
-APP_DIR = Path(__file__).parent
 STATIC_DIR = APP_DIR / "web" / "static"
 CONFIG_DIR = APP_DIR / "config"
 USERS_FILE = CONFIG_DIR / "users.json"

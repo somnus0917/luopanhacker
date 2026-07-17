@@ -18,7 +18,7 @@ if [[ "${SCHEDULED_SCRAPE_RUST_WORKER:-true}" == "true" ]] && command -v luopan-
   PYTHONUNBUFFERED=1 luopan-worker-rs compass-scrape \
     --login-timeout-minutes 30
 else
-  PYTHONUNBUFFERED=1 "$PYTHON_BIN" scheduler_run.py \
+  PYTHONUNBUFFERED=1 "$PYTHON_BIN" apps/scraper_py/scheduler_run.py \
     --login-timeout-minutes 30
 fi
 

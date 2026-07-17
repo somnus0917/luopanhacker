@@ -148,7 +148,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::InventorySync { refresh_only } => {
-            let mut args = vec!["inventory_sync.py".to_string()];
+            let mut args = vec!["apps/inventory_py/inventory_sync.py".to_string()];
             if refresh_only {
                 args.push("--refresh-only".to_string());
             }
@@ -161,7 +161,7 @@ async fn main() -> Result<()> {
             run_python(
                 &paths,
                 vec![
-                    "scheduler_run.py".to_string(),
+                    "apps/scraper_py/scheduler_run.py".to_string(),
                     "--random-delay-seconds".to_string(),
                     random_delay_seconds.to_string(),
                     "--login-timeout-minutes".to_string(),

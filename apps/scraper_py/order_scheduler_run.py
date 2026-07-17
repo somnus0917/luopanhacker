@@ -5,10 +5,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from douyin_orders import parse_args, run
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
+from apps.scraper_py.douyin_orders import parse_args, run
 
-APP_DIR = Path(__file__).parent
 ORDERS_ROOT = APP_DIR / "output" / "orders"
 LOCK_PATH = ORDERS_ROOT / "order_job.lock"
 STATUS_PATH = ORDERS_ROOT / "order_job_status.json"

@@ -26,6 +26,10 @@ rsync -a \
   "$archive_root/" "$APP_DIR/"
 
 cd "$APP_DIR"
-python3 -m py_compile web_app.py dashboard.py scheduler_run.py scraper.py
+python3 -m py_compile \
+  apps/dashboard_py/web_app.py \
+  apps/legacy_metrics_py/dashboard.py \
+  apps/scraper_py/scheduler_run.py \
+  apps/scraper_py/scraper.py
 bash -n docker/cron_scrape.sh
 docker compose up -d --build compass-dashboard

@@ -5,6 +5,7 @@ import json
 import os
 import random
 import re
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
@@ -12,7 +13,11 @@ from urllib.parse import urlencode
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
-from scraper import BROWSERS_DIR, human_pause, wait_network_quiet
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from apps.scraper_py.scraper import BROWSERS_DIR, human_pause, wait_network_quiet
 
 
 ORDER_PAGE_URL = (
@@ -23,7 +28,6 @@ DETAIL_URL = "https://order.cbbs.tmall.com/portal/v1/order/detail"
 ITEMS_DETAIL_URL = "https://order.cbbs.tmall.com/portal/v1/order/items/detail"
 ORDER_LIST_API_URL = "https://order.cbbs.tmall.com/portal/v1/order/orders"
 
-APP_DIR = Path(__file__).parent
 OUTPUT_ROOT = APP_DIR / "output" / "orders"
 SESSION_DIR = APP_DIR / "session" / "tmall_msd_orders"
 

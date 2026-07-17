@@ -5,7 +5,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-STATE_DIR = Path(os.getenv("LUOPAN_STATE_DIR", Path(__file__).parent / "state"))
+APP_DIR = Path(__file__).resolve().parents[2]
+STATE_DIR = Path(os.getenv("LUOPAN_STATE_DIR", APP_DIR / "state"))
 DB_PATH = STATE_DIR / "metrics.db"
 
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-import web_app
+from apps.dashboard_py import web_app
 
 
 class WebAppRustProxyTest(unittest.TestCase):

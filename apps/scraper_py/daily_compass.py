@@ -4,13 +4,18 @@ import csv
 import json
 import os
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from playwright.async_api import async_playwright
 
-from scraper import (
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+from apps.scraper_py.scraper import (
     AFTER_CLICK_DELAY_RANGE,
     BROWSERS_DIR,
     SESSION_DIR,
@@ -21,10 +26,10 @@ from scraper import (
     switch_shop,
     wait_network_quiet,
 )
-from task_status import LOGIN_SCREENSHOT, write_status
+from apps.scraper_py.task_status import LOGIN_SCREENSHOT, write_status
 
 
-OUTPUT_ROOT = Path(__file__).parent / "output" / "daily"
+OUTPUT_ROOT = APP_DIR / "output" / "daily"
 METRIC_LABELS = (
     "成交金额",
     "用户支付金额",

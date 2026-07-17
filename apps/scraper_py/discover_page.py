@@ -6,8 +6,9 @@ from playwright.async_api import async_playwright
 
 
 ROOT_URL = "https://compass.jinritemai.com/"
-SESSION_DIR = Path(__file__).parent / "session"
-BROWSERS_DIR = Path(__file__).parent / ".playwright-browsers"
+APP_DIR = Path(__file__).resolve().parents[2]
+SESSION_DIR = APP_DIR / "session"
+BROWSERS_DIR = APP_DIR / ".playwright-browsers"
 
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(BROWSERS_DIR))
 

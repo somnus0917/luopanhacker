@@ -5,11 +5,12 @@ import random
 from pathlib import Path
 
 
+APP_DIR = Path(__file__).resolve().parents[2]
 HOME_URL = "https://compass.jinritemai.com/"
 OVERVIEW_URL = "https://compass.jinritemai.com/overview"
 SHOP_URL = "https://compass.jinritemai.com/shop"
-SESSION_DIR = Path(__file__).parent / "session"
-BROWSERS_DIR = Path(__file__).parent / ".playwright-browsers"
+SESSION_DIR = APP_DIR / "session"
+BROWSERS_DIR = APP_DIR / ".playwright-browsers"
 TARGET_SHOPS = (
     "华硕凡飞笔记本电脑专卖店",
     "惠普办公设备旗舰店",

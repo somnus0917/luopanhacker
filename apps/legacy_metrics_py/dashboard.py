@@ -8,13 +8,14 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from db import init_db
+from apps.legacy_metrics_py.db import init_db
 
+APP_DIR = Path(__file__).resolve().parents[2]
 
-DB_PATH = Path(os.getenv("LUOPAN_STATE_DIR", Path(__file__).parent / "state")) / "metrics.db"
-OUTPUT_PATH = Path(__file__).parent / "dashboard.html"
-DAILY_OUTPUT_ROOT = Path(__file__).parent / "output" / "daily"
-EXTERNAL_ORDERS_PATH = Path(__file__).parent / "output" / "external_orders" / "orders_daily.json"
+DB_PATH = Path(os.getenv("LUOPAN_STATE_DIR", APP_DIR / "state")) / "metrics.db"
+OUTPUT_PATH = APP_DIR / "dashboard.html"
+DAILY_OUTPUT_ROOT = APP_DIR / "output" / "daily"
+EXTERNAL_ORDERS_PATH = APP_DIR / "output" / "external_orders" / "orders_daily.json"
 
 METRIC_LABELS = {
     "income_amt": "成交金额",

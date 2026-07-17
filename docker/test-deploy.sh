@@ -28,8 +28,8 @@ required_files=(
     "docker/supervisord.conf"
     "pyproject.toml"
     "uv.lock"
-    "daily_compass.py"
-    "web_app.py"
+    "apps/scraper_py/daily_compass.py"
+    "apps/dashboard_py/web_app.py"
 )
 
 for file in "${required_files[@]}"; do

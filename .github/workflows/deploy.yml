@@ -32,9 +32,7 @@ jobs:
         run: uv sync --locked --no-dev
       - name: Run Python syntax and unit checks
         run: |
-          uv run --locked python -m compileall -q \
-            dashboard.py db.py web_app.py external_order_store.py import_external_orders.py \
-            inventory_data.py inventory_sync.py scheduler_run.py
+          uv run --locked python -m compileall -q apps tests
           uv run --locked python -m unittest discover -s tests -v
       - name: Check browser JavaScript syntax
         uses: actions/setup-node@v6

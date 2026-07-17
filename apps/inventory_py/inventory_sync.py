@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 
-APP_DIR = Path(__file__).parent
+APP_DIR = Path(__file__).resolve().parents[2]
 INVENTORY_DIR = APP_DIR / "output" / "inventory"
 SNAPSHOT_PATH = INVENTORY_DIR / "inventory_snapshot.json"
 HISTORY_DIR = INVENTORY_DIR / "history"
