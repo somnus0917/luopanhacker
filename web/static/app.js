@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 
@@ -74,18 +74,68 @@ function operationFilteredRecords() {
   return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name) && state.operationSources.has(recordSourceLabel(item)));
 }
 
-function renderOperationsFilters() {
-  const dates = [...new Set(state.records.map((item) => item.date))].sort();
-  const shops = [...new Set(state.records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const sources = [...new Set(state.records.map(recordSourceLabel))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure"><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
-  $("#operations-filters").innerHTML = buildGroup("业务日期", dates, state.operationDates, "date") + buildGroup("店铺", shops, state.operationShops, "shop") + buildGroup("数据来源", sources, state.operationSources, "source");
-  $$('[data-operation-filter]').forEach((button) => button.addEventListener("click", () => {
-    const selected = button.dataset.operationFilter === "date" ? state.operationDates : button.dataset.operationFilter === "shop" ? state.operationShops : state.operationSources;
-    const value = button.dataset.value;
-    if (selected.has(value) && selected.size > 1) selected.delete(value); else selected.add(value);
-    renderOperationsFilters();
+function operationFilterSet(kind) {
+  return kind === "date" ? state.operationDates : kind === "shop" ? state.operationShops : state.operationSources;
+}
+
+function operationFilterItems(kind, records = state.records) {
+  if (kind === "date") return [...new Set(records.map((item) => item.date))].sort();
+  if (kind === "shop") return [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  return [...new Set(records.map(recordSourceLabel))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function operationSingleFilterValue(kind) {
+  const selected = [...operationFilterSet(kind)];
+  return selected.length === 1 ? selected[0] : "";
+}
+
+function applySingleOperationFilter(kind, value) {
+  const selected = operationFilterSet(kind);
+  selected.clear();
+  if (value) selected.add(value);
+  else operationFilterItems(kind).forEach((item) => selected.add(item));
+}
+
+function operationsFiltersMarkup() {
+  const dates = operationFilterItems("date");
+  const shops = operationFilterItems("shop");
+  const sources = operationFilterItems("source");
+  const openAttr = (kind) => state.operationFilterOpen.has(kind) ? " open" : "";
+  const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
+  const buildDropdown = (title, items, selected, kind) => `<details class="filter-disclosure filter-dropdown" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="dropdown-panel"><div class="dropdown-actions"><button type="button" class="dropdown-action" data-operation-select-all="${kind}">全选</button><button type="button" class="dropdown-action" data-operation-clear="${kind}">仅保留一个</button></div><div class="dropdown-list">${items.map((item) => `<label class="dropdown-option"><input type="checkbox" data-operation-filter="${kind}" data-value="${escapeHtml(item)}" ${selected.has(item) ? "checked" : ""}><span>${escapeHtml(item)}</span></label>`).join("")}</div></div></details>`;
+  return buildGroup("业务日期", dates, state.operationDates, "date") + buildDropdown("店铺", shops, state.operationShops, "shop") + buildGroup("数据来源", sources, state.operationSources, "source");
+}
+
+function bindOperationsFilterEvents() {
+  const dates = operationFilterItems("date");
+  const shops = operationFilterItems("shop");
+  const sources = operationFilterItems("source");
+  $$('[data-operation-filter]').forEach((control) => control.addEventListener(control.type === "checkbox" ? "change" : "click", () => {
+    const selected = operationFilterSet(control.dataset.operationFilter);
+    const value = control.dataset.value;
+    const shouldSelect = control.type === "checkbox" ? control.checked : !selected.has(value);
+    if (!shouldSelect && selected.size <= 1) { control.checked = true; return; }
+    if (shouldSelect) selected.add(value); else selected.delete(value);
     renderOperations();
+  }));
+  $$('[data-operation-select-all]').forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.operationSelectAll;
+    const items = kind === "date" ? dates : kind === "shop" ? shops : sources;
+    const selected = operationFilterSet(kind);
+    items.forEach((item) => selected.add(item));
+    renderOperations();
+  }));
+  $$('[data-operation-clear]').forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.operationClear;
+    const items = kind === "date" ? dates : kind === "shop" ? shops : sources;
+    const selected = operationFilterSet(kind);
+    selected.clear();
+    if (items.length) selected.add(items[0]);
+    renderOperations();
+  }));
+  $$('[data-filter-kind]').forEach((details) => details.addEventListener("toggle", () => {
+    const kind = details.dataset.filterKind;
+    if (details.open) state.operationFilterOpen.add(kind); else state.operationFilterOpen.delete(kind);
   }));
 }
 
@@ -169,24 +219,26 @@ function operatingRatio(value) {
 
 function detailTableRecords(records) {
   return records.filter((item) =>
-    (!state.tableDate || item.date === state.tableDate) &&
-    (!state.tableShop || item.shop_name === state.tableShop)
+    state.operationDates.has(item.date) &&
+    state.operationShops.has(item.shop_name)
   );
 }
 
-function detailTableFilters(records) {
-  const dates = [...new Set(records.map((item) => item.date))].sort();
-  const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  if (state.tableDate && !dates.includes(state.tableDate)) state.tableDate = "";
-  if (state.tableShop && !shops.includes(state.tableShop)) state.tableShop = "";
+function detailTableFilters() {
+  const dates = operationFilterItems("date");
+  const shops = operationFilterItems("shop");
+  state.tableDate = operationSingleFilterValue("date");
+  state.tableShop = operationSingleFilterValue("shop");
   const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="明细筛选"><div><strong>明细筛选</strong><span>仅筛选下方两张明细表，不影响汇总和趋势</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="看板筛选"><div><strong>看板筛选</strong><span>筛选卡片、趋势、对比与下方明细表</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
 }
 
 function bindDetailTableFilters() {
   $$('[data-table-filter]').forEach((select) => select.addEventListener("change", () => {
-    if (select.dataset.tableFilter === "date") state.tableDate = select.value;
+    const kind = select.dataset.tableFilter;
+    if (kind === "date") state.tableDate = select.value;
     else state.tableShop = select.value;
+    applySingleOperationFilter(kind, select.value);
     renderOperations();
   }));
 }
@@ -194,9 +246,16 @@ function bindDetailTableFilters() {
 function renderOperations() {
   const records = operationFilteredRecords();
   const target = $("#operations-content");
+  const detailFiltersTarget = $("#detail-filters");
   if (!records.length) {
-    target.innerHTML = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请选择至少一个业务日期和店铺。</span></div>`;
+    if (detailFiltersTarget) detailFiltersTarget.innerHTML = "";
+    target.innerHTML = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请选择至少一个业务日期和店铺。</span></div>${operationsFiltersMarkup()}`;
+    bindOperationsFilterEvents();
     return;
+  }
+  if (detailFiltersTarget) {
+    detailFiltersTarget.innerHTML = detailTableFilters();
+    bindDetailTableFilters();
   }
   const totals = aggregate(records);
   const returnOnSpend = totals.expense_amt ? totals.pay_amt / totals.expense_amt : null;
@@ -215,9 +274,9 @@ function renderOperations() {
   const detailRecords = detailTableRecords(records);
   const tableCount = whole(detailRecords.length);
   const detailTables = `<details class="detail-table-disclosure"><summary><span>店铺经营明细</span><small>按日期与店铺查看关键经营指标 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords, true)}</div></details>`;
-  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${detailTableFilters(records)}<div class="detail-table-stack">${detailTables}</div>`;
+  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${operationsFiltersMarkup()}<div class="detail-table-stack">${detailTables}</div>`;
   bindLineChartHover(records);
-  bindDetailTableFilters();
+  bindOperationsFilterEvents();
 }
 
 function lineChart(records, metricKey, title) {
@@ -455,7 +514,6 @@ async function loadCompass() {
   state.operationDates = new Set(state.records.map((item) => item.date));
   state.operationShops = new Set(state.records.map((item) => item.shop_name));
   state.operationSources = new Set(state.records.map(recordSourceLabel));
-  renderOperationsFilters();
   renderOperations();
   if (state.status) placeCollectionStatus(state.status);
 }

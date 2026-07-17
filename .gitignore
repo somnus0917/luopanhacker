@@ -74,4 +74,5 @@ config/import_dedupe_secret.txt
 config/wdt.env
 order_dashboard.html
 
-state
+# Runtime persistent state
+state/

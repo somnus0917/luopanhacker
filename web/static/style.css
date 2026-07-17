@@ -105,9 +105,20 @@ main { padding-top: 20px; }
 .chip { padding: 6px 9px; color: var(--muted); background: #1a213b; border: 1px solid transparent; border-radius: 6px; font-size: 12px; transition: .16s ease; }
 .chip:hover { border-color: var(--line-strong); color: var(--text); }
 .chip.selected { color: #fff; background: rgba(240, 70, 105, .2); border-color: rgba(240, 70, 105, .6); }
+.filter-dropdown .dropdown-panel { padding: 11px 15px 14px; }
+.dropdown-actions { display: flex; gap: 8px; margin-bottom: 10px; }
+.dropdown-action { padding: 5px 10px; color: var(--muted); background: #1a213b; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 11px; font-weight: 650; transition: .16s ease; }
+.dropdown-action:hover { border-color: rgba(240, 70, 105, .6); color: var(--text); }
+.dropdown-list { display: grid; gap: 2px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.dropdown-option { display: flex; align-items: center; gap: 9px; padding: 7px 8px; color: var(--muted); border-radius: 6px; font-size: 12.5px; cursor: pointer; transition: .16s ease; }
+.dropdown-option:hover { background: rgba(125, 148, 211, .1); color: var(--text); }
+.dropdown-option input[type="checkbox"] { width: 15px; height: 15px; accent-color: #f04669; }
+.dropdown-list::-webkit-scrollbar { width: 6px; }
+.dropdown-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
 .section-title { margin: 32px 0 14px; font-size: 19px; font-weight: 800; letter-spacing: -.035em; }
 .section-title small { margin-left: 8px; color: var(--faint); font-size: 12px; font-weight: 600; }
 .table-filter-panel { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 16px; margin-top: 28px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-quiet); }
+.table-filter-container .table-filter-panel { margin-top: 0; margin-bottom: 24px; }
 .table-filter-panel > div { min-width: 210px; margin-right: auto; }
 .table-filter-panel strong, .table-filter-panel span { display: block; }
 .table-filter-panel strong { color: #e6ebfa; font-size: 13px; }
