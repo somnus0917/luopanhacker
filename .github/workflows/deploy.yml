@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out committed source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -33,7 +33,7 @@ jobs:
             inventory_data.py inventory_sync.py scheduler_run.py
           python -m unittest discover -s tests -v
       - name: Check browser JavaScript syntax
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
       - name: Check JavaScript and shell scripts
