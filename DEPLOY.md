@@ -137,6 +137,83 @@ TARGET_SHOPS = (
 )
 ```
 
+### Rust 迁移开关
+
+当前镜像会同时构建两个 Rust 二进制：
+
+- `luopan-worker-rs`: 用于采集任务编排、状态写入、SQLite 同步和库存聚合
+- `luopan-api-rs`: Rust API sidecar，Flask 业务 API 必须代理到它
+
+Rust API sidecar 默认启动。修改 `.env` 后重启容器：
+
+```bash
+docker-compose up -d
+```
+
+默认值如下：
+
+```bash
+LUOPAN_API_RS_ENABLED=true
+LUOPAN_API_RS_HOST=0.0.0.0
+LUOPAN_API_RS_PORT=8601
+RUST_API_BASE_URL=http://127.0.0.1:8601
+RUST_API_TIMEOUT=2
+```
+
+如果 `api-rs` 不可用，Flask 会返回 502，不再读取 Python 本地业务数据。上传和预览订单 Excel 仍由 Python 负责，确认写入和撤销走 Rust。
+
+手动补采和定时补采也可以通过 Rust worker 进入 Python Playwright 抓取器。默认容器配置已经打开：
+
+```bash
+MANUAL_SCRAPE_COMMAND=luopan-worker-rs compass-scrape
+STATUS_UPDATE_COMMAND=luopan-worker-rs status-update
+SCHEDULED_SCRAPE_RUST_WORKER=true
+```
+
+这样做不会迁移 Playwright 抓取本身，只是把任务入口、状态预写和子进程编排移到 Rust worker。
+
+Rust SQLite 数据层默认用于 API 优先读取。可以手动把当前 JSON 派生数据同步进 `/app/state/luopan.db`：
+
+```bash
+docker exec -it douyin-compass luopan-worker-rs storage-sync
+docker exec -it douyin-compass luopan-worker-rs storage-summary
+```
+
+每次通过 Rust worker 采集成功后会默认自动同步：
+
+```bash
+STORAGE_SYNC_AFTER_SCRAPE=true
+LUOPAN_STORAGE_DB=/app/state/luopan.db
+```
+
+需要临时禁用数据库优先读路径时设置：
+
+```bash
+LUOPAN_API_RS_STORAGE_READS=false
+```
+
+打开后也可以直接检查 Rust API 的数据库汇总：
+
+```bash
+curl -s http://127.0.0.1:8601/api/storage/summary
+```
+
+一条命令做部署健康检查：
+
+```bash
+docker exec -it douyin-compass luopan-worker-rs doctor
+curl -s http://127.0.0.1:8601/api/diagnostics
+```
+
+订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
+
+sidecar 日志位置：
+
+```bash
+tail -f /app/logs/rust-api-rs.log
+tail -f /app/logs/rust-api-rs.err
+```
+
 ## 故障排查
 
 ### 1. 浏览器无法启动

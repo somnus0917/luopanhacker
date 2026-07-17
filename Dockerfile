@@ -1,4 +1,19 @@
-FROM mirror.ccs.tencentyun.com/library/python:3.11-slim
+ARG RUST_IMAGE=rust:1.95-slim
+ARG PYTHON_IMAGE=python:3.11-slim
+
+FROM ${RUST_IMAGE} AS rust-builder
+
+WORKDIR /src
+
+# Build only the Rust control-plane binaries. The Python Playwright code remains
+# the production scraper runtime.
+COPY Cargo.toml Cargo.lock ./
+COPY apps ./apps
+COPY crates ./crates
+RUN cargo build --release -p luopan-api-rs -p luopan-worker-rs
+
+
+FROM ${PYTHON_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
@@ -69,6 +84,11 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY . .
 RUN uv sync --locked --no-dev
 
+# Rust migration sidecar binaries. Flask uses luopan-worker-rs for optional
+# inventory shadow comparison; luopan-api-rs is available for manual sidecar runs.
+COPY --from=rust-builder /src/target/release/luopan-worker-rs /usr/local/bin/luopan-worker-rs
+COPY --from=rust-builder /src/target/release/luopan-api-rs /usr/local/bin/luopan-api-rs
+
 # 创建必要目录
 RUN mkdir -p /app/output/daily /app/session /app/logs /app/config /app/state
 
@@ -82,13 +102,14 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # 创建启动脚本
 COPY docker/start.sh /start.sh
-RUN chmod +x /start.sh
+RUN chmod +x /start.sh /app/docker/run_api_rs.sh
 
 # 暴露端口
 # 6080: noVNC 网页远程桌面
 # 8501: 独立网页看板
 # 5900: VNC 直连（可选）
-EXPOSE 6080 8501 5900
+# 8601: Rust API sidecar（手动启用）
+EXPOSE 6080 8501 5900 8601
 
 # 数据卷
 VOLUME ["/app/output", "/app/session"]

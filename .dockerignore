@@ -3,6 +3,9 @@
 .playwright-browsers
 .playwright-cli
 .venv
+target
+node_modules
+apps/web/node_modules
 __pycache__
 *.pyc
 *.pyo

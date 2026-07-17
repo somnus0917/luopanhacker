@@ -84,47 +84,23 @@ pnpm dev
 Vite serves `apps/web/index.html` and proxies `/api` plus `/assets` to Flask on
 `127.0.0.1:8501`.
 
-## Inventory Shadow Mode
-
-The production default now prefers Rust API payloads with Python fallback.
-Inventory shadow mode remains available when comparing a future inventory
-change without changing responses:
-
-```bash
-INVENTORY_RUST_SHADOW=true
-INVENTORY_RUST_SHADOW_TIMEOUT=5
-INVENTORY_RUST_COMMAND="luopan-worker-rs inventory-json"
-```
-
-When enabled, `/api/inventory` logs whether the Rust payload matches the Python
-payload on the key summary, count, health, and trend fields. Rust failures,
-timeouts, or mismatches do not change the HTTP response.
+## Rust Runtime Model
 
 The Docker image builds `luopan-worker-rs` and `luopan-api-rs` in a Rust builder
 stage and copies the release binaries into `/usr/local/bin`. In local
-development, Flask falls back to `cargo run -q -p luopan-worker-rs -- inventory-json`
-when the binary is not on `PATH`.
+development, command defaults use `cargo run -q -p luopan-worker-rs -- ...`
+when the release binary is not on `PATH`.
 
-Docker Compose exposes the Rust-first production defaults through `.env`:
+Docker Compose exposes the Rust-owned production defaults through `.env`:
 
 ```bash
-INVENTORY_RUST_SHADOW=false
-INVENTORY_RUST_SHADOW_TIMEOUT=5
-INVENTORY_RUST_COMMAND="luopan-worker-rs inventory-json"
 LUOPAN_API_RS_ENABLED=true
 LUOPAN_API_RS_HOST=0.0.0.0
 LUOPAN_API_RS_PORT=8601
 LUOPAN_API_RS_STORAGE_READS=true
 RUST_API_BASE_URL="http://127.0.0.1:8601"
 RUST_API_TIMEOUT=2
-COMPASS_RUST_PROXY=true
-ORDER_IMPORTS_RUST_PROXY=true
-ORDER_IMPORT_WRITES_RUST=true
-STATUS_RUST_PROXY=true
-INVENTORY_RUST_PROXY=true
-MANUAL_SCRAPE_RUST_WORKER=true
 MANUAL_SCRAPE_COMMAND="luopan-worker-rs compass-scrape"
-STATUS_UPDATE_RUST=true
 STATUS_UPDATE_COMMAND="luopan-worker-rs status-update"
 SCHEDULED_SCRAPE_RUST_WORKER=true
 LUOPAN_STORAGE_DB="/app/state/luopan.db"
@@ -139,26 +115,20 @@ STORAGE_SYNC_AFTER_SCRAPE=true
 /app/logs/rust-api-rs.err
 ```
 
-## Flask-To-Rust Proxy
+## Flask-To-Rust Boundary
 
-Flask still owns browser sessions, authentication, static files, and endpoints
-that have not been ported. Individual API routes can delegate to `api-rs` with
-fallback to Python:
+Flask owns browser sessions, authentication, static files, and the order Excel
+preview upload. Business data APIs are required to come from `api-rs`:
 
-```bash
-LUOPAN_API_RS_ENABLED=true
-COMPASS_RUST_PROXY=true
-ORDER_IMPORTS_RUST_PROXY=true
-ORDER_IMPORT_WRITES_RUST=true
-STATUS_RUST_PROXY=true
-INVENTORY_RUST_PROXY=true
-```
+- `/api/compass`
+- `/api/orders/imports`
+- `/api/orders/imports/<batch_id>`
+- `/api/status`
+- `/api/inventory`
 
-`/api/compass`, `/api/orders/imports`, `/api/status`, and `/api/inventory` are
-served through this Rust-first proxy by default. Order import confirm/delete can
-also use Rust when `ORDER_IMPORT_WRITES_RUST=true`; Excel preview parsing stays
-in Python. If `api-rs` is unavailable, Flask logs a warning and returns the
-existing Python payload instead.
+If `api-rs` is unavailable, Flask returns HTTP 502 instead of reading the legacy
+Python JSON sources. Order Excel preview parsing stays in Python until it is
+ported to Rust.
 
 Manual and scheduled compass scraping can also enter through `luopan-worker-rs
 compass-scrape`. Rust owns the task entrypoint and the shared task-status
@@ -169,17 +139,17 @@ automation.
 JSON-derived operations records, order-import history, task status, and the
 inventory dashboard snapshot into `LUOPAN_STORAGE_DB`. The Rust API can read
 operations, order imports, and inventory snapshots from SQLite when
-`LUOPAN_API_RS_STORAGE_READS=true`. Empty or failed SQLite reads fall back to the
-existing JSON sources.
+`LUOPAN_API_RS_STORAGE_READS=true`. Empty or failed SQLite reads are handled
+inside `api-rs`, not by Flask.
 
 When `STORAGE_SYNC_AFTER_SCRAPE=true`, `luopan-worker-rs compass-scrape` syncs
 SQLite immediately after a successful Python Playwright scrape. The cron wrapper
-only runs a separate sync when it falls back to direct Python execution.
+only runs a separate sync when it directly executes the Python scheduler.
 
 ## Completed Porting Steps
 
-- Flask now defaults to Rust API reads for status, operations, order imports,
-  and inventory, with Python fallback.
+- Flask now requires Rust API reads for status, operations, order imports, and
+  inventory; there is no Flask Python data fallback.
 - `LUOPAN_API_RS_STORAGE_READS=true` is the default. SQLite reads fall back to
   JSON-derived payloads when the DB is empty or unavailable.
 - `STORAGE_SYNC_AFTER_SCRAPE=true` is the default, so Rust worker scrapes sync
@@ -188,16 +158,14 @@ only runs a separate sync when it falls back to direct Python execution.
 - Vite local development is available under `apps/web`.
 - `luopan-worker-rs doctor` and `GET /api/diagnostics` provide deployment
   health checks.
-- Order import confirm/delete now have Rust worker/API implementations with
-  Python fallback.
+- Order import confirm/delete now have Rust worker/API implementations.
 - Legacy generated `dashboard.html` is no longer part of the production path.
 
 ## Remaining Optional Work
 
 - Replace the Flask-authenticated static shell with a standalone Vite dev
   server for local frontend iteration.
-- Move upload/preview/delete order write APIs into Rust after the read path has
-  run cleanly in production.
+- Move order Excel preview parsing into Rust.
 - Keep Python Playwright/noVNC as the browser automation boundary.
 
 See `docs/python-retention-map.md` for the file-by-file Python retention and

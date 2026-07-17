@@ -1,34 +1,31 @@
-"""Standalone dashboard web server.
+"""Standalone dashboard shell.
 
-This module only exposes the existing dashboard records and job controls.  The
-scraper, normalisation code and daily-output format stay in their original
-modules so the presentation layer can evolve independently.
+Flask owns browser sessions, static files, and the order preview upload. Business
+data APIs are proxied to the Rust API sidecar.
 """
 
 import hashlib
 import hmac
 import json
 import os
+import shlex
+import shutil
 import subprocess
-import sys
 import time
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from dashboard import get_dashboard_records
 from external_order_store import (
     ImportValidationError,
-    commit_preview,
-    delete_batch,
     preview_upload,
-    public_imports,
 )
-from inventory_data import load_inventory_dashboard
-from task_status import read_status, write_status
 
 
 APP_DIR = Path(__file__).parent
@@ -36,12 +33,37 @@ STATIC_DIR = APP_DIR / "web" / "static"
 CONFIG_DIR = APP_DIR / "config"
 USERS_FILE = CONFIG_DIR / "users.json"
 SESSION_SECRET_FILE = CONFIG_DIR / "session_secret.txt"
-DAILY_LOCK = APP_DIR / "output" / "daily_job.lock"
 PROGRESS_LOG = APP_DIR / "output" / "progress.log"
-NOVNC_URL = os.getenv("NOVNC_URL", "http://127.0.0.1:6080")
-STATUS_LOG_MAX_BYTES = 24 * 1024
-STATUS_LOG_MAX_LINES = 160
 MAX_ORDER_UPLOAD_BYTES = 30 * 1024 * 1024
+
+
+def env_float(name, default):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+RUST_API_BASE_URL = os.getenv(
+    "RUST_API_BASE_URL",
+    f"http://127.0.0.1:{os.getenv('LUOPAN_API_RS_PORT', '8601')}",
+).rstrip("/")
+RUST_API_TIMEOUT = env_float("RUST_API_TIMEOUT", 2.0)
+
+
+def default_rust_worker_command(subcommand):
+    if shutil.which("luopan-worker-rs"):
+        return f"luopan-worker-rs {subcommand}"
+    return f"cargo run -q -p luopan-worker-rs -- {subcommand}"
+
+
+DEFAULT_MANUAL_SCRAPE_COMMAND = default_rust_worker_command("compass-scrape")
+MANUAL_SCRAPE_COMMAND = shlex.split(os.getenv("MANUAL_SCRAPE_COMMAND", DEFAULT_MANUAL_SCRAPE_COMMAND))
+DEFAULT_STATUS_UPDATE_COMMAND = default_rust_worker_command("status-update")
+STATUS_UPDATE_COMMAND = shlex.split(os.getenv("STATUS_UPDATE_COMMAND", DEFAULT_STATUS_UPDATE_COMMAND))
 
 app = Flask(__name__, static_folder=None)
 app.config.update(
@@ -107,14 +129,23 @@ def require_login(handler):
 def start_manual_scrape():
     PROGRESS_LOG.parent.mkdir(parents=True, exist_ok=True)
     PROGRESS_LOG.write_text("", encoding="utf-8")
-    write_status(state="manual_requested", message="已收到手动补采请求，正在启动采集任务", last_error="")
+    write_manual_scrape_requested_status()
     environment = os.environ.copy()
     environment["PYTHONUNBUFFERED"] = "1"
+    environment.setdefault("LUOPAN_APP_DIR", str(APP_DIR))
+    command = [
+        *MANUAL_SCRAPE_COMMAND,
+        "--random-delay-seconds",
+        "0",
+        "--login-timeout-minutes",
+        "30",
+    ]
     with PROGRESS_LOG.open("ab") as log_file:
         log_file.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] start manual compass scrape\n".encode())
+        log_file.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] command: {shlex.join(command)}\n".encode())
         log_file.flush()
         subprocess.Popen(
-            [sys.executable, "scheduler_run.py", "--random-delay-seconds", "0", "--login-timeout-minutes", "30"],
+            command,
             cwd=str(APP_DIR),
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -123,31 +154,79 @@ def start_manual_scrape():
         )
 
 
-def read_progress_log_tail():
-    """Return a bounded tail of the scraper terminal output for the status UI."""
-    if not PROGRESS_LOG.exists():
-        return ""
+def write_manual_scrape_requested_status():
+    environment = os.environ.copy()
+    environment.setdefault("LUOPAN_APP_DIR", str(APP_DIR))
+    command = [
+        *STATUS_UPDATE_COMMAND,
+        "--state",
+        "manual_requested",
+        "--message",
+        "已收到手动补采请求，正在启动采集任务",
+        "--last-error",
+        "",
+    ]
+    completed = subprocess.run(
+        command,
+        cwd=str(APP_DIR),
+        env=environment,
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"rust status update exited with {completed.returncode}: {completed.stderr.strip()[:500]}"
+        )
 
+
+class RustApiUnavailable(RuntimeError):
+    pass
+
+
+def rust_api_json(path, query=None, method="GET", payload=None):
+    if not RUST_API_BASE_URL:
+        raise RustApiUnavailable("RUST_API_BASE_URL is empty")
+
+    encoded_query = f"?{urlencode(query)}" if query else ""
+    url = f"{RUST_API_BASE_URL}{path}{encoded_query}"
+    body = None
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request_data = Request(url, data=body, headers=headers, method=method)
     try:
-        with PROGRESS_LOG.open("rb") as log_file:
-            log_file.seek(0, os.SEEK_END)
-            size = log_file.tell()
-            log_file.seek(max(0, size - STATUS_LOG_MAX_BYTES))
-            content = log_file.read().decode("utf-8", errors="replace")
-        if size > STATUS_LOG_MAX_BYTES:
-            content = "… 已省略较早输出 …\n" + content.split("\n", 1)[-1]
-        return "\n".join(content.splitlines()[-STATUS_LOG_MAX_LINES:])
-    except OSError:
-        return ""
+        with urlopen(request_data, timeout=RUST_API_TIMEOUT) as response:
+            return json.loads(response.read().decode("utf-8")), response.status
+    except HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        try:
+            return json.loads(body), error.code
+        except json.JSONDecodeError:
+            return {"error": body[:500] or f"Rust API HTTP {error.code}"}, error.code
+    except (URLError, TimeoutError, OSError) as error:
+        raise RustApiUnavailable(f"rust api unavailable for {path}: {error}") from error
+    except json.JSONDecodeError as error:
+        raise RustApiUnavailable(f"rust api returned invalid JSON for {path}: {error}") from error
+
+
+def rust_api_response(path, query=None, method="GET", payload=None):
+    try:
+        response_payload, status_code = rust_api_json(path, query=query, method=method, payload=payload)
+    except RustApiUnavailable as error:
+        app.logger.error("%s", error)
+        return jsonify({"error": "Rust API 不可用", "detail": str(error)}), 502
+    return jsonify(response_payload), status_code
 
 
 def status_payload(include_terminal_output=True):
-    data = read_status()
-    data["job_running"] = DAILY_LOCK.exists()
-    data["novnc_url"] = NOVNC_URL
-    if include_terminal_output:
-        data["terminal_output"] = read_progress_log_tail()
-    return data
+    payload, _status_code = rust_api_json(
+        "/api/status",
+        {"terminal_output": "true" if include_terminal_output else "false"},
+    )
+    return payload
 
 
 @app.errorhandler(RequestEntityTooLarge)
@@ -198,19 +277,13 @@ def me():
 @app.get("/api/compass")
 @require_login
 def compass_data():
-    return jsonify(
-        {
-            "records": get_dashboard_records(),
-            "status": status_payload(include_terminal_output=False),
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    )
+    return rust_api_response("/api/compass")
 
 
 @app.get("/api/orders/imports")
 @require_login
 def order_imports():
-    return jsonify(public_imports())
+    return rust_api_response("/api/orders/imports")
 
 
 @app.post("/api/orders/preview")
@@ -229,40 +302,40 @@ def commit_order_import():
     token = str(payload.get("preview_token", "")).strip()
     if not token:
         return jsonify({"error": "缺少导入预览凭据，请重新选择文件"}), 400
-    try:
-        return jsonify(commit_preview(token)), 201
-    except ImportValidationError as exc:
-        return jsonify({"error": str(exc)}), 400
+    return rust_api_response(
+        "/api/orders/imports",
+        method="POST",
+        payload={"preview_token": token},
+    )
 
 
 @app.delete("/api/orders/imports/<batch_id>")
 @require_login
 def remove_order_import(batch_id):
-    try:
-        return jsonify({"deleted": delete_batch(batch_id)})
-    except ImportValidationError as exc:
-        return jsonify({"error": str(exc)}), 404
+    return rust_api_response(f"/api/orders/imports/{batch_id}", method="DELETE")
 
 
 @app.get("/api/inventory")
 @require_login
 def inventory_data():
-    payload = load_inventory_dashboard()
-    if payload is None:
-        return jsonify({"error": "暂无库存快照，请由服务器运行只读库存同步"}), 404
-    return jsonify(payload)
+    return rust_api_response("/api/inventory")
 
 
 @app.get("/api/status")
 @require_login
 def status():
-    return jsonify(status_payload())
+    return rust_api_response("/api/status")
 
 
 @app.post("/api/scrape")
 @require_login
 def scrape():
-    if DAILY_LOCK.exists():
+    try:
+        current_status = status_payload(include_terminal_output=False)
+    except RustApiUnavailable as error:
+        app.logger.error("%s", error)
+        return jsonify({"error": "Rust API 不可用", "detail": str(error)}), 502
+    if current_status.get("job_running"):
         return jsonify({"error": "已有采集任务在运行"}), 409
     start_manual_scrape()
     return jsonify({"message": "已启动手动补采任务"}), 202
