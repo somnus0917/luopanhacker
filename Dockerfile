@@ -1,5 +1,10 @@
 FROM mirror.ccs.tencentyun.com/library/python:3.11-slim
 
+# Keep the container's dependency resolver aligned with local development and
+# CI. The binary is copied from the official Astral image rather than installed
+# with pip, so its version is deterministic and independent of the base image.
+COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /uvx /bin/
+
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 腾讯云服务器访问官方 Debian 源可能较慢，构建时改用腾讯云镜像源。
@@ -49,19 +54,20 @@ WORKDIR /app
 # 设置环境变量（必须在安装 Playwright 浏览器之前）
 ENV DISPLAY=:99
 ENV CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
+ENV UV_PYTHON_DOWNLOADS=0
+ENV UV_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+ENV PATH="/app/.venv/bin:${PATH}"
 
-# 复制依赖文件
-COPY requirements.txt .
-COPY pyproject.toml .
-
-# 安装 Python 依赖
-RUN pip install --no-cache-dir \
-    -i https://mirrors.cloud.tencent.com/pypi/simple \
-    --trusted-host mirrors.cloud.tencent.com \
-    -r requirements.txt
+# Lockfile-first dependency installation. `uv.lock` is committed, so a Docker
+# build cannot silently resolve a different dependency graph.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
 
 # 复制应用代码
 COPY . .
+RUN uv sync --locked --no-dev
 
 # 创建必要目录
 RUN mkdir -p /app/output/daily /app/session /app/logs /app/config /app/state

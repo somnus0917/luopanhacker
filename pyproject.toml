@@ -1,12 +1,17 @@
 [project]
-name = "luopan-demo"
+name = "luopan-data-center"
 version = "0.1.0"
-description = "Douyin Compass scraper demo"
-requires-python = ">=3.9"
+description = "Douyin Compass and inventory data center"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "apscheduler",
-    "pandas",
-    "playwright",
     "Flask",
     "gunicorn",
+    "openpyxl",
+    "pandas",
+    "playwright",
 ]
+
+[tool.uv]
+# This is an application repository, not a distributable Python package.
+package = false

@@ -57,7 +57,6 @@ output/
 
 # UV
 .uv-cache/
-uv.lock
 
 # Streamlit
 .streamlit/

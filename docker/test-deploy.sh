@@ -26,7 +26,8 @@ required_files=(
     "docker-compose.yml"
     "docker/start.sh"
     "docker/supervisord.conf"
-    "requirements.txt"
+    "pyproject.toml"
+    "uv.lock"
     "daily_compass.py"
     "web_app.py"
 )

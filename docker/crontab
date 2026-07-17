@@ -1,5 +1,5 @@
 # 每天 9 点（上海时区）触发，脚本内部随机等待 0-60 分钟。
-PATH=/usr/local/bin:/usr/bin:/bin
+PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
 CRON_TZ=Asia/Shanghai
 TZ=Asia/Shanghai
 0 9 * * * /app/docker/cron_scrape.sh >> /app/logs/cron_scrape.log 2>&1

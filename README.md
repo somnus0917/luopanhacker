@@ -41,10 +41,12 @@ docker-compose up -d
 ### 首次准备
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/python -m playwright install chromium
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv sync --locked
+uv run python -m playwright install chromium
 ```
+
+项目的 Python 依赖由 `pyproject.toml` 和提交到 Git 的 `uv.lock` 统一管理。不要再使用 `pip install -r requirements.txt`；新增或升级依赖时运行 `uv add <包名>` 或 `uv lock`，并一并提交更新后的锁文件。
 
 ### 每日运行
 
