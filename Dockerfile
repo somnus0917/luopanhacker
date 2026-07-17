@@ -64,7 +64,7 @@ RUN pip install --no-cache-dir \
 COPY . .
 
 # 创建必要目录
-RUN mkdir -p /app/output/daily /app/session /app/logs /app/config
+RUN mkdir -p /app/output/daily /app/session /app/logs /app/config /app/state
 
 # 复制并设置 crontab
 COPY docker/crontab /etc/cron.d/compass-cron

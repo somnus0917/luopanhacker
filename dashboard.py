@@ -1,5 +1,6 @@
 import html
 import json
+import os
 import re
 import sqlite3
 from collections import defaultdict
@@ -10,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 from db import init_db
 
 
-DB_PATH = Path(__file__).parent / "metrics.db"
+DB_PATH = Path(os.getenv("LUOPAN_STATE_DIR", Path(__file__).parent / "state")) / "metrics.db"
 OUTPUT_PATH = Path(__file__).parent / "dashboard.html"
 DAILY_OUTPUT_ROOT = Path(__file__).parent / "output" / "daily"
 EXTERNAL_ORDERS_PATH = Path(__file__).parent / "output" / "external_orders" / "orders_daily.json"
@@ -827,7 +828,7 @@ def render(records):
       </aside>
     </section>
     <section class="panel source">
-      数据源：优先读取 <code>output/daily/**/*.json</code> 的每日可见指标，并兼容本地 SQLite <code>metrics.db</code> 中的接口响应。
+      数据源：优先读取 <code>output/daily/**/*.json</code> 的每日可见指标，并兼容持久化 SQLite <code>state/metrics.db</code> 中的接口响应。
       金额统一展示为元；比例统一展示为百分比。每日方式：执行 <code>./run_daily.sh</code> 后会自动刷新本看板。
     </section>
   </main>

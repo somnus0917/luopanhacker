@@ -7,13 +7,17 @@ services:
       dockerfile: Dockerfile
     container_name: douyin-compass
     volumes:
-      - ./output:/app/output        # 数据输出目录
-      - ./session:/app/session      # 浏览器会话（登录状态）
-      - ./logs:/app/logs            # 日志目录
-      - ./config:/app/config        # 用户配置目录
+      # 生产环境通过 LUOPAN_DATA_DIR 指向代码仓库外的持久目录；
+      # 本地未设置时保持当前项目内目录，方便开发调试。
+      - ${LUOPAN_DATA_DIR:-.}/output:/app/output
+      - ${LUOPAN_DATA_DIR:-.}/session:/app/session
+      - ${LUOPAN_DATA_DIR:-.}/logs:/app/logs
+      - ${LUOPAN_DATA_DIR:-.}/config:/app/config
+      - ${LUOPAN_DATA_DIR:-.}/state:/app/state
     environment:
       - TZ=Asia/Shanghai            # 时区设置
       - DISPLAY=:99
+      - LUOPAN_STATE_DIR=/app/state
       - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}  # 从 .env 读取或使用默认值
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}       # 管理员密码
     restart: unless-stopped

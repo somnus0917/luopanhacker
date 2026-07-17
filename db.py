@@ -1,13 +1,16 @@
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 
-DB_PATH = Path(__file__).parent / "metrics.db"
+STATE_DIR = Path(os.getenv("LUOPAN_STATE_DIR", Path(__file__).parent / "state"))
+DB_PATH = STATE_DIR / "metrics.db"
 
 
 def init_db():
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """
