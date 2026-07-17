@@ -13,7 +13,42 @@ permissions:
   contents: read
 
 jobs:
+  ci:
+    name: Validate code and deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out committed source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install Python dependencies
+        run: python -m pip install --requirement requirements.txt
+      - name: Run Python syntax and unit checks
+        run: |
+          python -m compileall -q \
+            dashboard.py db.py web_app.py external_order_store.py import_external_orders.py \
+            inventory_data.py inventory_sync.py scheduler_run.py
+          python -m unittest discover -s tests -v
+      - name: Check browser JavaScript syntax
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check JavaScript and shell scripts
+        run: |
+          node --check web/static/app.js
+          bash -n ops/deploy.sh ops/backup.sh ops/ssh-deploy-wrapper.sh \
+            docker/start.sh docker/cron_scrape.sh docker/cron_inventory_sync.sh
+      - name: Validate Docker Compose production mounts
+        run: |
+          docker compose config >/dev/null
+          LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | \
+            grep -q '/srv/luopan-data/state'
+
   deploy:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       - name: Configure restricted deployment key
