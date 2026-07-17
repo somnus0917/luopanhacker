@@ -1,5 +1,8 @@
 .git
 .gitignore
+.env
+.env.*
+.pytest_cache
 .playwright-browsers
 .playwright-cli
 .venv
@@ -12,6 +15,9 @@ __pycache__
 output
 session
 logs
+state
+config
+docker-compose.override.yml
 metrics.db
 *.db
 .DS_Store
