@@ -1,0 +1,23 @@
+[package]
+name = "luopan-api-rs"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+luopan-inventory = { path = "../../crates/inventory" }
+luopan-jobs = { path = "../../crates/jobs" }
+luopan-operations = { path = "../../crates/operations" }
+luopan-orders = { path = "../../crates/orders" }
+luopan-runtime = { path = "../../crates/runtime" }
+luopan-storage = { path = "../../crates/storage" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

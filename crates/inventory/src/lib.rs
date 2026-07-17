@@ -1,0 +1,513 @@
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+};
+
+use anyhow::{Context, Result};
+use chrono::NaiveDate;
+use luopan_runtime::{RuntimePaths, read_json_file};
+use serde_json::{Map, Value, json};
+
+const ACTUAL_TURNOVER_WINDOW_DAYS: usize = 30;
+const TARGET_COVER_DAYS: f64 = 30.0;
+const SAFETY_STOCK_DAYS: f64 = 7.0;
+const HEALTH_ORDER: [&str; 8] = [
+    "out_of_stock",
+    "urgent",
+    "replenish",
+    "healthy",
+    "high",
+    "overstock",
+    "no_movement",
+    "unavailable",
+];
+
+pub fn load_inventory_dashboard(paths: &RuntimePaths) -> Result<Option<Value>> {
+    let snapshot_path = paths.inventory_snapshot_path();
+    let Some(snapshot) = read_json_file(&snapshot_path)? else {
+        return Ok(None);
+    };
+    let history_dir = snapshot_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| paths.output_dir.join("inventory"))
+        .join("history");
+    Ok(Some(build_dashboard(&snapshot, &history_dir)?))
+}
+
+pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
+    let sales_rows = value_array(snapshot, "sales_7d");
+    let inbound_rows = value_array(snapshot, "inbound_30d");
+    let mut sales: HashMap<(String, String), f64> = HashMap::new();
+    let mut inbound: HashMap<(String, String), f64> = HashMap::new();
+
+    for row in sales_rows {
+        *sales.entry(inventory_key(row)).or_default() += number(row.get("quantity"));
+    }
+    for row in inbound_rows {
+        *inbound.entry(inventory_key(row)).or_default() += number(row.get("quantity"));
+    }
+
+    let mut rows = Vec::new();
+    for source in value_array(snapshot, "inventory") {
+        let mut item = source.as_object().cloned().unwrap_or_default();
+        let key = inventory_key(source);
+        let sales_7d = rounded(*sales.get(&key).unwrap_or(&0.0));
+        let inbound_30d = rounded(*inbound.get(&key).unwrap_or(&0.0));
+        let (health_key, health_name, coverage_days, replenish_qty) =
+            health_for(number(item.get("available_num")), sales_7d);
+
+        item.insert("sales_7d".to_string(), json!(sales_7d));
+        item.insert("inbound_30d".to_string(), json!(inbound_30d));
+        item.insert("health_key".to_string(), json!(health_key));
+        item.insert("health_name".to_string(), json!(health_name));
+        item.insert(
+            "coverage_days".to_string(),
+            coverage_days.map_or(Value::Null, |value| json!(value)),
+        );
+        item.insert("replenish_qty".to_string(), json!(replenish_qty));
+        rows.push(Value::Object(item));
+    }
+
+    let warehouse_names: HashMap<String, String> = rows
+        .iter()
+        .map(|row| {
+            let warehouse_no = text(row.get("warehouse_no"));
+            let warehouse_name = first_text(row, &["warehouse_name", "warehouse_no"])
+                .unwrap_or_else(|| "未命名仓库".to_string());
+            (warehouse_no, warehouse_name)
+        })
+        .collect();
+
+    let total_available: f64 = rows
+        .iter()
+        .map(|row| number(row.get("available_num")))
+        .sum();
+    let total_sales_7d: f64 = sales_rows
+        .iter()
+        .map(|row| number(row.get("quantity")))
+        .sum();
+    let coverage_rows: Vec<f64> = rows
+        .iter()
+        .filter_map(|row| {
+            let coverage = row.get("coverage_days").and_then(Value::as_f64);
+            if coverage.is_some() && number(row.get("sales_7d")) > 0.0 {
+                coverage
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let history = historical_turnover(history_dir)?;
+    let mut summary = json!({
+        "sku_records": rows.len(),
+        "distinct_skus": distinct_count(&rows, "spec_no", |_| true),
+        "salable_skus": distinct_count(&rows, "spec_no", |row| number(row.get("available_num")) > 0.0),
+        "stock_num": rounded(sum_rows(&rows, "stock_num")),
+        "available_num": rounded(total_available),
+        "sales_7d": rounded(total_sales_7d),
+        "inbound_30d": rounded(inbound_rows.iter().map(|row| number(row.get("quantity"))).sum()),
+        "negative_available": rows.iter().filter(|row| number(row.get("available_num")) < 0.0).count(),
+        "turnover_days": if total_sales_7d > 0.0 { json!(rounded(total_available / (total_sales_7d / 7.0))) } else { Value::Null },
+        "average_coverage_days": if coverage_rows.is_empty() { Value::Null } else { json!(rounded(coverage_rows.iter().sum::<f64>() / coverage_rows.len() as f64)) },
+        "replenishment_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "out_of_stock" | "urgent" | "replenish")).count(),
+        "no_movement_records": rows.iter().filter(|row| text(row.get("health_key")) == "no_movement").count(),
+        "overstock_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "overstock" | "high")).count(),
+    });
+    if let Some(object) = summary.as_object_mut() {
+        object.insert(
+            "actual_turnover_30d".to_string(),
+            history
+                .get("actual_turnover_days")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        object.insert(
+            "history_days".to_string(),
+            history.get("available_days").cloned().unwrap_or(json!(0)),
+        );
+    }
+
+    rows.sort_by(compare_inventory_rows);
+
+    Ok(json!({
+        "captured_at": snapshot.get("captured_at").cloned().unwrap_or(Value::Null),
+        "source": snapshot.get("source").cloned().unwrap_or_else(|| json!({})),
+        "summary": summary,
+        "warehouses": build_group(&rows, "warehouse_name"),
+        "brands": build_group(&rows, "brand_name"),
+        "health": build_health(&rows),
+        "sales_trend_7d": build_sales_trend(sales_rows, &warehouse_names).0,
+        "sales_trend_7d_by_warehouse": build_sales_trend(sales_rows, &warehouse_names).1,
+        "settings": {"target_cover_days": TARGET_COVER_DAYS as i64, "safety_stock_days": SAFETY_STOCK_DAYS as i64},
+        "history": history,
+        "rows": rows,
+    }))
+}
+
+fn value_array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn inventory_key(row: &Value) -> (String, String) {
+    (text(row.get("warehouse_no")), text(row.get("spec_no")))
+}
+
+fn number(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Number(number)) => number.as_f64().unwrap_or(0.0),
+        Some(Value::String(text)) => text.parse::<f64>().unwrap_or(0.0),
+        Some(Value::Bool(true)) => 1.0,
+        _ => 0.0,
+    }
+}
+
+fn text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(value)) => value.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn first_text(row: &Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .map(|key| text(row.get(*key)))
+        .find(|value| !value.is_empty())
+}
+
+fn rounded(value: f64) -> f64 {
+    (value * 10_000.0).round() / 10_000.0
+}
+
+fn ceil_i64(value: f64) -> i64 {
+    value.ceil() as i64
+}
+
+fn health_for(available_num: f64, sales_7d: f64) -> (&'static str, &'static str, Option<i64>, i64) {
+    let daily_sales = sales_7d / 7.0;
+    let coverage_days = if daily_sales > 0.0 {
+        Some(ceil_i64(available_num.max(0.0) / daily_sales))
+    } else {
+        None
+    };
+    let replenish_qty = if daily_sales > 0.0 {
+        ceil_i64(
+            ((TARGET_COVER_DAYS + SAFETY_STOCK_DAYS) * daily_sales - available_num.max(0.0))
+                .max(0.0),
+        )
+    } else {
+        0
+    };
+
+    if available_num <= 0.0 && sales_7d > 0.0 {
+        return ("out_of_stock", "已缺货", coverage_days, replenish_qty);
+    }
+    if sales_7d == 0.0 && available_num > 0.0 {
+        return ("no_movement", "近 7 日未动销", None, 0);
+    }
+    if let Some(days) = coverage_days {
+        if sales_7d > 0.0 && days < 7 {
+            return ("urgent", "紧急补货", coverage_days, replenish_qty);
+        }
+        if sales_7d > 0.0 && days < 14 {
+            return ("replenish", "需安排补货", coverage_days, replenish_qty);
+        }
+        if sales_7d > 0.0 && days <= 45 {
+            return ("healthy", "库存健康", coverage_days, 0);
+        }
+        if sales_7d > 0.0 && days <= 90 {
+            return ("high", "库存偏高", coverage_days, 0);
+        }
+    }
+    if sales_7d > 0.0 {
+        return ("overstock", "库存积压", coverage_days, 0);
+    }
+    ("unavailable", "暂无可售", None, 0)
+}
+
+fn build_group(rows: &[Value], key_name: &str) -> Vec<Value> {
+    let mut groups: BTreeMap<String, Group> = BTreeMap::new();
+    for row in rows {
+        let name = first_text(row, &[key_name]).unwrap_or_else(|| "未归类".to_string());
+        let group = groups.entry(name.clone()).or_insert_with(|| Group {
+            name,
+            ..Group::default()
+        });
+        group.sku_records += 1;
+        group.stock_num += number(row.get("stock_num"));
+        group.available_num += number(row.get("available_num"));
+        group.sales_7d += number(row.get("sales_7d"));
+        group.inbound_30d += number(row.get("inbound_30d"));
+        group.negative_available += usize::from(number(row.get("available_num")) < 0.0);
+    }
+
+    let mut values: Vec<Value> = groups
+        .into_values()
+        .map(|group| {
+            json!({
+                "name": group.name,
+                "sku_records": group.sku_records,
+                "stock_num": rounded(group.stock_num),
+                "available_num": rounded(group.available_num),
+                "sales_7d": rounded(group.sales_7d),
+                "inbound_30d": rounded(group.inbound_30d),
+                "negative_available": group.negative_available,
+                "turnover_days": if group.sales_7d > 0.0 { json!(rounded(group.available_num / (group.sales_7d / 7.0))) } else { Value::Null },
+            })
+        })
+        .collect();
+    values.sort_by(|left, right| {
+        number(right.get("available_num"))
+            .partial_cmp(&number(left.get("available_num")))
+            .unwrap_or(Ordering::Equal)
+    });
+    values
+}
+
+#[derive(Default)]
+struct Group {
+    name: String,
+    sku_records: usize,
+    stock_num: f64,
+    available_num: f64,
+    sales_7d: f64,
+    inbound_30d: f64,
+    negative_available: usize,
+}
+
+fn build_health(rows: &[Value]) -> Vec<Value> {
+    let names = health_names();
+    HEALTH_ORDER
+        .iter()
+        .map(|key| {
+            let members: Vec<&Value> = rows
+                .iter()
+                .filter(|row| text(row.get("health_key")) == *key)
+                .collect();
+            json!({
+                "key": key,
+                "name": names.get(key).copied().unwrap_or("未知状态"),
+                "sku_records": members.len(),
+                "available_num": rounded(members.iter().map(|row| number(row.get("available_num"))).sum()),
+            })
+        })
+        .collect()
+}
+
+fn health_names() -> HashMap<&'static str, &'static str> {
+    HashMap::from([
+        ("out_of_stock", "已缺货"),
+        ("urgent", "紧急补货"),
+        ("replenish", "需安排补货"),
+        ("healthy", "库存健康"),
+        ("high", "库存偏高"),
+        ("overstock", "库存积压"),
+        ("no_movement", "近 7 日未动销"),
+        ("unavailable", "暂无可售"),
+    ])
+}
+
+fn build_sales_trend(
+    sales_rows: &[Value],
+    warehouse_names: &HashMap<String, String>,
+) -> (Vec<Value>, BTreeMap<String, Vec<Value>>) {
+    let mut totals: BTreeMap<String, f64> = BTreeMap::new();
+    let mut by_warehouse: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+
+    for row in sales_rows {
+        let date = text(row.get("date"));
+        if date.is_empty() {
+            continue;
+        }
+        let quantity = number(row.get("quantity"));
+        *totals.entry(date.clone()).or_default() += quantity;
+        let warehouse_name = warehouse_names
+            .get(&text(row.get("warehouse_no")))
+            .cloned()
+            .unwrap_or_else(|| "未命名仓库".to_string());
+        *by_warehouse
+            .entry(warehouse_name)
+            .or_default()
+            .entry(date)
+            .or_default() += quantity;
+    }
+
+    let total_rows = totals
+        .into_iter()
+        .map(|(date, quantity)| json!({"date": date, "quantity": rounded(quantity)}))
+        .collect();
+    let warehouse_rows = by_warehouse
+        .into_iter()
+        .map(|(warehouse, values)| {
+            let rows = values
+                .into_iter()
+                .map(|(date, quantity)| json!({"date": date, "quantity": rounded(quantity)}))
+                .collect();
+            (warehouse, rows)
+        })
+        .collect();
+    (total_rows, warehouse_rows)
+}
+
+fn sum_rows(rows: &[Value], key: &str) -> f64 {
+    rows.iter().map(|row| number(row.get(key))).sum()
+}
+
+fn distinct_count<F>(rows: &[Value], key: &str, predicate: F) -> usize
+where
+    F: Fn(&Map<String, Value>) -> bool,
+{
+    rows.iter()
+        .filter_map(Value::as_object)
+        .filter(|row| predicate(row))
+        .map(|row| text(row.get(key)))
+        .filter(|value| !value.is_empty())
+        .collect::<HashSet<_>>()
+        .len()
+}
+
+fn compare_inventory_rows(left: &Value, right: &Value) -> Ordering {
+    let left_priority = health_priority(&text(left.get("health_key")));
+    let right_priority = health_priority(&text(right.get("health_key")));
+    left_priority
+        .cmp(&right_priority)
+        .then_with(|| {
+            coverage_sort_value(left)
+                .partial_cmp(&coverage_sort_value(right))
+                .unwrap_or(Ordering::Equal)
+        })
+        .then_with(|| {
+            number(right.get("sales_7d"))
+                .partial_cmp(&number(left.get("sales_7d")))
+                .unwrap_or(Ordering::Equal)
+        })
+}
+
+fn health_priority(key: &str) -> usize {
+    HEALTH_ORDER
+        .iter()
+        .position(|candidate| *candidate == key)
+        .unwrap_or(usize::MAX)
+}
+
+fn coverage_sort_value(row: &Value) -> f64 {
+    row.get("coverage_days")
+        .and_then(Value::as_f64)
+        .unwrap_or(1_000_000_000.0)
+}
+
+fn historical_turnover(history_dir: &Path) -> Result<Value> {
+    let mut snapshots: Vec<(String, Value)> = Vec::new();
+    if history_dir.exists() {
+        let mut paths: Vec<PathBuf> = fs::read_dir(history_dir)
+            .with_context(|| format!("read {}", history_dir.display()))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+                    && path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .is_some_and(|stem| stem.len() == 10)
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            let Some(snapshot) = read_json_file(&path)? else {
+                continue;
+            };
+            if snapshot
+                .get("inventory")
+                .and_then(Value::as_array)
+                .is_some()
+            {
+                let date = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                snapshots.push((date, snapshot));
+            }
+        }
+    }
+
+    let start = snapshots.len().saturating_sub(ACTUAL_TURNOVER_WINDOW_DAYS);
+    let snapshots = snapshots.split_off(start);
+    let dates: Vec<String> = snapshots.iter().map(|(date, _)| date.clone()).collect();
+    let mut result = json!({
+        "required_days": ACTUAL_TURNOVER_WINDOW_DAYS,
+        "available_days": dates.len(),
+        "dates": dates,
+        "ready": false,
+        "average_available_num": Value::Null,
+        "sales_quantity": Value::Null,
+        "actual_turnover_days": Value::Null,
+    });
+    if snapshots.len() != ACTUAL_TURNOVER_WINDOW_DAYS {
+        return Ok(result);
+    }
+
+    let first = NaiveDate::parse_from_str(&snapshots[0].0, "%Y-%m-%d");
+    let last = NaiveDate::parse_from_str(&snapshots[snapshots.len() - 1].0, "%Y-%m-%d");
+    let (Ok(first), Ok(last)) = (first, last) else {
+        return Ok(result);
+    };
+    if last.signed_duration_since(first).num_days() != (ACTUAL_TURNOVER_WINDOW_DAYS - 1) as i64 {
+        return Ok(result);
+    }
+
+    let average_available = snapshots
+        .iter()
+        .map(|(_, snapshot)| {
+            value_array(snapshot, "inventory")
+                .iter()
+                .map(|row| number(row.get("available_num")))
+                .sum::<f64>()
+        })
+        .sum::<f64>()
+        / snapshots.len() as f64;
+
+    let mut sales_by_detail_date: HashMap<(String, String, String), f64> = HashMap::new();
+    for (_, snapshot) in &snapshots {
+        for row in value_array(snapshot, "sales_7d") {
+            let key = (
+                text(row.get("date")),
+                text(row.get("warehouse_no")),
+                text(row.get("spec_no")),
+            );
+            if !key.0.is_empty() && !key.1.is_empty() && !key.2.is_empty() {
+                sales_by_detail_date.insert(key, number(row.get("quantity")));
+            }
+        }
+    }
+    let sales_quantity: f64 = sales_by_detail_date.values().sum();
+    if let Some(object) = result.as_object_mut() {
+        object.insert("ready".to_string(), json!(sales_quantity > 0.0));
+        object.insert(
+            "average_available_num".to_string(),
+            json!(rounded(average_available)),
+        );
+        object.insert("sales_quantity".to_string(), json!(rounded(sales_quantity)));
+        object.insert(
+            "actual_turnover_days".to_string(),
+            if sales_quantity > 0.0 {
+                json!(rounded(
+                    average_available / (sales_quantity / ACTUAL_TURNOVER_WINDOW_DAYS as f64)
+                ))
+            } else {
+                Value::Null
+            },
+        );
+    }
+    Ok(result)
+}
