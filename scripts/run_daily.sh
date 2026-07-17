@@ -6,11 +6,11 @@ cd "$(dirname "$0")"
 if [[ -n "${PYTHON:-}" ]]; then
   PY="$PYTHON"
 elif command -v uv >/dev/null 2>&1; then
-  exec env PYTHONUNBUFFERED=1 uv run --locked python daily_compass.py "$@"
+  exec env PYTHONUNBUFFERED=1 uv run --locked python apps/scraper_py/daily_compass.py "$@"
 elif [[ -x ".venv/bin/python" ]]; then
   PY=".venv/bin/python"
 else
   PY="python3"
 fi
 
-PYTHONUNBUFFERED=1 "$PY" daily_compass.py "$@"
+PYTHONUNBUFFERED=1 "$PY" apps/scraper_py/daily_compass.py "$@"

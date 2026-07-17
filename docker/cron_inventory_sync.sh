@@ -19,4 +19,4 @@ set +a
 : "${WDT_APPKEY:?WDT_APPKEY is required}"
 : "${WDT_APPSECRET:?WDT_APPSECRET is required}"
 
-exec /app/run_inventory_sync.sh
+exec /app/scripts/run_inventory_sync.sh

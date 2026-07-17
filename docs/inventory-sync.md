@@ -4,10 +4,10 @@
 
 ## 两种运行方式
 
-- 日结快照（每天一次）：`./run_inventory_sync.sh`
+- 日结快照（每天一次）：`./scripts/run_inventory_sync.sh`
   - 写入最新快照与 `output/inventory/history/YYYY-MM-DD.json`。
   - 同一天已存在的历史文件不会被覆盖。
-- 日内刷新（按需）：`./run_inventory_sync.sh --refresh-only`
+- 日内刷新（按需）：`./scripts/run_inventory_sync.sh --refresh-only`
   - 只更新最新快照，不影响日结历史。
 
 建议将日结任务安排在每日 02:30–03:30；日内刷新可安排在 09:00、13:00、17:00。请由服务器的任务调度器运行，并通过环境变量或密钥管理服务提供旺店通访问凭据；不要把密钥写进脚本、任务参数或仓库。

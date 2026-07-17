@@ -51,7 +51,7 @@ uv run python -m playwright install chromium
 ### 每日运行
 
 ```bash
-./run_daily.sh
+./scripts/run_daily.sh
 ```
 
 脚本会打开有头浏览器。如果出现登录页，请手动扫码登录；登录态会保存在 `session/`，后续通常可以复用。
@@ -64,7 +64,7 @@ uv run python -m playwright install chromium
 也可以只抓某一家：
 
 ```bash
-./run_daily.sh --shop "华硕凡飞笔记本电脑专卖店"
+./scripts/run_daily.sh --shop "华硕凡飞笔记本电脑专卖店"
 ```
 
 ## 输出
@@ -85,7 +85,7 @@ output/daily/2026-06-11/compass_daily_2026-06-11_143000.csv
 脚本完成后可以启动数据看板：
 
 ```bash
-./run_dashboard.sh
+./scripts/run_dashboard.sh
 ```
 
 看板默认地址：
@@ -129,7 +129,7 @@ pnpm dev
 可选参数：
 
 ```bash
-./run_daily.sh --login-timeout-minutes 15 --keep-open
+./scripts/run_daily.sh --login-timeout-minutes 15 --keep-open
 ```
 
 `--keep-open` 会在完成后保留浏览器 60 秒，方便人工检查。
