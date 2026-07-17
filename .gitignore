@@ -73,3 +73,5 @@ config/session_secret.txt
 config/import_dedupe_secret.txt
 config/wdt.env
 order_dashboard.html
+
+state
