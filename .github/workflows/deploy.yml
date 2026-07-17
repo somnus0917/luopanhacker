@@ -71,4 +71,5 @@ jobs:
           DEPLOY_USER: ${{ secrets.LUOPAN_DEPLOY_USER }}
         run: |
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
             "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${GITHUB_SHA}"
