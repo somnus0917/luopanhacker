@@ -1,10 +1,5 @@
 FROM mirror.ccs.tencentyun.com/library/python:3.11-slim
 
-# Keep the container's dependency resolver aligned with local development and
-# CI. The binary is copied from the official Astral image rather than installed
-# with pip, so its version is deterministic and independent of the base image.
-COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /uvx /bin/
-
 ARG DEBIAN_FRONTEND=noninteractive
 
 # 腾讯云服务器访问官方 Debian 源可能较慢，构建时改用腾讯云镜像源。
@@ -15,6 +10,7 @@ RUN sed -i \
 
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
+    curl \
     wget \
     gnupg \
     chromium \
@@ -48,6 +44,11 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install the pinned official uv binary without relying on a second container
+# registry. This endpoint is also used by the host installation.
+RUN curl -LsSf https://astral.sh/uv/0.11.29/install.sh | \
+    env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
 WORKDIR /app
 
