@@ -85,3 +85,6 @@ order_dashboard.html
 
 # Runtime persistent state
 state/
+
+# codegraph
+.codegraph
