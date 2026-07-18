@@ -7,7 +7,11 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+calamine.workspace = true
 chrono.workspace = true
 fs2.workspace = true
+hmac.workspace = true
 luopan-runtime = { path = "../runtime" }
 serde_json.workspace = true
+sha2.workspace = true
+rand_core.workspace = true

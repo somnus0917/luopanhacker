@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
-    extract::{Path as AxumPath, Query, Request, State},
+    extract::{Multipart, Path as AxumPath, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{Next, from_fn_with_state},
     response::{IntoResponse, Response},
@@ -18,7 +18,9 @@ use axum::{
 use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::{progress_log_tail, status_payload};
 use luopan_operations::load_operations_records;
-use luopan_orders::{commit_preview, delete_batch, public_imports};
+use luopan_orders::{
+    UploadedWorkbook, commit_preview, delete_batch, preview_upload, public_imports,
+};
 use luopan_runtime::{RuntimePaths, read_json_file};
 use luopan_settlement::{load_settlement_dashboard_for_shop, save_settlement_upload};
 use luopan_storage::{
@@ -179,6 +181,7 @@ async fn main() -> Result<()> {
         .route("/api/inventory/raw", get(inventory_raw))
         .route("/api/settlement", get(settlement_dashboard))
         .route("/api/settlement/uploads", post(upload_settlement))
+        .route("/api/orders/preview", post(preview_order_import))
         .route("/api/orders/imports", get(order_imports))
         .route("/api/orders/imports", post(commit_order_import))
         .route(
@@ -573,6 +576,34 @@ async fn order_imports(State(state): State<AppState>) -> Result<Json<Value>, Api
 
     Ok(Json(
         public_imports(&state.paths).map_err(ApiError::internal)?,
+    ))
+}
+
+async fn preview_order_import(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>, ApiError> {
+    let mut files = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(|error| ApiError {
+        status: StatusCode::BAD_REQUEST,
+        message: format!("读取上传文件失败：{error}"),
+    })? {
+        if field.name() != Some("files") {
+            continue;
+        }
+        let filename = field.file_name().unwrap_or_default().to_string();
+        let content = field
+            .bytes()
+            .await
+            .map_err(|error| ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: format!("读取上传文件失败：{error}"),
+            })?
+            .to_vec();
+        files.push(UploadedWorkbook { filename, content });
+    }
+    Ok(Json(
+        preview_upload(&state.paths, files).map_err(ApiError::bad_request)?,
     ))
 }
 
