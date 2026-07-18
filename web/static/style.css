@@ -31,7 +31,8 @@ button { cursor: pointer; }
 .account { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
 .text-button { padding: 6px 0; border: 0; color: var(--muted); background: transparent; }
 .text-button:hover { color: var(--text); }
-.nav-tabs { display: flex; align-items: stretch; gap: 5px; min-height: 74px; border-bottom: 2px solid #173763; overflow-x: auto; }
+.nav-tabs { display: flex; align-items: stretch; gap: 5px; min-height: 74px; border-bottom: 2px solid #173763; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.nav-tabs::-webkit-scrollbar { display: none; }
 .nav-tab { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 0 22px; color: #9ca7c5; background: transparent; border: 0; font-weight: 750; white-space: nowrap; transition: color .18s ease, background .18s ease; }
 .nav-tab:hover { color: #e9edfb; background: rgba(117, 138, 197, .09); }
 .nav-tab.active { color: var(--pink); background: rgba(240, 70, 105, .13); }
