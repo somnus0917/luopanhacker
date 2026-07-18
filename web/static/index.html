@@ -50,8 +50,8 @@
 
         <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">
           <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>结算看板</h2><p>按月核对品牌结算、返利、国补及平台补贴。</p></div>
-          <div class="metric-grid four" data-placeholder="月度结算总额|返利总额|国补总额|平台补贴总额"></div>
-          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>接入结算数据后，可直接按品牌核对金额与补贴构成。</span></div>
+          <div id="settlement-summary-cards" class="metric-grid six" data-placeholder="结算净额|收入合计|支出合计|订单数|平台补贴|政府补贴"></div>
+          <div id="settlement-content"><div class="empty-panel"><strong>正在读取结算数据</strong><span>将读取服务器 output/settlement 目录下的抖音结算 CSV。</span></div></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-channel" data-page="channel">

@@ -34,6 +34,14 @@ class WebAppRustProxyTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(response.get_json(), {"summary": {"sku_records": 1}})
 
+    def test_settlement_endpoint_uses_rust_api_only(self) -> None:
+        with web_app.app.test_request_context("/api/settlement"):
+            with patch.object(web_app, "rust_api_json", return_value=({"summary": {"row_count": 1}}, 200)):
+                response, status = web_app.settlement_data.__wrapped__()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response.get_json(), {"summary": {"row_count": 1}})
+
     def test_compass_endpoint_uses_rust_api_only(self) -> None:
         with web_app.app.test_request_context("/api/compass"):
             with patch.object(web_app, "rust_api_json", return_value=({"records": [{"date": "2026-07-16"}]}, 200)):

@@ -1,0 +1,377 @@
+use std::{collections::BTreeMap, fs, path::Path};
+
+use anyhow::{Context, Result};
+use luopan_runtime::RuntimePaths;
+use serde_json::{Value, json};
+
+const DETAIL_LIMIT: usize = 500;
+
+#[derive(Default)]
+struct Summary {
+    settlement_amount: f64,
+    income_total: f64,
+    expense_total: f64,
+    user_paid: f64,
+    platform_subsidy: f64,
+    government_merchant: f64,
+    government_platform: f64,
+    refund_before_settlement: f64,
+    service_fee: f64,
+    talent_commission: f64,
+    order_count: usize,
+    row_count: usize,
+}
+
+#[derive(Default)]
+struct Group {
+    summary: Summary,
+    order_ids: std::collections::BTreeSet<String>,
+}
+
+pub fn load_settlement_dashboard(paths: &RuntimePaths) -> Result<Value> {
+    let dir = paths.output_dir.join("settlement");
+    let mut files = csv_files(&dir)?;
+    files.sort();
+
+    let mut summary = Group::default();
+    let mut by_month: BTreeMap<String, Group> = BTreeMap::new();
+    let mut by_subject: BTreeMap<String, Group> = BTreeMap::new();
+    let mut by_business_type: BTreeMap<String, Group> = BTreeMap::new();
+    let mut rows = Vec::new();
+    let mut parsed_files = Vec::new();
+
+    for path in files {
+        let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        let records = parse_csv(&strip_bom(&text));
+        if records.len() < 3 {
+            continue;
+        }
+        let headers = &records[0];
+        let header_index = header_index(headers);
+        let mut file_rows = 0usize;
+
+        for record in records.into_iter().skip(2) {
+            if record.iter().all(|field| field.trim().is_empty()) {
+                continue;
+            }
+            let item = SettlementRecord::from_row(&header_index, &record, &path)?;
+            file_rows += 1;
+            add_record(&mut summary, &item);
+            add_record(
+                by_month.entry(item.settlement_month.clone()).or_default(),
+                &item,
+            );
+            add_record(by_subject.entry(item.subject.clone()).or_default(), &item);
+            add_record(
+                by_business_type
+                    .entry(item.business_type.clone())
+                    .or_default(),
+                &item,
+            );
+            if rows.len() < DETAIL_LIMIT {
+                rows.push(item.as_json());
+            }
+        }
+
+        parsed_files.push(json!({
+            "path": path.to_string_lossy(),
+            "name": path.file_name().and_then(|name| name.to_str()).unwrap_or(""),
+            "rows": file_rows,
+        }));
+    }
+
+    Ok(json!({
+        "summary": summary_json(&summary),
+        "months": groups_json(by_month),
+        "subjects": groups_json(by_subject),
+        "business_types": groups_json(by_business_type),
+        "rows": rows,
+        "files": parsed_files,
+        "row_limit": DETAIL_LIMIT,
+    }))
+}
+
+fn csv_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let path = entry?.path();
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("csv"))
+        {
+            files.push(path);
+        }
+    }
+    Ok(files)
+}
+
+fn strip_bom(text: &str) -> String {
+    text.trim_start_matches('\u{feff}').to_string()
+}
+
+fn parse_csv(text: &str) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    let mut row = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                chars.next();
+                field.push('"');
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                row.push(std::mem::take(&mut field));
+            }
+            '\n' if !in_quotes => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            '\r' if !in_quotes => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+            }
+            _ => field.push(ch),
+        }
+    }
+
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
+}
+
+fn header_index(headers: &[String]) -> BTreeMap<String, usize> {
+    headers
+        .iter()
+        .enumerate()
+        .map(|(index, header)| (header.trim().to_string(), index))
+        .collect()
+}
+
+fn field(row: &[String], index: &BTreeMap<String, usize>, name: &str) -> String {
+    index
+        .get(name)
+        .and_then(|position| row.get(*position))
+        .map(|value| clean_text(value))
+        .unwrap_or_default()
+}
+
+fn number(row: &[String], index: &BTreeMap<String, usize>, name: &str) -> f64 {
+    field(row, index, name)
+        .replace(',', "")
+        .parse::<f64>()
+        .unwrap_or(0.0)
+}
+
+fn clean_text(value: &str) -> String {
+    value.trim().trim_start_matches('\'').trim().to_string()
+}
+
+#[derive(Debug)]
+struct SettlementRecord {
+    settlement_time: String,
+    settlement_date: String,
+    settlement_month: String,
+    order_id: String,
+    sub_order_id: String,
+    settlement_amount: f64,
+    account: String,
+    statement_type: String,
+    order_time: String,
+    product_id: String,
+    product_name: String,
+    quantity: f64,
+    business_type: String,
+    order_type: String,
+    order_total: f64,
+    product_total: f64,
+    user_paid: f64,
+    income_total: f64,
+    expense_total: f64,
+    platform_subsidy: f64,
+    government_merchant: f64,
+    government_platform: f64,
+    refund_before_settlement: f64,
+    service_fee: f64,
+    talent_commission: f64,
+    free_commission: String,
+    free_commission_amount: f64,
+    subject: String,
+    app_channel: String,
+    source_file: String,
+}
+
+impl SettlementRecord {
+    fn from_row(index: &BTreeMap<String, usize>, row: &[String], path: &Path) -> Result<Self> {
+        let settlement_time = field(row, index, "结算时间");
+        let settlement_date = settlement_time.chars().take(10).collect::<String>();
+        let settlement_month = settlement_date.chars().take(7).collect::<String>();
+        Ok(Self {
+            settlement_time,
+            settlement_date,
+            settlement_month,
+            order_id: field(row, index, "订单号"),
+            sub_order_id: field(row, index, "子订单号"),
+            settlement_amount: number(row, index, "结算金额"),
+            account: field(row, index, "结算账户"),
+            statement_type: field(row, index, "结算单类型"),
+            order_time: field(row, index, "下单时间"),
+            product_id: field(row, index, "商品ID"),
+            product_name: field(row, index, "商品名称"),
+            quantity: number(row, index, "商品数量"),
+            business_type: fallback_label(field(row, index, "业务类型")),
+            order_type: field(row, index, "订单类型"),
+            order_total: number(row, index, "订单总价"),
+            product_total: number(row, index, "商品总价"),
+            user_paid: number(row, index, "用户实付"),
+            income_total: number(row, index, "收入合计"),
+            expense_total: number(row, index, "支出合计"),
+            platform_subsidy: number(row, index, "平台补贴")
+                + number(row, index, "其他平台补贴")
+                + number(row, index, "平台补贴运费"),
+            government_merchant: number(row, index, "政府补贴商家垫资"),
+            government_platform: number(row, index, "政府补贴平台垫资"),
+            refund_before_settlement: number(row, index, "结算前退款金额"),
+            service_fee: number(row, index, "平台服务费"),
+            talent_commission: number(row, index, "达人佣金"),
+            free_commission: field(row, index, "是否免佣"),
+            free_commission_amount: number(row, index, "免佣金额"),
+            subject: fallback_label(field(row, index, "商户主体名称")),
+            app_channel: field(row, index, "APP渠道"),
+            source_file: path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+    }
+
+    fn as_json(&self) -> Value {
+        json!({
+            "settlement_time": self.settlement_time,
+            "settlement_date": self.settlement_date,
+            "settlement_month": self.settlement_month,
+            "order_id": self.order_id,
+            "sub_order_id": self.sub_order_id,
+            "settlement_amount": self.settlement_amount,
+            "account": self.account,
+            "statement_type": self.statement_type,
+            "order_time": self.order_time,
+            "product_id": self.product_id,
+            "product_name": self.product_name,
+            "quantity": self.quantity,
+            "business_type": self.business_type,
+            "order_type": self.order_type,
+            "order_total": self.order_total,
+            "product_total": self.product_total,
+            "user_paid": self.user_paid,
+            "income_total": self.income_total,
+            "expense_total": self.expense_total,
+            "platform_subsidy": self.platform_subsidy,
+            "government_merchant": self.government_merchant,
+            "government_platform": self.government_platform,
+            "refund_before_settlement": self.refund_before_settlement,
+            "service_fee": self.service_fee,
+            "talent_commission": self.talent_commission,
+            "free_commission": self.free_commission,
+            "free_commission_amount": self.free_commission_amount,
+            "subject": self.subject,
+            "app_channel": self.app_channel,
+            "source_file": self.source_file,
+        })
+    }
+}
+
+fn fallback_label(value: String) -> String {
+    if value.is_empty() {
+        "未标注".to_string()
+    } else {
+        value
+    }
+}
+
+fn add_record(group: &mut Group, record: &SettlementRecord) {
+    group.summary.settlement_amount += record.settlement_amount;
+    group.summary.income_total += record.income_total;
+    group.summary.expense_total += record.expense_total;
+    group.summary.user_paid += record.user_paid;
+    group.summary.platform_subsidy += record.platform_subsidy;
+    group.summary.government_merchant += record.government_merchant;
+    group.summary.government_platform += record.government_platform;
+    group.summary.refund_before_settlement += record.refund_before_settlement;
+    group.summary.service_fee += record.service_fee;
+    group.summary.talent_commission += record.talent_commission;
+    group.summary.row_count += 1;
+    if !record.order_id.is_empty() {
+        group.order_ids.insert(record.order_id.clone());
+    }
+    group.summary.order_count = group.order_ids.len();
+}
+
+fn groups_json(groups: BTreeMap<String, Group>) -> Vec<Value> {
+    groups
+        .into_iter()
+        .map(|(name, group)| {
+            let mut value = summary_json(&group);
+            value["name"] = json!(name);
+            value
+        })
+        .collect()
+}
+
+fn summary_json(group: &Group) -> Value {
+    json!({
+        "settlement_amount": round_money(group.summary.settlement_amount),
+        "income_total": round_money(group.summary.income_total),
+        "expense_total": round_money(group.summary.expense_total),
+        "user_paid": round_money(group.summary.user_paid),
+        "platform_subsidy": round_money(group.summary.platform_subsidy),
+        "government_merchant": round_money(group.summary.government_merchant),
+        "government_platform": round_money(group.summary.government_platform),
+        "refund_before_settlement": round_money(group.summary.refund_before_settlement),
+        "service_fee": round_money(group.summary.service_fee),
+        "talent_commission": round_money(group.summary.talent_commission),
+        "order_count": group.summary.order_count,
+        "row_count": group.summary.row_count,
+    })
+}
+
+fn round_money(value: f64) -> f64 {
+    let rounded = (value * 100.0).round() / 100.0;
+    if rounded.abs() < 0.005 { 0.0 } else { rounded }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_quoted_multiline_csv_records() {
+        let rows = parse_csv("a,b\n\"x\ny\",2\n");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1][0], "x\ny");
+        assert_eq!(rows[1][1], "2");
+    }
+
+    #[test]
+    fn strips_accounting_apostrophes() {
+        assert_eq!(clean_text("'6953319116962666149"), "6953319116962666149");
+    }
+
+    #[test]
+    fn rounds_negative_zero_to_zero() {
+        assert_eq!(round_money(-0.001), 0.0);
+    }
+}

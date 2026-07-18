@@ -13,6 +13,7 @@ use luopan_jobs::{progress_log_tail, status_payload};
 use luopan_operations::load_operations_records;
 use luopan_orders::{commit_preview, delete_batch, public_imports};
 use luopan_runtime::{RuntimePaths, read_json_file};
+use luopan_settlement::load_settlement_dashboard;
 use luopan_storage::{
     StoragePool, kv_value, load_operations_records_from_db, public_imports_from_db, summary,
 };
@@ -124,6 +125,7 @@ async fn main() -> Result<()> {
         .route("/api/compass", get(compass_dashboard))
         .route("/api/inventory", get(inventory_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
+        .route("/api/settlement", get(settlement_dashboard))
         .route("/api/orders/imports", get(order_imports))
         .route("/api/orders/imports", post(commit_order_import))
         .route(
@@ -208,6 +210,12 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
         "status": status,
         "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
     })))
+}
+
+async fn settlement_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(
+        load_settlement_dashboard(&state.paths).map_err(ApiError::internal)?,
+    ))
 }
 
 async fn order_imports(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

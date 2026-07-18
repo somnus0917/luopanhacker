@@ -1,4 +1,4 @@
-const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
+const state = { records: [], operationDates: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -11,6 +11,8 @@ const ratio = (value) => `${(number(value) * 100).toFixed(2)}%`;
 const metricText = (key, value) => key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
 const hasValue = (value) => value !== null && value !== undefined && value !== "";
 const moneyOrDash = (value) => hasValue(value) ? money(value) : "—";
+const settlementMoney = (yuan) => `¥${number(yuan).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const settlementMoneyOrDash = (value) => hasValue(value) ? settlementMoney(value) : "—";
 const wholeOrDash = (value) => hasValue(value) ? whole(value) : "—";
 const ratioOrDash = (value) => hasValue(value) ? ratio(value) : "—";
 function recordSourceLabel(item) {
@@ -526,6 +528,65 @@ async function loadInventory() {
         target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(error.message || "请在服务器侧运行只读库存同步")}</span></div>`;
     }
 }
+function settlementGroupTable(title, groups) {
+    const rows = [...(groups || [])]
+        .sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount))
+        .map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`)
+        .join("");
+    return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
+}
+function settlementDetailTable(rows) {
+    const body = [...(rows || [])].map((item) => {
+        const governmentSubsidy = number(item.government_merchant) + number(item.government_platform);
+        const cells = [
+            item.settlement_time || item.settlement_date,
+            item.order_id,
+            item.product_name,
+            item.business_type,
+            settlementMoneyOrDash(item.settlement_amount),
+            settlementMoneyOrDash(item.user_paid),
+            settlementMoneyOrDash(item.income_total),
+            settlementMoneyOrDash(item.expense_total),
+            settlementMoneyOrDash(item.service_fee),
+            settlementMoney(governmentSubsidy),
+        ];
+        return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
+    }).join("");
+    return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table><thead><tr><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="10">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
+}
+function renderSettlement(payload) {
+    state.settlement = payload;
+    const summary = payload.summary || {};
+    const fileNames = (payload.files || []).map((file) => file.name).filter(Boolean);
+    const governmentSubsidy = number(summary.government_merchant) + number(summary.government_platform);
+    const metrics = [
+        ["结算净额", settlementMoney(summary.settlement_amount), `明细行：${whole(summary.row_count)}`],
+        ["收入合计", settlementMoney(summary.income_total), `用户实付：${settlementMoney(summary.user_paid)}`],
+        ["支出合计", settlementMoney(summary.expense_total), `平台服务费：${settlementMoney(summary.service_fee)}`],
+        ["订单数", whole(summary.order_count), "按订单号去重"],
+        ["平台补贴", settlementMoney(summary.platform_subsidy), "平台、其他平台与运费补贴"],
+        ["政府补贴", settlementMoney(governmentSubsidy), "商家垫资 + 平台垫资"],
+    ];
+    $("#settlement-summary-cards").innerHTML = metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("");
+    $("#settlement-content").innerHTML = summary.row_count
+        ? `<section class="panel operations-note"><h3>数据来源</h3><p>读取服务器本地 <code>output/settlement/</code> 目录下的抖音结算 CSV；金额按 CSV 原始元单位展示，不做分转元转换。</p><p>已读取文件：${escapeHtml(fileNames.join("、") || "—")}</p></section><div class="chart-grid"><div class="chart-stack">${settlementGroupTable("按结算月份", payload.months)}</div><div class="chart-stack">${settlementGroupTable("按商户主体", payload.subjects)}${settlementGroupTable("按业务类型", payload.business_types)}</div></div>${settlementDetailTable(payload.rows)}`
+        : `<div class="empty-panel"><strong>暂无结算数据</strong><span>请把抖音结算 CSV 放入服务器 output/settlement/ 目录后刷新页面。</span></div>`;
+}
+async function loadSettlement() {
+    const target = $("#settlement-content");
+    try {
+        const response = await fetch("/api/settlement");
+        if (response.status === 401)
+            return showLogin();
+        const payload = await response.json();
+        if (!response.ok)
+            throw new Error(payload.error || "结算数据不可用");
+        renderSettlement(payload);
+    }
+    catch (error) {
+        target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(error.message || "请检查 Rust API 与 output/settlement 目录")}</span></div>`;
+    }
+}
 function statusTerminal(status, logMessage) {
     if (typeof status.terminal_output === "string" && status.terminal_output) {
         const lineCount = status.terminal_output.split("\n").length;
@@ -613,6 +674,7 @@ async function initialise() {
         loadCompass();
         loadOrderImports();
         loadInventory();
+        loadSettlement();
     });
     const me = await fetch("/api/me").then((response) => response.json());
     if (me.authenticated) {
@@ -620,6 +682,7 @@ async function initialise() {
         loadCompass();
         loadOrderImports();
         loadInventory();
+        loadSettlement();
     }
     else
         showLogin();

@@ -325,6 +325,12 @@ def inventory_data():
     return rust_api_response("/api/inventory")
 
 
+@app.get("/api/settlement")
+@require_login
+def settlement_data():
+    return rust_api_response("/api/settlement")
+
+
 @app.get("/api/status")
 @require_login
 def status():

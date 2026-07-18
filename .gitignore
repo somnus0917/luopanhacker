@@ -59,6 +59,7 @@ Thumbs.db
 # Output
 output/
 !output/.gitkeep
+DL*.csv
 
 # UV
 .uv-cache/

@@ -88,6 +88,7 @@ python apps/scraper_py/scheduler_run.py --login-timeout-minutes 30
 
 - `./output` - 抓取的数据输出
   - `output/daily/` - 每日采集的 JSON 和 CSV
+  - `output/settlement/` - 抖音结算导出的 `DL*.csv`
   - `output/task_status.json` - 任务状态文件
   - `output/login.png` - 登录页面截图
 - `./session` - 浏览器会话（登录状态）
@@ -206,6 +207,14 @@ curl -s http://127.0.0.1:8601/api/diagnostics
 ```
 
 订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
+
+结算看板读取本地 `output/settlement/` 目录中的抖音结算 CSV：
+
+```bash
+mkdir -p output/settlement
+cp DL*.csv output/settlement/
+docker exec -it douyin-compass luopan-worker-rs settlement-json
+```
 
 sidecar 日志位置：
 

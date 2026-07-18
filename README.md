@@ -120,6 +120,16 @@ pnpm dev
 
 订单明细上传、预览、确认写入和撤销都在当前数据看板中完成。Excel 解析仍由 Python 完成，确认写入与撤销默认优先走 Rust API。
 
+## 结算数据
+
+抖音结算导出的 `DL*.csv` 放到 `output/settlement/` 后，第三个“结算看板”会通过 Rust API 自动读取。金额按 CSV 原始元单位展示。
+
+```bash
+mkdir -p output/settlement
+cp DL*.csv output/settlement/
+docker exec -it douyin-compass luopan-worker-rs settlement-json
+```
+
 旧的独立 HTML/Streamlit 入口已归档到 `legacy/`，不再作为生产路径。
 
 ## 低频策略

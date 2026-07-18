@@ -6,6 +6,7 @@ members = [
   "crates/inventory",
   "crates/operations",
   "crates/orders",
+  "crates/settlement",
   "crates/runtime",
   "crates/storage",
 ]

@@ -856,6 +856,7 @@ dependencies = [
  "luopan-operations",
  "luopan-orders",
  "luopan-runtime",
+ "luopan-settlement",
  "luopan-storage",
  "serde",
  "serde_json",
@@ -917,6 +918,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "luopan-settlement"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "luopan-runtime",
+ "serde_json",
+]
+
+[[package]]
 name = "luopan-storage"
 version = "0.1.0"
 dependencies = [
@@ -944,6 +954,7 @@ dependencies = [
  "luopan-operations",
  "luopan-orders",
  "luopan-runtime",
+ "luopan-settlement",
  "luopan-storage",
  "serde_json",
  "tokio",

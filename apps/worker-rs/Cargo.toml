@@ -13,6 +13,7 @@ luopan-jobs = { path = "../../crates/jobs" }
 luopan-operations = { path = "../../crates/operations" }
 luopan-orders = { path = "../../crates/orders" }
 luopan-runtime = { path = "../../crates/runtime" }
+luopan-settlement = { path = "../../crates/settlement" }
 luopan-storage = { path = "../../crates/storage" }
 serde_json.workspace = true
 tokio.workspace = true
