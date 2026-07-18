@@ -8,7 +8,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{Next, from_fn_with_state},
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, get_service, post},
 };
 use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::{progress_log_tail, status_payload};
@@ -25,7 +25,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use subtle::ConstantTimeEq;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{
+    cors::CorsLayer,
+    services::{ServeDir, ServeFile},
+    set_header::SetResponseHeaderLayer,
+    trace::TraceLayer,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Clone)]
@@ -157,7 +162,7 @@ async fn main() -> Result<()> {
     import_legacy_users(&auth_pool, &paths).await?;
     let storage_pool = env_bool("LUOPAN_API_RS_STORAGE_READS", false).then_some(auth_pool.clone());
     let state = AppState {
-        paths,
+        paths: paths.clone(),
         novnc_url,
         auth_pool,
         storage_pool,
@@ -181,12 +186,24 @@ async fn main() -> Result<()> {
         .route("/api/status/raw", get(status_raw))
         .route("/api/status/log-tail", get(status_log_tail))
         .route_layer(from_fn_with_state(state.clone(), require_auth));
+    let static_dir = paths.app_dir.join("web").join("static");
+    let static_files = Router::new()
+        .route_service(
+            "/",
+            get_service(ServeFile::new(static_dir.join("index.html"))),
+        )
+        .nest_service("/assets", ServeDir::new(static_dir))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=3600"),
+        ));
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
         .merge(protected)
+        .merge(static_files)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
