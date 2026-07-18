@@ -48,6 +48,25 @@ class WebAppRustProxyTest(unittest.TestCase):
             payload=None,
         )
 
+    def test_settlement_upload_uses_rust_api_only(self) -> None:
+        payload = {
+            "shop_name": "测试店铺",
+            "file_name": "settlement.csv",
+            "content": "结算时间,订单号,结算金额,收入合计,支出合计\n说明,,,,\n2026-07-01,1,2,3,-1\n",
+        }
+        with web_app.app.test_request_context("/api/settlement/uploads", method="POST", json=payload):
+            with patch.object(web_app, "rust_api_json", return_value=({"upload": {"file": {"rows": 1}}}, 201)) as fetch:
+                response, status = web_app.upload_settlement.__wrapped__()
+
+        self.assertEqual(status, 201)
+        self.assertEqual(response.get_json(), {"upload": {"file": {"rows": 1}}})
+        fetch.assert_called_once_with(
+            "/api/settlement/uploads",
+            query=None,
+            method="POST",
+            payload=payload,
+        )
+
     def test_compass_endpoint_uses_rust_api_only(self) -> None:
         with web_app.app.test_request_context("/api/compass"):
             with patch.object(web_app, "rust_api_json", return_value=({"records": [{"date": "2026-07-16"}]}, 200)):

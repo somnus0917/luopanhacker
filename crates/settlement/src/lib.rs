@@ -2,6 +2,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::Path,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
@@ -9,6 +10,7 @@ use luopan_runtime::RuntimePaths;
 use serde_json::{Value, json};
 
 const DETAIL_LIMIT: usize = 500;
+const SHOP_MAP_FILE: &str = "shops.json";
 
 #[derive(Default)]
 struct Summary {
@@ -43,6 +45,7 @@ pub fn load_settlement_dashboard_for_shop(
     let dir = paths.output_dir.join("settlement");
     let mut files = csv_files(&dir)?;
     files.sort();
+    let shop_map = read_shop_map(&dir)?;
 
     let mut summary = Group::default();
     let mut by_month: BTreeMap<String, Group> = BTreeMap::new();
@@ -57,7 +60,7 @@ pub fn load_settlement_dashboard_for_shop(
         .filter(|value| !value.is_empty());
 
     for path in files {
-        let shop_name = settlement_shop_name(&path);
+        let shop_name = settlement_shop_name(&path, &shop_map);
         shop_names.insert(shop_name.clone());
         if selected_shop.is_some_and(|selected| selected != shop_name) {
             continue;
@@ -117,6 +120,70 @@ pub fn load_settlement_dashboard_for_shop(
     }))
 }
 
+pub fn save_settlement_upload(
+    paths: &RuntimePaths,
+    original_file_name: &str,
+    shop_name: &str,
+    bytes: &[u8],
+) -> Result<Value> {
+    let clean_shop = clean_text(shop_name);
+    if clean_shop.is_empty() {
+        anyhow::bail!("请填写店铺名称");
+    }
+    if bytes.is_empty() {
+        anyhow::bail!("上传文件为空");
+    }
+    if !original_file_name.to_ascii_lowercase().ends_with(".csv") {
+        anyhow::bail!("只支持上传 CSV 结算文件");
+    }
+
+    let row_count = validate_settlement_csv(bytes)?;
+    let dir = paths.output_dir.join("settlement");
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let mut shop_map = read_shop_map(&dir)?;
+    for existing in csv_files(&dir)? {
+        let existing_bytes =
+            fs::read(&existing).with_context(|| format!("read {}", existing.display()))?;
+        if existing_bytes == bytes {
+            let file_name = existing
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_string();
+            shop_map.insert(file_name.clone(), clean_shop.clone());
+            write_shop_map(&dir, &shop_map)?;
+            return Ok(json!({
+                "file": {
+                    "name": file_name,
+                    "original_name": original_file_name,
+                    "path": existing.to_string_lossy(),
+                    "shop_name": clean_shop,
+                    "rows": row_count,
+                    "deduplicated": true,
+                }
+            }));
+        }
+    }
+
+    let file_name = uploaded_file_name(original_file_name, &clean_shop, bytes);
+    let path = dir.join(&file_name);
+    fs::write(&path, bytes).with_context(|| format!("write {}", path.display()))?;
+
+    shop_map.insert(file_name.clone(), clean_shop.clone());
+    write_shop_map(&dir, &shop_map)?;
+
+    Ok(json!({
+        "file": {
+            "name": file_name,
+            "original_name": original_file_name,
+            "path": path.to_string_lossy(),
+            "shop_name": clean_shop,
+            "rows": row_count,
+            "deduplicated": false,
+        }
+    }))
+}
+
 fn csv_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     if !dir.exists() {
         return Ok(Vec::new());
@@ -135,8 +202,59 @@ fn csv_files(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
     Ok(files)
 }
 
+fn shop_map_path(dir: &Path) -> std::path::PathBuf {
+    dir.join(SHOP_MAP_FILE)
+}
+
+fn read_shop_map(dir: &Path) -> Result<BTreeMap<String, String>> {
+    let path = shop_map_path(dir);
+    if !path.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))
+}
+
+fn write_shop_map(dir: &Path, shop_map: &BTreeMap<String, String>) -> Result<()> {
+    let path = shop_map_path(dir);
+    let temp_path = dir.join(format!(
+        ".shops.{}.json.tmp",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+    let text = serde_json::to_string_pretty(shop_map)?;
+    fs::write(&temp_path, text).with_context(|| format!("write {}", temp_path.display()))?;
+    fs::rename(&temp_path, &path)
+        .with_context(|| format!("replace {} with {}", temp_path.display(), path.display()))
+}
+
 fn strip_bom(text: &str) -> String {
     text.trim_start_matches('\u{feff}').to_string()
+}
+
+fn validate_settlement_csv(bytes: &[u8]) -> Result<usize> {
+    let text = std::str::from_utf8(bytes).context("结算 CSV 必须是 UTF-8 编码")?;
+    let records = parse_csv(&strip_bom(text));
+    if records.len() < 3 {
+        anyhow::bail!("结算 CSV 缺少表头或明细行");
+    }
+    let headers = &records[0];
+    for required in ["结算时间", "订单号", "结算金额", "收入合计", "支出合计"] {
+        if !headers.iter().any(|header| header.trim() == required) {
+            anyhow::bail!("结算 CSV 缺少字段：{required}");
+        }
+    }
+    let row_count = records
+        .into_iter()
+        .skip(2)
+        .filter(|record| record.iter().any(|field| !field.trim().is_empty()))
+        .count();
+    if row_count == 0 {
+        anyhow::bail!("结算 CSV 没有可解析的明细行");
+    }
+    Ok(row_count)
 }
 
 fn parse_csv(text: &str) -> Vec<Vec<String>> {
@@ -205,11 +323,14 @@ fn clean_text(value: &str) -> String {
     value.trim().trim_start_matches('\'').trim().to_string()
 }
 
-fn settlement_shop_name(path: &Path) -> String {
+fn settlement_shop_name(path: &Path, shop_map: &BTreeMap<String, String>) -> String {
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
+    if let Some(shop_name) = shop_map.get(file_name) {
+        return shop_name.clone();
+    }
     if file_name.ends_with("3441.csv") {
         "惠普办公设备旗舰店".to_string()
     } else if file_name.ends_with("5137.csv") {
@@ -217,6 +338,38 @@ fn settlement_shop_name(path: &Path) -> String {
     } else {
         "未标注店铺".to_string()
     }
+}
+
+fn uploaded_file_name(original_file_name: &str, shop_name: &str, bytes: &[u8]) -> String {
+    let hash = stable_hash(shop_name.as_bytes())
+        .wrapping_mul(0x100000001b3)
+        .wrapping_add(stable_hash(bytes));
+    let mut safe_original = original_file_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if safe_original.len() > 80 {
+        safe_original.truncate(80);
+    }
+    if !safe_original.to_ascii_lowercase().ends_with(".csv") {
+        safe_original.push_str(".csv");
+    }
+    format!("upload_{hash:016x}_{safe_original}")
+}
+
+fn stable_hash(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 #[derive(Debug)]
@@ -426,12 +579,84 @@ mod tests {
     #[test]
     fn maps_known_download_files_to_shops() {
         assert_eq!(
-            settlement_shop_name(Path::new("DL202607181143232999613441.csv")),
+            settlement_shop_name(
+                Path::new("DL202607181143232999613441.csv"),
+                &BTreeMap::new()
+            ),
             "惠普办公设备旗舰店"
         );
         assert_eq!(
-            settlement_shop_name(Path::new("DL202607181203353587675137.csv")),
+            settlement_shop_name(
+                Path::new("DL202607181203353587675137.csv"),
+                &BTreeMap::new()
+            ),
             "HYPEX极度未知凡飞店"
         );
+    }
+
+    #[test]
+    fn uploaded_shop_map_overrides_file_name_fallback() {
+        let mut shop_map = BTreeMap::new();
+        shop_map.insert(
+            "DL202607181143232999613441.csv".to_string(),
+            "手动填写店铺".to_string(),
+        );
+        assert_eq!(
+            settlement_shop_name(Path::new("DL202607181143232999613441.csv"), &shop_map),
+            "手动填写店铺"
+        );
+    }
+
+    #[test]
+    fn validates_settlement_csv_shape() {
+        let text =
+            "结算时间,订单号,结算金额,收入合计,支出合计\n说明,,,,\n2026-07-01,1,2.00,3.00,-1.00\n";
+        assert_eq!(validate_settlement_csv(text.as_bytes()).unwrap(), 1);
+    }
+
+    #[test]
+    fn saves_uploaded_csv_with_shop_mapping() {
+        let base = std::env::temp_dir().join(format!(
+            "luopan-settlement-upload-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let paths = RuntimePaths {
+            app_dir: base.clone(),
+            output_dir: base.join("output"),
+            state_dir: base.join("state"),
+            config_dir: base.join("config"),
+            logs_dir: base.join("logs"),
+            session_dir: base.join("session"),
+        };
+        let text = "结算时间,订单号,结算金额,收入合计,支出合计\n说明,,,,\n2026-07-01,order-1,2.00,3.00,-1.00\n";
+
+        let upload = save_settlement_upload(&paths, "plain.csv", "测试店铺", text.as_bytes())
+            .expect("save upload");
+        let saved_name = upload["file"]["name"].as_str().unwrap();
+        assert!(saved_name.starts_with("upload_"));
+
+        let dashboard = load_settlement_dashboard_for_shop(&paths, Some("测试店铺")).unwrap();
+        assert_eq!(dashboard["summary"]["row_count"], json!(1));
+        assert_eq!(dashboard["summary"]["order_count"], json!(1));
+        assert_eq!(dashboard["shops"], json!(["测试店铺"]));
+
+        let second_upload =
+            save_settlement_upload(&paths, "plain.csv", "改名店铺", text.as_bytes())
+                .expect("deduplicate upload");
+        assert_eq!(second_upload["file"]["deduplicated"], json!(true));
+        assert_eq!(
+            csv_files(&paths.output_dir.join("settlement"))
+                .unwrap()
+                .len(),
+            1
+        );
+        let renamed_dashboard =
+            load_settlement_dashboard_for_shop(&paths, Some("改名店铺")).unwrap();
+        assert_eq!(renamed_dashboard["summary"]["row_count"], json!(1));
+
+        let _ = fs::remove_dir_all(base);
     }
 }

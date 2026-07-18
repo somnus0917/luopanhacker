@@ -208,7 +208,7 @@ curl -s http://127.0.0.1:8601/api/diagnostics
 
 订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
 
-结算看板读取本地 `output/settlement/` 目录中的抖音结算 CSV，并支持按店铺筛选。当前文件名映射：`*3441.csv` 为惠普办公设备旗舰店，`*5137.csv` 为 HYPEX极度未知凡飞店。
+结算看板支持网页上传抖音结算 CSV，上传时填写店铺名称；也会读取本地 `output/settlement/` 目录中的 CSV，并支持按店铺筛选。当前历史文件名映射：`*3441.csv` 为惠普办公设备旗舰店，`*5137.csv` 为 HYPEX极度未知凡飞店。
 
 ```bash
 mkdir -p output/settlement

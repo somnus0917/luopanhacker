@@ -13,7 +13,7 @@ use luopan_jobs::{progress_log_tail, status_payload};
 use luopan_operations::load_operations_records;
 use luopan_orders::{commit_preview, delete_batch, public_imports};
 use luopan_runtime::{RuntimePaths, read_json_file};
-use luopan_settlement::load_settlement_dashboard_for_shop;
+use luopan_settlement::{load_settlement_dashboard_for_shop, save_settlement_upload};
 use luopan_storage::{
     StoragePool, kv_value, load_operations_records_from_db, public_imports_from_db, summary,
 };
@@ -74,6 +74,13 @@ struct SettlementQuery {
     shop: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SettlementUploadPayload {
+    shop_name: String,
+    file_name: String,
+    content: String,
+}
+
 fn default_terminal_output() -> bool {
     true
 }
@@ -131,6 +138,7 @@ async fn main() -> Result<()> {
         .route("/api/inventory", get(inventory_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
         .route("/api/settlement", get(settlement_dashboard))
+        .route("/api/settlement/uploads", post(upload_settlement))
         .route("/api/orders/imports", get(order_imports))
         .route("/api/orders/imports", post(commit_order_import))
         .route(
@@ -224,6 +232,29 @@ async fn settlement_dashboard(
     Ok(Json(
         load_settlement_dashboard_for_shop(&state.paths, query.shop.as_deref())
             .map_err(ApiError::internal)?,
+    ))
+}
+
+async fn upload_settlement(
+    State(state): State<AppState>,
+    Json(payload): Json<SettlementUploadPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let upload = save_settlement_upload(
+        &state.paths,
+        &payload.file_name,
+        &payload.shop_name,
+        payload.content.as_bytes(),
+    )
+    .map_err(ApiError::bad_request)?;
+    let dashboard = load_settlement_dashboard_for_shop(&state.paths, Some(&payload.shop_name))
+        .map_err(ApiError::internal)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "upload": upload,
+            "dashboard": dashboard,
+        })),
     ))
 }
 

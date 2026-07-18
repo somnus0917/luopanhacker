@@ -23,12 +23,13 @@ type AppState = {
   inventoryWarehouse: string;
   settlement: AnyRecord | null;
   settlementShop: string;
+  settlementUploadMessage: string;
   orderImports: { batches: AnyRecord[]; summary: AnyRecord };
   orderPreview: AnyRecord | null;
   orderImportMessage: string;
 };
 
-const state: AppState = { records: [], operationDates: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
+const state: AppState = { records: [], operationDates: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer: number | null = null;
 
@@ -597,6 +598,12 @@ function settlementShopFilter(payload) {
   return `<section class="table-filter-panel" aria-label="结算筛选"><div><strong>结算筛选</strong><span>按结算 CSV 对应店铺重算汇总与明细</span></div><label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
 }
 
+function settlementUploadPanel() {
+  const message = state.settlementUploadMessage ? `<p class="order-import-message">${escapeHtml(state.settlementUploadMessage)}</p>` : "";
+  const defaultShop = state.settlementShop || "";
+  return `<details class="panel order-import-panel"><summary><span>结算 CSV 导入</span><small>填写店铺 → 上传 CSV → 自动刷新</small></summary><div class="order-import-body"><form id="settlement-upload-form" class="order-upload-form"><label>店铺名称<input name="shop_name" value="${escapeHtml(defaultShop)}" required /></label><label class="file-picker"><span>选择结算 CSV</span><input id="settlement-upload-file" type="file" name="file" accept=".csv,text/csv" required /></label><button class="button" type="submit">上传并解析</button></form>${message}<p class="import-help">上传后文件保存在服务器 <code>output/settlement/</code>，店铺名会保存为本地映射，用于后续筛选与汇总。</p></div></details>`;
+}
+
 function settlementDetailTable(rows) {
   const body = [...(rows || [])].map((item) => {
     const governmentSubsidy = number(item.government_merchant) + number(item.government_platform);
@@ -634,12 +641,46 @@ function renderSettlement(payload) {
   ];
   $("#settlement-summary-cards").innerHTML = metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("");
   $("#settlement-content").innerHTML = summary.row_count
-    ? `${settlementShopFilter(payload)}<section class="panel operations-note"><h3>数据来源</h3><p>读取服务器本地 <code>output/settlement/</code> 目录下的抖音结算 CSV；金额按 CSV 原始元单位展示，不做分转元转换。</p><p>已读取文件：${escapeHtml(fileNames.join("、") || "—")}</p></section><div class="chart-grid"><div class="chart-stack">${settlementGroupTable("按结算月份", payload.months)}${settlementGroupTable("按店铺", payload.shop_groups)}</div><div class="chart-stack">${settlementGroupTable("按商户主体", payload.subjects)}${settlementGroupTable("按业务类型", payload.business_types)}</div></div>${settlementDetailTable(payload.rows)}`
-    : `${settlementShopFilter(payload)}<div class="empty-panel"><strong>暂无结算数据</strong><span>请把抖音结算 CSV 放入服务器 output/settlement/ 目录后刷新页面。</span></div>`;
+    ? `${settlementUploadPanel()}${settlementShopFilter(payload)}<section class="panel operations-note"><h3>数据来源</h3><p>读取服务器本地 <code>output/settlement/</code> 目录下的抖音结算 CSV；金额按 CSV 原始元单位展示，不做分转元转换。</p><p>已读取文件：${escapeHtml(fileNames.join("、") || "—")}</p></section><div class="chart-grid"><div class="chart-stack">${settlementGroupTable("按结算月份", payload.months)}${settlementGroupTable("按店铺", payload.shop_groups)}</div><div class="chart-stack">${settlementGroupTable("按商户主体", payload.subjects)}${settlementGroupTable("按业务类型", payload.business_types)}</div></div>${settlementDetailTable(payload.rows)}`
+    : `${settlementUploadPanel()}${settlementShopFilter(payload)}<div class="empty-panel"><strong>暂无结算数据</strong><span>请上传结算 CSV 或把文件放入服务器 output/settlement/ 目录后刷新页面。</span></div>`;
+  $("#settlement-upload-form")?.addEventListener("submit", uploadSettlement);
   $('[data-settlement-filter="shop"]')?.addEventListener("change", (event) => {
     state.settlementShop = event.currentTarget.value;
     loadSettlement();
   });
+}
+
+async function uploadSettlement(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("button", form);
+  const data = new FormData(form);
+  const uploadFile = data.get("file");
+  const shopName = String(data.get("shop_name") || "").trim();
+  if (!(uploadFile instanceof File) || !shopName) {
+    state.settlementUploadMessage = "请选择结算 CSV 并填写店铺名称。";
+    if (state.settlement) renderSettlement(state.settlement);
+    return;
+  }
+  button.disabled = true;
+  button.textContent = "正在上传…";
+  state.settlementUploadMessage = "";
+  const content = await uploadFile.text();
+  const response = await fetch("/api/settlement/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    state.settlementUploadMessage = payload.error || "结算 CSV 上传失败，请检查文件格式。";
+    if (state.settlement) renderSettlement(state.settlement);
+    return;
+  }
+  const uploaded = payload.upload?.file || {};
+  state.settlementShop = uploaded.shop_name || state.settlementShop;
+  state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
+  renderSettlement(payload.dashboard || state.settlement || {});
 }
 
 async function loadSettlement() {

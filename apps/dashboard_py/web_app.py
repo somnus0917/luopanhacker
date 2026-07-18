@@ -331,6 +331,16 @@ def settlement_data():
     return rust_api_response("/api/settlement", query=request.args.to_dict(flat=True))
 
 
+@app.post("/api/settlement/uploads")
+@require_login
+def upload_settlement():
+    return rust_api_response(
+        "/api/settlement/uploads",
+        method="POST",
+        payload=request.get_json(silent=True) or {},
+    )
+
+
 @app.get("/api/status")
 @require_login
 def status():
