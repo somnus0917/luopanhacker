@@ -125,7 +125,6 @@ Playwright browser automation.
 
 `luopan-worker-rs storage-sync` creates the Rust SQLite schema and syncs current
 JSON-derived operations records, order-import history, task status, and the
-operations, order-import history, task status, and the
 inventory dashboard snapshot into `LUOPAN_STORAGE_DB`. The Rust API can read
 operations, order imports, and inventory snapshots from SQLite when
 `LUOPAN_API_RS_STORAGE_READS=true`. Empty or failed SQLite reads fall back to

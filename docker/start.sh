@@ -5,8 +5,8 @@ echo "========================================"
 echo "  Douyin Compass Dashboard - Starting  "
 echo "========================================"
 
-# 管理员密码由 Flask 用于首次初始化。拒绝已知默认值和短密码，避免服务在
-# 未显式完成生产配置时对外启动。
+# 管理员密码由 Rust 看板 API 用于首次初始化。拒绝已知默认值和短密码，
+# 避免服务在未显式完成生产配置时对外启动。
 admin_password="${ADMIN_PASSWORD:-}"
 if [ -z "$admin_password" ]; then
     echo "ERROR: ADMIN_PASSWORD must be set before starting the service." >&2

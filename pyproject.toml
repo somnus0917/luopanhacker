@@ -14,3 +14,7 @@ dependencies = [
 [tool.uv]
 # This is an application repository, not a distributable Python package.
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
