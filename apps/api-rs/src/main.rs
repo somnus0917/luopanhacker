@@ -1,4 +1,9 @@
-use std::{env, fs, net::SocketAddr, sync::Arc};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    process::{Command, Stdio},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
@@ -183,6 +188,7 @@ async fn main() -> Result<()> {
         .route("/api/diagnostics", get(diagnostics))
         .route("/api/storage/summary", get(storage_summary))
         .route("/api/status", get(status))
+        .route("/api/scrape", post(scrape))
         .route("/api/status/raw", get(status_raw))
         .route("/api/status/log-tail", get(status_log_tail))
         .route_layer(from_fn_with_state(state.clone(), require_auth));
@@ -631,6 +637,151 @@ async fn status(
     ))
 }
 
+async fn scrape(State(state): State<AppState>) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let current_status =
+        status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
+    if current_status
+        .get("job_running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "已有采集任务在运行".to_string(),
+        });
+    }
+
+    let paths = state.paths.clone();
+    tokio::task::spawn_blocking(move || write_manual_scrape_requested_status(&paths))
+        .await
+        .map_err(|error| ApiError::internal(error.into()))?
+        .map_err(ApiError::internal)?;
+    spawn_manual_scrape(&state.paths).map_err(ApiError::internal)?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({ "message": "已启动手动补采任务" })),
+    ))
+}
+
+fn write_manual_scrape_requested_status(paths: &RuntimePaths) -> Result<()> {
+    let (program, mut args) =
+        configured_command("STATUS_UPDATE_COMMAND", "luopan-worker-rs status-update")?;
+    args.extend([
+        "--state".to_string(),
+        "manual_requested".to_string(),
+        "--message".to_string(),
+        "已收到手动补采请求，正在启动采集任务".to_string(),
+        "--last-error".to_string(),
+        String::new(),
+    ]);
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(&paths.app_dir)
+        .env("LUOPAN_APP_DIR", &paths.app_dir)
+        .stdin(Stdio::null())
+        .output()
+        .context("run rust worker status-update")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "rust worker status-update exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+fn spawn_manual_scrape(paths: &RuntimePaths) -> Result<()> {
+    let (program, mut args) =
+        configured_command("MANUAL_SCRAPE_COMMAND", "luopan-worker-rs compass-scrape")?;
+    args.extend([
+        "--random-delay-seconds".to_string(),
+        "0".to_string(),
+        "--login-timeout-minutes".to_string(),
+        "30".to_string(),
+    ]);
+
+    fs::create_dir_all(&paths.output_dir)
+        .with_context(|| format!("create {}", paths.output_dir.display()))?;
+    let log_file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths.progress_log_path())
+        .with_context(|| format!("open {}", paths.progress_log_path().display()))?;
+    let stderr = log_file.try_clone().context("clone progress log handle")?;
+    Command::new(program)
+        .args(args)
+        .current_dir(&paths.app_dir)
+        .env("LUOPAN_APP_DIR", &paths.app_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(stderr))
+        .spawn()
+        .context("spawn manual compass scrape")?;
+    Ok(())
+}
+
+fn configured_command(key: &str, default: &str) -> Result<(String, Vec<String>)> {
+    let value = env::var(key).unwrap_or_else(|_| default.to_string());
+    let mut parts = parse_command(&value)?;
+    let program = parts.remove(0);
+    Ok((program, parts))
+}
+
+fn parse_command(value: &str) -> Result<Vec<String>> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut has_content = false;
+
+    for character in value.chars() {
+        if escaped {
+            current.push(character);
+            has_content = true;
+            escaped = false;
+            continue;
+        }
+        match (quote, character) {
+            (_, '\\') => escaped = true,
+            (Some(quote_character), character) if character == quote_character => quote = None,
+            (Some(_), character) => {
+                current.push(character);
+                has_content = true;
+            }
+            (None, '\'' | '"') => {
+                quote = Some(character);
+                has_content = true;
+            }
+            (None, character) if character.is_whitespace() => {
+                if has_content {
+                    parts.push(std::mem::take(&mut current));
+                    has_content = false;
+                }
+            }
+            (None, character) => {
+                current.push(character);
+                has_content = true;
+            }
+        }
+    }
+
+    if escaped {
+        anyhow::bail!("command ends with an escape character");
+    }
+    if quote.is_some() {
+        anyhow::bail!("command has an unterminated quote");
+    }
+    if has_content {
+        parts.push(current);
+    }
+    if parts.is_empty() {
+        anyhow::bail!("command must not be empty");
+    }
+    Ok(parts)
+}
+
 async fn status_log_tail(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let path = state.paths.progress_log_path();
     let tail = progress_log_tail(&state.paths)
@@ -825,6 +976,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(authenticated_user(&pool, &headers).await.unwrap(), None);
+    }
+
+    #[test]
+    fn parses_configured_commands_without_invoking_a_shell() {
+        assert_eq!(
+            parse_command("worker --label 'manual scrape' --path \"a b\"").unwrap(),
+            ["worker", "--label", "manual scrape", "--path", "a b"]
+        );
+        assert_eq!(parse_command("worker \"\"").unwrap(), ["worker", ""]);
+        assert!(parse_command("worker 'unterminated").is_err());
+        assert!(parse_command("   ").is_err());
+    }
+
+    #[tokio::test]
+    async fn scrape_rejects_requests_while_a_job_is_running() {
+        let root = std::env::temp_dir().join(format!(
+            "luopan-api-scrape-busy-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = RuntimePaths {
+            app_dir: root.clone(),
+            output_dir: root.join("output"),
+            state_dir: root.join("state"),
+            config_dir: root.join("config"),
+            logs_dir: root.join("logs"),
+            session_dir: root.join("session"),
+        };
+        fs::create_dir_all(&paths.output_dir).unwrap();
+        fs::write(paths.daily_lock_path(), "busy").unwrap();
+        let state = AppState {
+            paths: Arc::new(paths),
+            novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
+            auth_pool: Arc::new(test_pool().await),
+            storage_pool: None,
+        };
+
+        let error = scrape(State(state)).await.unwrap_err();
+        assert_eq!(error.status, StatusCode::CONFLICT);
+        assert_eq!(error.message, "已有采集任务在运行");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[tokio::test]
