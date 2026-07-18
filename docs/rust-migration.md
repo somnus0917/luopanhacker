@@ -5,7 +5,8 @@ existing Python Playwright scrapers and noVNC browser environment.
 
 ## Current Boundary
 
-- `apps/api-rs`: Rust sidecar API for health checks and runtime file reads.
+- `apps/api-rs`: production Rust dashboard API for authentication, static files,
+  health checks, and runtime data.
 - `apps/worker-rs`: Rust task runner that calls the existing Python scripts.
 - `crates/jobs`: Rust采集状态 payload, status-file updates, and log tails.
 - `crates/inventory`: Rust port of the inventory dashboard aggregation logic.
@@ -14,7 +15,7 @@ existing Python Playwright scrapers and noVNC browser environment.
 - `crates/runtime`: shared runtime path discovery and JSON/log file helpers.
 - `crates/storage`: SQLx/SQLite schema and sync commands for Rust-owned state.
 - Python Playwright scripts remain the source of truth for browser automation.
-- Flask remains the production dashboard until individual endpoints are ported.
+- `luopan-api-rs` is the production dashboard service and listens on port 8501.
 
 ## Why This Shape
 
@@ -43,10 +44,11 @@ cargo run -p luopan-worker-rs -- inventory-sync --refresh-only
 cargo run -p luopan-worker-rs -- compass-scrape --random-delay-seconds 0
 ```
 
-The Rust API listens on `127.0.0.1:8601` by default. Override with:
+The Rust dashboard API listens on `127.0.0.1:8501` in production. Override the
+local bind address or port with:
 
 ```bash
-LUOPAN_API_RS_HOST=0.0.0.0 LUOPAN_API_RS_PORT=8601 cargo run -p luopan-api-rs
+LUOPAN_API_RS_HOST=0.0.0.0 LUOPAN_API_RS_PORT=8501 cargo run -p luopan-api-rs
 ```
 
 ## Initial Endpoints
@@ -65,8 +67,7 @@ LUOPAN_API_RS_HOST=0.0.0.0 LUOPAN_API_RS_PORT=8601 cargo run -p luopan-api-rs
 - `GET /api/status/raw`
 - `GET /api/status/log-tail`
 
-These are intentionally sidecar endpoints, not drop-in replacements for the
-existing Flask API yet.
+These endpoints are served directly by the production Rust dashboard API.
 
 ## Frontend
 
@@ -81,8 +82,8 @@ pnpm build
 pnpm dev
 ```
 
-Vite serves `apps/web/index.html` and proxies `/api` plus `/assets` to Flask on
-`127.0.0.1:8501`.
+Vite serves `apps/web/index.html` and proxies `/api` plus `/assets` to the Rust
+API on `127.0.0.1:8501`.
 
 ## Rust Runtime Model
 
@@ -94,12 +95,9 @@ when the release binary is not on `PATH`.
 Docker Compose exposes the Rust-owned production defaults through `.env`:
 
 ```bash
-LUOPAN_API_RS_ENABLED=true
 LUOPAN_API_RS_HOST=0.0.0.0
-LUOPAN_API_RS_PORT=8601
+LUOPAN_API_RS_PORT=8501
 LUOPAN_API_RS_STORAGE_READS=true
-RUST_API_BASE_URL="http://127.0.0.1:8601"
-RUST_API_TIMEOUT=2
 MANUAL_SCRAPE_COMMAND="luopan-worker-rs compass-scrape"
 STATUS_UPDATE_COMMAND="luopan-worker-rs status-update"
 SCHEDULED_SCRAPE_RUST_WORKER=true
@@ -107,28 +105,18 @@ LUOPAN_STORAGE_DB="/app/state/luopan.db"
 STORAGE_SYNC_AFTER_SCRAPE=true
 ```
 
-`luopan-api-rs` is registered in supervisor but stays dormant unless
-`LUOPAN_API_RS_ENABLED=true`. Its logs are written to:
+`luopan-api-rs` is the dashboard supervisor program. Its logs are written to:
 
 ```bash
-/app/logs/rust-api-rs.log
-/app/logs/rust-api-rs.err
+/app/logs/dashboard.log
+/app/logs/dashboard.err
 ```
 
-## Flask-To-Rust Boundary
+## Dashboard Boundary
 
-Flask owns browser sessions, authentication, static files, and the order Excel
-preview upload. Business data APIs are required to come from `api-rs`:
-
-- `/api/compass`
-- `/api/orders/imports`
-- `/api/orders/imports/<batch_id>`
-- `/api/status`
-- `/api/inventory`
-
-If `api-rs` is unavailable, Flask returns HTTP 502 instead of reading the legacy
-Python JSON sources. Order Excel preview parsing stays in Python until it is
-ported to Rust.
+Rust owns browser sessions, authentication, static files, the order Excel preview
+upload, and the business data API. Python remains responsible for Playwright
+browser automation.
 
 Manual and scheduled compass scraping can also enter through `luopan-worker-rs
 compass-scrape`. Rust owns the task entrypoint and the shared task-status
@@ -137,10 +125,11 @@ Playwright browser automation.
 
 `luopan-worker-rs storage-sync` creates the Rust SQLite schema and syncs current
 JSON-derived operations records, order-import history, task status, and the
+operations, order-import history, task status, and the
 inventory dashboard snapshot into `LUOPAN_STORAGE_DB`. The Rust API can read
 operations, order imports, and inventory snapshots from SQLite when
-`LUOPAN_API_RS_STORAGE_READS=true`. Empty or failed SQLite reads are handled
-inside `api-rs`, not by Flask.
+`LUOPAN_API_RS_STORAGE_READS=true`. Empty or failed SQLite reads fall back to
+the JSON-derived payloads inside `api-rs`.
 
 When `STORAGE_SYNC_AFTER_SCRAPE=true`, `luopan-worker-rs compass-scrape` syncs
 SQLite immediately after a successful Python Playwright scrape. The cron wrapper
@@ -148,8 +137,8 @@ only runs a separate sync when it directly executes the Python scheduler.
 
 ## Completed Porting Steps
 
-- Flask now requires Rust API reads for status, operations, order imports, and
-  inventory; there is no Flask Python data fallback.
+- The Rust dashboard API directly serves status, operations, order imports,
+  inventory, authentication, and static assets.
 - `LUOPAN_API_RS_STORAGE_READS=true` is the default. SQLite reads fall back to
   JSON-derived payloads when the DB is empty or unavailable.
 - `STORAGE_SYNC_AFTER_SCRAPE=true` is the default, so Rust worker scrapes sync
@@ -163,8 +152,7 @@ only runs a separate sync when it directly executes the Python scheduler.
 
 ## Remaining Optional Work
 
-- Replace the Flask-authenticated static shell with a standalone Vite dev
-  server for local frontend iteration.
+
 - Move order Excel preview parsing into Rust.
 - Keep Python Playwright/noVNC as the browser automation boundary.
 

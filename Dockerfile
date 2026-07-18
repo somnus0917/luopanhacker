@@ -84,8 +84,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY . .
 RUN uv sync --locked --no-dev
 
-# Rust migration sidecar binaries. Flask uses luopan-worker-rs for optional
-# inventory shadow comparison; luopan-api-rs is available for manual sidecar runs.
+# Rust control-plane binaries. Python remains only for browser automation.
 COPY --from=rust-builder /src/target/release/luopan-worker-rs /usr/local/bin/luopan-worker-rs
 COPY --from=rust-builder /src/target/release/luopan-api-rs /usr/local/bin/luopan-api-rs
 
@@ -102,14 +101,13 @@ COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # 创建启动脚本
 COPY docker/start.sh /start.sh
-RUN chmod +x /start.sh /app/docker/run_api_rs.sh
+RUN chmod +x /start.sh
 
 # 暴露端口
 # 6080: noVNC 网页远程桌面
-# 8501: 独立网页看板
+# 8501: Rust dashboard API and static frontend
 # 5900: VNC 直连（可选）
-# 8601: Rust API sidecar（手动启用）
-EXPOSE 6080 8501 5900 8601
+EXPOSE 6080 8501 5900
 
 # 数据卷
 VOLUME ["/app/output", "/app/session"]

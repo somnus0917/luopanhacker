@@ -100,7 +100,7 @@ http://127.0.0.1:8501
 
 登录后可以在侧边栏修改密码和管理用户。
 
-当前生产看板走 Rust API sidecar 和 SQLite 优先读取；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。Flask 只负责登录、静态文件和代理 Rust API。前端源码位于 `apps/web/src/main.ts`，运行时静态产物仍提交在 `web/static/`。
+当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。前端源码位于 `apps/web/src/main.ts`，运行时静态产物仍提交在 `web/static/`。
 
 部署后可以用一条命令检查核心状态：
 
@@ -108,7 +108,7 @@ http://127.0.0.1:8501
 docker exec -it douyin-compass luopan-worker-rs doctor
 ```
 
-前端本地开发可以在 Flask 运行时启动 Vite：
+前端本地开发可以启动 Rust API 和 Vite：
 
 ```bash
 cd apps/web

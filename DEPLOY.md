@@ -143,9 +143,9 @@ TARGET_SHOPS = (
 当前镜像会同时构建两个 Rust 二进制：
 
 - `luopan-worker-rs`: 用于采集任务编排、状态写入、SQLite 同步和库存聚合
-- `luopan-api-rs`: Rust API sidecar，Flask 业务 API 必须代理到它
+- `luopan-api-rs`: 生产看板服务，直接提供登录、静态前端和业务 API
 
-Rust API sidecar 默认启动。修改 `.env` 后重启容器：
+Rust 看板 API 默认启动并监听 8501。修改 `.env` 后重启容器：
 
 ```bash
 docker-compose up -d
@@ -154,14 +154,11 @@ docker-compose up -d
 默认值如下：
 
 ```bash
-LUOPAN_API_RS_ENABLED=true
 LUOPAN_API_RS_HOST=0.0.0.0
-LUOPAN_API_RS_PORT=8601
-RUST_API_BASE_URL=http://127.0.0.1:8601
-RUST_API_TIMEOUT=2
+LUOPAN_API_RS_PORT=8501
 ```
 
-如果 `api-rs` 不可用，Flask 会返回 502，不再读取 Python 本地业务数据。上传和预览订单 Excel 仍由 Python 负责，确认写入和撤销走 Rust。
+`api-rs` 直接提供看板；上传、预览、确认写入和撤销均由 Rust API 处理。Python 仅保留 Playwright 抓取。
 
 手动补采和定时补采也可以通过 Rust worker 进入 Python Playwright 抓取器。默认容器配置已经打开：
 
@@ -196,14 +193,14 @@ LUOPAN_API_RS_STORAGE_READS=false
 打开后也可以直接检查 Rust API 的数据库汇总：
 
 ```bash
-curl -s http://127.0.0.1:8601/api/storage/summary
+curl -s http://127.0.0.1:8501/api/storage/summary
 ```
 
 一条命令做部署健康检查：
 
 ```bash
 docker exec -it douyin-compass luopan-worker-rs doctor
-curl -s http://127.0.0.1:8601/api/diagnostics
+curl -s http://127.0.0.1:8501/api/diagnostics
 ```
 
 订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
@@ -217,11 +214,11 @@ docker exec -it douyin-compass luopan-worker-rs settlement-json
 docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "HYPEX极度未知凡飞店"
 ```
 
-sidecar 日志位置：
+看板 API 日志位置：
 
 ```bash
-tail -f /app/logs/rust-api-rs.log
-tail -f /app/logs/rust-api-rs.err
+tail -f /app/logs/dashboard.log
+tail -f /app/logs/dashboard.err
 ```
 
 ## 故障排查

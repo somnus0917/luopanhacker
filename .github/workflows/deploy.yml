@@ -57,7 +57,7 @@ jobs:
           node --check web/static/app.js
           bash -n ops/deploy.sh ops/backup.sh ops/ssh-deploy-wrapper.sh \
             docker/start.sh docker/cron_scrape.sh docker/cron_inventory_sync.sh \
-            docker/run_api_rs.sh docker/run_daily.sh docker/test-deploy.sh \
+            docker/run_daily.sh docker/test-deploy.sh \
             scripts/run_daily.sh scripts/run_dashboard.sh scripts/run_inventory_sync.sh \
             scripts/deploy_from_github.sh
       - name: Validate Docker Compose production mounts

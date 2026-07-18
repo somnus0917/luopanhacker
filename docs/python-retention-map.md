@@ -22,8 +22,7 @@ page capture. They should stay Python unless the scraper strategy changes.
 These files contain API, state, storage, dashboard aggregation, or import logic.
 They are good Rust migration candidates.
 
-- `apps/dashboard_py/web_app.py`: keep only login/static/proxy shell until the
-  shell itself moves to Rust or a standalone frontend host.
+
 - `apps/scraper_py/task_status.py`: thin Python shim that writes through
   `crates/jobs`.
 - `apps/legacy_metrics_py/inventory_data.py`: being replaced by
@@ -51,8 +50,8 @@ Docker startup path.
 - `crates/inventory`: Rust inventory dashboard aggregation.
 - `crates/jobs`: Rust task status payload, status-file update, and progress log
   tail.
-- `apps/api-rs`: Rust API sidecar for operations, orders, inventory, status,
-  raw files, diagnostics, and health.
+- `apps/api-rs`: production Rust dashboard API for authentication, static files,
+  operations, orders, inventory, status, raw files, diagnostics, and health.
 - `apps/worker-rs`: Rust CLI for inventory/status commands and Python scraper
   subprocess orchestration.
 - `crates/orders`: Rust order import read, confirm, delete, and snapshot update

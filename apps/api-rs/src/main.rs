@@ -146,7 +146,7 @@ async fn main() -> Result<()> {
     if let Some(argument) = env::args().nth(1) {
         if argument == "-h" || argument == "--help" {
             println!(
-                "Rust API sidecar for the Luopan data center migration\n\nUsage: luopan-api-rs\n\nEnvironment:\n  LUOPAN_API_RS_HOST           Bind host, default 127.0.0.1\n  LUOPAN_API_RS_PORT           Bind port, default 8601\n  LUOPAN_API_RS_STORAGE_READS  Read supported payloads from SQLite when true"
+                "Rust dashboard API for Luopan\n\nUsage: luopan-api-rs\n\nEnvironment:\n  LUOPAN_API_RS_HOST           Bind host, default 127.0.0.1\n  LUOPAN_API_RS_PORT           Bind port, default 8501\n  LUOPAN_API_RS_STORAGE_READS  Read supported payloads from SQLite when true"
             );
             return Ok(());
         }
@@ -167,6 +167,7 @@ async fn main() -> Result<()> {
     let auth_pool = Arc::new(luopan_storage::connect(&paths).await?);
     luopan_storage::migrate(&auth_pool).await?;
     import_legacy_users(&auth_pool, &paths).await?;
+    ensure_initial_admin(&auth_pool, env::var("ADMIN_PASSWORD").ok().as_deref()).await?;
     let storage_pool = env_bool("LUOPAN_API_RS_STORAGE_READS", false).then_some(auth_pool.clone());
     let state = AppState {
         paths: paths.clone(),
@@ -221,7 +222,7 @@ async fn main() -> Result<()> {
     let port = env::var("LUOPAN_API_RS_PORT")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(8601);
+        .unwrap_or(8501);
     let address: SocketAddr = format!("{host}:{port}").parse()?;
     tracing::info!(%address, "starting luopan-api-rs");
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -339,6 +340,29 @@ fn invalid_credentials() -> ApiError {
         status: StatusCode::UNAUTHORIZED,
         message: "用户名或密码错误".to_string(),
     }
+}
+
+async fn ensure_initial_admin(pool: &StoragePool, password: Option<&str>) -> Result<()> {
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
+    if user_count > 0 {
+        return Ok(());
+    }
+
+    let password = password
+        .filter(|value| !value.trim().is_empty())
+        .context("ADMIN_PASSWORD must be set when initializing the first dashboard account")?;
+    sqlx::query(
+        "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind("admin")
+    .bind(hash_password(password)?)
+    .bind("admin")
+    .bind(now_string())
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 async fn import_legacy_users(pool: &StoragePool, paths: &RuntimePaths) -> Result<()> {
@@ -977,6 +1001,28 @@ mod tests {
                 .get(0);
         assert!(upgraded.starts_with("$argon2"));
         assert!(verify_password("dashboard-password", &upgraded));
+    }
+
+    #[tokio::test]
+    async fn initializes_configured_admin_only_when_users_are_absent() {
+        let pool = test_pool().await;
+        ensure_initial_admin(&pool, Some("strong-password"))
+            .await
+            .unwrap();
+        let user: (String, String) =
+            sqlx::query_as("SELECT username, password_hash FROM users WHERE username = 'admin'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(user.0, "admin");
+        assert!(verify_password("strong-password", &user.1));
+
+        ensure_initial_admin(&pool, None).await.unwrap();
+        let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(user_count, 1);
     }
 
     #[tokio::test]

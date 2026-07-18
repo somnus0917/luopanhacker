@@ -27,7 +27,7 @@ rsync -a \
 
 cd "$APP_DIR"
 python3 -m py_compile \
-  apps/dashboard_py/web_app.py \
+
   apps/legacy_metrics_py/dashboard.py \
   apps/scraper_py/scheduler_run.py \
   apps/scraper_py/scraper.py

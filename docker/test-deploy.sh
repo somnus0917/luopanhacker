@@ -29,7 +29,7 @@ required_files=(
     "pyproject.toml"
     "uv.lock"
     "apps/scraper_py/daily_compass.py"
-    "apps/dashboard_py/web_app.py"
+    "apps/api-rs/src/main.rs"
 )
 
 for file in "${required_files[@]}"; do
