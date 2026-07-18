@@ -1,9 +1,12 @@
 use std::{
+    fs,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
+use chrono::{DateTime, Local};
 use clap::{Parser, Subcommand};
 use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::{status_payload, try_status_patch, write_task_status};
@@ -255,9 +258,12 @@ async fn doctor(paths: &RuntimePaths) -> serde_json::Value {
     let inventory_exists = paths.inventory_snapshot_path().exists();
     let task_status_exists = paths.task_status_path().exists();
     let progress_log_exists = paths.progress_log_path().exists();
-    let operations_count = load_operations_records(paths)
-        .map(|records| records.len())
-        .unwrap_or_default();
+    let operations = load_operations_records(paths).unwrap_or_default();
+    let operations_count = operations.len();
+    let max_data_age =
+        Duration::from_secs(env_u64("LUOPAN_DOCTOR_MAX_DATA_AGE_HOURS", 36) * 60 * 60);
+    let operations_freshness = operations_freshness(paths, &operations, max_data_age);
+    let storage_freshness = path_freshness(&paths.storage_db_path(), max_data_age);
     let order_imports = public_imports(paths).unwrap_or_else(|error| {
         serde_json::json!({"error": error.to_string(), "summary": {"batches": 0, "orders": 0}})
     });
@@ -285,6 +291,14 @@ async fn doctor(paths: &RuntimePaths) -> serde_json::Value {
     let ok = inventory_exists
         && task_status_exists
         && operations_count > 0
+        && operations_freshness
+            .get("fresh")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        && storage_freshness
+            .get("fresh")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
         && storage
             .get("ok")
             .and_then(serde_json::Value::as_bool)
@@ -300,8 +314,111 @@ async fn doctor(paths: &RuntimePaths) -> serde_json::Value {
             "order_imports": order_imports.get("summary").cloned().unwrap_or_default(),
             "storage": storage,
             "status": status,
+        },
+        "freshness": {
+            "max_data_age_hours": max_data_age.as_secs() / 3600,
+            "operations": operations_freshness,
+            "storage": storage_freshness,
         }
     })
+}
+
+fn operations_freshness(
+    paths: &RuntimePaths,
+    operations: &[luopan_operations::OperationRecord],
+    max_age: Duration,
+) -> serde_json::Value {
+    let latest_captured_at = operations
+        .iter()
+        .map(|record| record.captured_at.as_str())
+        .filter(|timestamp| !timestamp.is_empty())
+        .max()
+        .unwrap_or_default();
+    let latest_business_date = operations
+        .iter()
+        .map(|record| record.date.as_str())
+        .max()
+        .unwrap_or_default();
+    let newest_source = operations
+        .iter()
+        .filter(|record| !record.source_file.is_empty())
+        .filter_map(|record| {
+            let source_path = PathBuf::from(&record.source_file);
+            let source_path = if source_path.is_absolute() {
+                source_path
+            } else {
+                paths.app_dir.join(source_path)
+            };
+            fs::metadata(&source_path)
+                .ok()?
+                .modified()
+                .ok()
+                .map(|modified| (source_path, modified))
+        })
+        .max_by_key(|(_, modified)| *modified);
+
+    let Some((source_path, modified)) = newest_source else {
+        return serde_json::json!({
+            "exists": false,
+            "fresh": false,
+            "records": operations.len(),
+            "latest_captured_at": latest_captured_at,
+            "latest_business_date": latest_business_date,
+        });
+    };
+    let age = modified.elapsed().unwrap_or_default();
+    let modified_at: DateTime<Local> = modified.into();
+    serde_json::json!({
+        "exists": true,
+        "fresh": age <= max_age,
+        "source_file": source_path,
+        "last_modified": modified_at.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
+        "age_seconds": age.as_secs(),
+        "records": operations.len(),
+        "latest_captured_at": latest_captured_at,
+        "latest_business_date": latest_business_date,
+    })
+}
+
+fn path_freshness(path: &Path, max_age: Duration) -> serde_json::Value {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return serde_json::json!({
+                "exists": false,
+                "fresh": false,
+                "path": path,
+                "error": error.to_string(),
+            });
+        }
+    };
+    let modified = match metadata.modified() {
+        Ok(modified) => modified,
+        Err(error) => {
+            return serde_json::json!({
+                "exists": true,
+                "fresh": false,
+                "path": path,
+                "error": error.to_string(),
+            });
+        }
+    };
+    let age = modified.elapsed().unwrap_or_default();
+    let modified_at: DateTime<Local> = modified.into();
+    serde_json::json!({
+        "exists": true,
+        "fresh": age <= max_age,
+        "path": path,
+        "last_modified": modified_at.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
+        "age_seconds": age.as_secs(),
+    })
+}
+
+fn env_u64(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_bool(key: &str, default: bool) -> bool {

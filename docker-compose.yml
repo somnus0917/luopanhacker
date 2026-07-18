@@ -17,7 +17,8 @@ services:
       - DISPLAY=:99
       - LUOPAN_STATE_DIR=/app/state
       - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}  # 从 .env 读取或使用默认值
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}       # 管理员密码
+      # 必须在 .env 中设置；容器启动时会拒绝空值、默认值及短密码。
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - LUOPAN_API_RS_HOST=${LUOPAN_API_RS_HOST:-0.0.0.0}
       - LUOPAN_API_RS_PORT=8501
       - LUOPAN_API_RS_STORAGE_READS=${LUOPAN_API_RS_STORAGE_READS:-true}

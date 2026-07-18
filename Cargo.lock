@@ -1087,6 +1087,7 @@ name = "luopan-worker-rs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "luopan-inventory",
  "luopan-jobs",

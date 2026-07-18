@@ -17,7 +17,7 @@ APP_DIR = Path(__file__).resolve().parents[2]
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from apps.scraper_py.scraper import BROWSERS_DIR, human_pause, wait_network_quiet
+from apps.scraper_py.scraper import BROWSERS_DIR, human_pause, wait_network_quiet  # noqa: E402
 
 
 ORDER_PAGE_URL = (

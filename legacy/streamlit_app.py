@@ -7,10 +7,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pandas as pd
-import streamlit as st
+import pandas as pd  # noqa: E402
+import streamlit as st  # noqa: E402
 
-from auth import (
+from auth import (  # noqa: E402
     add_user,
     change_password,
     delete_user,
@@ -19,7 +19,7 @@ from auth import (
     logout,
     require_auth,
 )
-from dashboard import (
+from dashboard import (  # noqa: E402
     CONTENT_LABELS,
     MONEY_METRICS,
     aggregate,
@@ -32,8 +32,8 @@ from dashboard import (
     percent,
     shop_list,
 )
-from order_dashboard import load_all_orders, load_tmall_msd_orders, normalize_order_status
-from task_status import LOGIN_SCREENSHOT, read_status, write_status
+from order_dashboard import load_all_orders, load_tmall_msd_orders, normalize_order_status  # noqa: E402
+from task_status import LOGIN_SCREENSHOT, read_status, write_status  # noqa: E402
 
 
 APP_DIR = Path(__file__).parent

@@ -9,7 +9,7 @@ APP_DIR = Path(__file__).resolve().parents[2]
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from apps.scraper_py.douyin_orders import parse_args, run
+from apps.scraper_py.douyin_orders import parse_args, run  # noqa: E402
 
 ORDERS_ROOT = APP_DIR / "output" / "orders"
 LOCK_PATH = ORDERS_ROOT / "order_job.lock"

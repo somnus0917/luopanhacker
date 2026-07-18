@@ -1,0 +1,20 @@
+{
+  "include": [
+    "tests"
+  ],
+  "exclude": [
+    "apps/legacy_metrics_py",
+    "apps/orders_py",
+    "apps/scraper_py",
+    "legacy"
+  ],
+  "ignore": [
+    "apps/legacy_metrics_py",
+    "apps/orders_py",
+    "apps/scraper_py",
+    "legacy"
+  ],
+  "typeCheckingMode": "off",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}

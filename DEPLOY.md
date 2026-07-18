@@ -2,7 +2,17 @@
 
 ## 快速开始
 
-### 1. 构建 Docker 镜像
+### 1. 配置管理员密码并构建 Docker 镜像
+
+在项目根目录创建 `.env`，设置不少于 12 位且不等于 `admin123` 的密码：
+
+```bash
+ADMIN_PASSWORD="请替换为强密码"
+```
+
+容器启动会拒绝空密码、默认密码和少于 12 位的密码。
+
+然后构建镜像：
 
 ```bash
 docker-compose build
@@ -201,6 +211,11 @@ curl -s http://127.0.0.1:8501/api/storage/summary
 ```bash
 docker exec -it douyin-compass luopan-worker-rs doctor
 curl -s http://127.0.0.1:8501/api/diagnostics
+
+# doctor 默认将经营数据源与 SQLite 超过 36 小时未更新视为过期；
+# 可通过环境变量调整阈值。
+docker exec -e LUOPAN_DOCTOR_MAX_DATA_AGE_HOURS=48 -it douyin-compass \
+  luopan-worker-rs doctor
 ```
 
 订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
@@ -269,17 +284,17 @@ cat /app/output/task_status.json
 
 ## 安全建议
 
-1. **修改默认端口**: 修改 `docker-compose.yml` 中的端口映射
-2. **修改默认密码**: 首次登录后立即修改管理员密码
-3. **防火墙设置**: 只允许可信 IP 访问
-4. **HTTPS**: 使用 Nginx 反向代理并配置 SSL
+1. **设置强管理员密码**: 在启动前通过 `.env` 设置不少于 12 位的 `ADMIN_PASSWORD`；容器拒绝默认密码。
+2. **限制 noVNC 访问**: 仅允许可信 IP、VPN 或额外的反向代理认证访问。
+3. **防火墙设置**: 只允许可信 IP 访问。
+4. **HTTPS**: 使用 Nginx 反向代理并配置 SSL。
 
 ### 登录系统
 
 系统内置了用户认证功能：
 
-- **默认管理员账户**: admin / admin123
-- **首次使用**: 请立即登录并修改默认密码
+- **管理员账户**: `admin` / 启动前在 `.env` 中设置的 `ADMIN_PASSWORD`
+- **首次使用**: 必须先设置强密码；容器不会接受默认密码
 - **用户管理**: 管理员可以在侧边栏添加/删除用户
 - **角色权限**:
   - `admin`: 完整访问权限，可管理用户
