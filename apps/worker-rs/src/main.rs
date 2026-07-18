@@ -10,7 +10,7 @@ use luopan_jobs::{status_payload, try_status_patch, write_task_status};
 use luopan_operations::load_operations_records;
 use luopan_orders::{commit_preview, delete_batch, public_imports};
 use luopan_runtime::RuntimePaths;
-use luopan_settlement::load_settlement_dashboard;
+use luopan_settlement::load_settlement_dashboard_for_shop;
 use luopan_storage::{connect, migrate, summary, sync_all};
 
 #[derive(Parser)]
@@ -30,7 +30,10 @@ enum Commands {
     /// Print the Rust order import history payload as JSON.
     OrderImportsJson,
     /// Print the settlement dashboard payload as JSON.
-    SettlementJson,
+    SettlementJson {
+        #[arg(long)]
+        shop: Option<String>,
+    },
     /// Commit an existing order import preview JSON into the private ledger.
     OrderImportCommit {
         #[arg(long)]
@@ -110,8 +113,8 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string(&payload)?);
             Ok(())
         }
-        Commands::SettlementJson => {
-            let payload = load_settlement_dashboard(&paths)?;
+        Commands::SettlementJson { shop } => {
+            let payload = load_settlement_dashboard_for_shop(&paths, shop.as_deref())?;
             println!("{}", serde_json::to_string(&payload)?);
             Ok(())
         }

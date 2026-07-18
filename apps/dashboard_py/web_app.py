@@ -328,7 +328,7 @@ def inventory_data():
 @app.get("/api/settlement")
 @require_login
 def settlement_data():
-    return rust_api_response("/api/settlement")
+    return rust_api_response("/api/settlement", query=request.args.to_dict(flat=True))
 
 
 @app.get("/api/status")

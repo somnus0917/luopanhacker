@@ -122,12 +122,16 @@ pnpm dev
 
 ## 结算数据
 
-抖音结算导出的 `DL*.csv` 放到 `output/settlement/` 后，第三个“结算看板”会通过 Rust API 自动读取。金额按 CSV 原始元单位展示。
+抖音结算导出的 `DL*.csv` 放到 `output/settlement/` 后，第三个“结算看板”会通过 Rust API 自动读取。金额按 CSV 原始元单位展示，页面支持按店铺筛选。当前文件名映射：
+
+- `*3441.csv`：惠普办公设备旗舰店
+- `*5137.csv`：HYPEX极度未知凡飞店
 
 ```bash
 mkdir -p output/settlement
 cp DL*.csv output/settlement/
 docker exec -it douyin-compass luopan-worker-rs settlement-json
+docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "惠普办公设备旗舰店"
 ```
 
 旧的独立 HTML/Streamlit 入口已归档到 `legacy/`，不再作为生产路径。

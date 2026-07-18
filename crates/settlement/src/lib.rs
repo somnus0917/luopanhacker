@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use anyhow::{Context, Result};
 use luopan_runtime::RuntimePaths;
@@ -29,18 +33,35 @@ struct Group {
 }
 
 pub fn load_settlement_dashboard(paths: &RuntimePaths) -> Result<Value> {
+    load_settlement_dashboard_for_shop(paths, None)
+}
+
+pub fn load_settlement_dashboard_for_shop(
+    paths: &RuntimePaths,
+    shop_filter: Option<&str>,
+) -> Result<Value> {
     let dir = paths.output_dir.join("settlement");
     let mut files = csv_files(&dir)?;
     files.sort();
 
     let mut summary = Group::default();
     let mut by_month: BTreeMap<String, Group> = BTreeMap::new();
+    let mut by_shop: BTreeMap<String, Group> = BTreeMap::new();
     let mut by_subject: BTreeMap<String, Group> = BTreeMap::new();
     let mut by_business_type: BTreeMap<String, Group> = BTreeMap::new();
+    let mut shop_names = BTreeSet::new();
     let mut rows = Vec::new();
     let mut parsed_files = Vec::new();
+    let selected_shop = shop_filter
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
 
     for path in files {
+        let shop_name = settlement_shop_name(&path);
+        shop_names.insert(shop_name.clone());
+        if selected_shop.is_some_and(|selected| selected != shop_name) {
+            continue;
+        }
         let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         let records = parse_csv(&strip_bom(&text));
         if records.len() < 3 {
@@ -54,13 +75,14 @@ pub fn load_settlement_dashboard(paths: &RuntimePaths) -> Result<Value> {
             if record.iter().all(|field| field.trim().is_empty()) {
                 continue;
             }
-            let item = SettlementRecord::from_row(&header_index, &record, &path)?;
+            let item = SettlementRecord::from_row(&header_index, &record, &path, &shop_name)?;
             file_rows += 1;
             add_record(&mut summary, &item);
             add_record(
                 by_month.entry(item.settlement_month.clone()).or_default(),
                 &item,
             );
+            add_record(by_shop.entry(item.shop_name.clone()).or_default(), &item);
             add_record(by_subject.entry(item.subject.clone()).or_default(), &item);
             add_record(
                 by_business_type
@@ -76,6 +98,7 @@ pub fn load_settlement_dashboard(paths: &RuntimePaths) -> Result<Value> {
         parsed_files.push(json!({
             "path": path.to_string_lossy(),
             "name": path.file_name().and_then(|name| name.to_str()).unwrap_or(""),
+            "shop_name": shop_name,
             "rows": file_rows,
         }));
     }
@@ -83,6 +106,9 @@ pub fn load_settlement_dashboard(paths: &RuntimePaths) -> Result<Value> {
     Ok(json!({
         "summary": summary_json(&summary),
         "months": groups_json(by_month),
+        "shop_groups": groups_json(by_shop),
+        "shops": shop_names.into_iter().collect::<Vec<_>>(),
+        "selected_shop": selected_shop.unwrap_or(""),
         "subjects": groups_json(by_subject),
         "business_types": groups_json(by_business_type),
         "rows": rows,
@@ -179,8 +205,23 @@ fn clean_text(value: &str) -> String {
     value.trim().trim_start_matches('\'').trim().to_string()
 }
 
+fn settlement_shop_name(path: &Path) -> String {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if file_name.ends_with("3441.csv") {
+        "惠普办公设备旗舰店".to_string()
+    } else if file_name.ends_with("5137.csv") {
+        "HYPEX极度未知凡飞店".to_string()
+    } else {
+        "未标注店铺".to_string()
+    }
+}
+
 #[derive(Debug)]
 struct SettlementRecord {
+    shop_name: String,
     settlement_time: String,
     settlement_date: String,
     settlement_month: String,
@@ -214,11 +255,17 @@ struct SettlementRecord {
 }
 
 impl SettlementRecord {
-    fn from_row(index: &BTreeMap<String, usize>, row: &[String], path: &Path) -> Result<Self> {
+    fn from_row(
+        index: &BTreeMap<String, usize>,
+        row: &[String],
+        path: &Path,
+        shop_name: &str,
+    ) -> Result<Self> {
         let settlement_time = field(row, index, "结算时间");
         let settlement_date = settlement_time.chars().take(10).collect::<String>();
         let settlement_month = settlement_date.chars().take(7).collect::<String>();
         Ok(Self {
+            shop_name: shop_name.to_string(),
             settlement_time,
             settlement_date,
             settlement_month,
@@ -260,6 +307,7 @@ impl SettlementRecord {
 
     fn as_json(&self) -> Value {
         json!({
+            "shop_name": self.shop_name,
             "settlement_time": self.settlement_time,
             "settlement_date": self.settlement_date,
             "settlement_month": self.settlement_month,
@@ -373,5 +421,17 @@ mod tests {
     #[test]
     fn rounds_negative_zero_to_zero() {
         assert_eq!(round_money(-0.001), 0.0);
+    }
+
+    #[test]
+    fn maps_known_download_files_to_shops() {
+        assert_eq!(
+            settlement_shop_name(Path::new("DL202607181143232999613441.csv")),
+            "惠普办公设备旗舰店"
+        );
+        assert_eq!(
+            settlement_shop_name(Path::new("DL202607181203353587675137.csv")),
+            "HYPEX极度未知凡飞店"
+        );
     }
 }

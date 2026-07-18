@@ -13,7 +13,7 @@ use luopan_jobs::{progress_log_tail, status_payload};
 use luopan_operations::load_operations_records;
 use luopan_orders::{commit_preview, delete_batch, public_imports};
 use luopan_runtime::{RuntimePaths, read_json_file};
-use luopan_settlement::load_settlement_dashboard;
+use luopan_settlement::load_settlement_dashboard_for_shop;
 use luopan_storage::{
     StoragePool, kv_value, load_operations_records_from_db, public_imports_from_db, summary,
 };
@@ -67,6 +67,11 @@ struct HealthPayload {
 struct StatusQuery {
     #[serde(default = "default_terminal_output")]
     terminal_output: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SettlementQuery {
+    shop: Option<String>,
 }
 
 fn default_terminal_output() -> bool {
@@ -212,9 +217,13 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
     })))
 }
 
-async fn settlement_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+async fn settlement_dashboard(
+    State(state): State<AppState>,
+    Query(query): Query<SettlementQuery>,
+) -> Result<Json<Value>, ApiError> {
     Ok(Json(
-        load_settlement_dashboard(&state.paths).map_err(ApiError::internal)?,
+        load_settlement_dashboard_for_shop(&state.paths, query.shop.as_deref())
+            .map_err(ApiError::internal)?,
     ))
 }
 

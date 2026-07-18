@@ -208,12 +208,13 @@ curl -s http://127.0.0.1:8601/api/diagnostics
 
 订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
 
-结算看板读取本地 `output/settlement/` 目录中的抖音结算 CSV：
+结算看板读取本地 `output/settlement/` 目录中的抖音结算 CSV，并支持按店铺筛选。当前文件名映射：`*3441.csv` 为惠普办公设备旗舰店，`*5137.csv` 为 HYPEX极度未知凡飞店。
 
 ```bash
 mkdir -p output/settlement
 cp DL*.csv output/settlement/
 docker exec -it douyin-compass luopan-worker-rs settlement-json
+docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "HYPEX极度未知凡飞店"
 ```
 
 sidecar 日志位置：
