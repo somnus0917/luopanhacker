@@ -8,9 +8,12 @@ aggregation over time, while Python remains the Playwright scraper runtime.
 These files drive official Python Playwright browser automation or marketplace
 page capture. They should stay Python unless the scraper strategy changes.
 
-- `apps/scraper_py/daily_compass.py`
+- `apps/collector_py/compass.py`
+- `apps/collector_py/operations.py`
+- `apps/collector_py/channel.py`
+- `apps/collector_py/scheduler.py`
+- `apps/collector_py/service.py`
 - `apps/scraper_py/scraper.py`
-- `apps/scraper_py/scheduler_run.py`
 - `apps/scraper_py/douyin_orders.py`
 - `apps/scraper_py/tmall_msd_orders.py`
 - `apps/scraper_py/order_scheduler_run.py`
@@ -23,8 +26,8 @@ These files contain API, state, storage, dashboard aggregation, or import logic.
 They are good Rust migration candidates.
 
 
-- `apps/scraper_py/task_status.py`: thin Python shim that writes through
-  `crates/jobs`.
+- `apps/scraper_py/daily_compass.py`, `scheduler_run.py`, and `task_status.py`:
+  compatibility shims for older commands; new code uses `apps/collector_py`.
 - `apps/legacy_metrics_py/inventory_data.py`: being replaced by
   `crates/inventory`.
 - `apps/inventory_py/inventory_sync.py`: keep Python WDT sync for now; move pure
@@ -50,6 +53,7 @@ Docker startup path.
 - `crates/inventory`: Rust inventory dashboard aggregation.
 - `crates/jobs`: Rust task status payload, status-file update, and progress log
   tail.
+- `crates/channels`: traffic, product, and search aggregation from allowlisted captures.
 - `apps/api-rs`: production Rust dashboard API for authentication, static files,
   operations, orders, inventory, status, raw files, diagnostics, and health.
 - `apps/worker-rs`: Rust CLI for inventory/status commands and Python scraper

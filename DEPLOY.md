@@ -4,9 +4,10 @@
 
 ### 1. 配置管理员密码并构建 Docker 镜像
 
-在项目根目录创建 `.env`，设置不少于 12 位且不等于 `admin123` 的密码：
+在项目根目录复制环境示例，设置不少于 12 位且不等于 `admin123` 的密码：
 
 ```bash
+cp .env.example .env
 ADMIN_PASSWORD="请替换为强密码"
 ```
 
@@ -15,19 +16,21 @@ ADMIN_PASSWORD="请替换为强密码"
 然后构建镜像：
 
 ```bash
-docker-compose build
+docker compose build
 ```
 
 ### 2. 启动服务
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 3. 访问服务
 
 - **noVNC 网页远程桌面**: `http://YOUR_SERVER_IP:6080`
 - **数据看板**: `http://YOUR_SERVER_IP:8501`
+
+Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预先存在的外部 Docker 网络。正式部署脚本会在共享 `proxy` 网络存在时自动把容器接入该网络，供 Caddy 等容器反向代理使用。只有配置了防火墙或额外认证时才应设置 `LUOPAN_HOST_BIND=0.0.0.0`。
 
 ## 首次使用
 
@@ -36,7 +39,7 @@ docker-compose up -d
 1. 打开 noVNC 网页远程桌面: `http://YOUR_SERVER_IP:6080`
 2. 在终端中运行抓取脚本:
    ```bash
-   docker exec -it douyin-compass bash
+   docker exec -it douyin-compass-collector bash
    ./docker/run_daily.sh
    ```
 3. 当浏览器打开登录页面时，在 noVNC 中手动扫码登录
@@ -46,7 +49,7 @@ docker-compose up -d
 
 ```bash
 # 进入容器
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 
 # 执行抓取
 ./docker/run_daily.sh
@@ -74,7 +77,7 @@ docker exec -it douyin-compass bash
 
 当登录态失效时：
 
-1. 系统会自动截图保存到 `output/login.png`
+1. 系统会自动截图保存到 `output/collection/login.png`
 2. 数据看板会显示采集状态和远程浏览器入口
 3. 看板提供 noVNC 远程浏览器入口
 4. 用户通过 noVNC 扫码登录后，任务会自动继续
@@ -83,10 +86,10 @@ docker exec -it douyin-compass bash
 
 ```bash
 # 进入容器
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 
 # 手动执行采集（带随机延迟）
-python apps/scraper_py/scheduler_run.py --login-timeout-minutes 30
+python apps/collector_py/scheduler.py --login-timeout-minutes 30
 
 # 或直接执行（无随机延迟）
 ./docker/run_daily.sh
@@ -99,8 +102,10 @@ python apps/scraper_py/scheduler_run.py --login-timeout-minutes 30
 - `./output` - 抓取的数据输出
   - `output/daily/` - 每日采集的 JSON 和 CSV
   - `output/settlement/` - 抖音结算导出的 `DL*.csv`
-  - `output/task_status.json` - 任务状态文件
-  - `output/login.png` - 登录页面截图
+  - `output/channel/` - 流量、商品和搜索模块的原始白名单响应
+  - `output/collection/status.json` - 统一采集状态文件
+  - `output/collection/progress.log` - 采集终端日志
+  - `output/collection/login.png` - 登录页面截图
 - `./session` - 浏览器会话（登录状态）
 - `./logs` - 日志文件
 
@@ -108,19 +113,19 @@ python apps/scraper_py/scheduler_run.py --login-timeout-minutes 30
 
 ```bash
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 
 # 重启服务
-docker-compose restart
+docker compose restart
 
 # 停止服务
-docker-compose down
+docker compose down
 
 # 查看容器状态
-docker-compose ps
+docker compose ps
 
 # 进入容器
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 
 # 查看抓取日志
 tail -f logs/cron.log
@@ -133,8 +138,8 @@ tail -f logs/cron.log
 编辑 `docker/crontab` 文件，然后重新构建镜像：
 
 ```bash
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 ```
 
 ### 修改抓取店铺
@@ -158,7 +163,7 @@ TARGET_SHOPS = (
 Rust 看板 API 默认启动并监听 8501。修改 `.env` 后重启容器：
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 默认值如下：
@@ -173,12 +178,12 @@ LUOPAN_API_RS_PORT=8501
 手动补采和定时补采也可以通过 Rust worker 进入 Python Playwright 抓取器。默认容器配置已经打开：
 
 ```bash
-MANUAL_SCRAPE_COMMAND=luopan-worker-rs compass-scrape
+COLLECTION_WORKER_COMMAND=luopan-worker-rs compass-collect
 STATUS_UPDATE_COMMAND=luopan-worker-rs status-update
 SCHEDULED_SCRAPE_RUST_WORKER=true
 ```
 
-这样做不会迁移 Playwright 抓取本身，只是把任务入口、状态预写和子进程编排移到 Rust worker。
+API 只向共享目录写入采集请求；独立采集服务消费请求并调用 Rust worker。Playwright 仍负责浏览器自动化，但已按经营与渠道模块拆分，单个模块失败不会阻止其他模块保存结果。
 
 Rust SQLite 数据层默认用于 API 优先读取。可以手动把当前 JSON 派生数据同步进 `/app/state/luopan.db`：
 
@@ -218,7 +223,7 @@ docker exec -e LUOPAN_DOCTOR_MAX_DATA_AGE_HOURS=48 -it douyin-compass \
   luopan-worker-rs doctor
 ```
 
-订单导入的 Excel 解析仍由 Python 完成；确认写入和撤销走 Rust API。
+订单导入的 Excel 解析、确认写入和撤销均由 Rust API 完成。
 
 结算看板支持网页上传抖音结算 CSV，上传时填写店铺名称；也会读取本地 `output/settlement/` 目录中的 CSV，并支持按店铺筛选。当前历史文件名映射：`*3441.csv` 为惠普办公设备旗舰店，`*5137.csv` 为 HYPEX极度未知凡飞店。
 
@@ -242,7 +247,7 @@ tail -f /app/logs/dashboard.err
 
 检查日志：
 ```bash
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 cat /app/logs/xvfb.err
 cat /app/logs/x11vnc.err
 ```
@@ -265,7 +270,7 @@ rm -rf session/*
 
 确保已经执行过抓取：
 ```bash
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 ./docker/run_daily.sh
 ```
 
@@ -273,13 +278,13 @@ docker exec -it douyin-compass bash
 
 检查 cron 日志：
 ```bash
-docker exec -it douyin-compass bash
+docker exec -it douyin-compass-collector bash
 cat /app/logs/cron.log
 ```
 
 检查任务状态：
 ```bash
-cat /app/output/task_status.json
+cat /app/output/collection/status.json
 ```
 
 ## 安全建议
@@ -295,7 +300,7 @@ cat /app/output/task_status.json
 
 - **管理员账户**: `admin` / 启动前在 `.env` 中设置的 `ADMIN_PASSWORD`
 - **首次使用**: 必须先设置强密码；容器不会接受默认密码
-- **用户管理**: 管理员可以在侧边栏添加/删除用户
+- **账户设置**: 所有用户可以修改自己的密码，管理员可以添加/删除用户
 - **角色权限**:
   - `admin`: 完整访问权限，可管理用户
   - `viewer`: 只能查看数据，无法管理用户
@@ -332,6 +337,6 @@ server {
 git pull
 
 # 重新构建并部署
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 ```

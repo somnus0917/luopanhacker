@@ -68,8 +68,58 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   chmod 600 "${ENV_FILE}"
 fi
 
+admin_password="$(awk -F= '$1 == "ADMIN_PASSWORD" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")"
+if [[ -z "${admin_password}" ]]; then
+  echo "ADMIN_PASSWORD is missing or empty in ${ENV_FILE}." >&2
+  echo "Set a password of at least 12 characters before deploying." >&2
+  exit 2
+fi
+unset admin_password
+
 LUOPAN_DATA_DIR="${DATA_DIR}" \
   docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
+
+for container_name in douyin-compass douyin-compass-collector; do
+  if [[ "$(docker inspect --format '{{.State.Running}}' "${container_name}" 2>/dev/null || true)" != "true" ]]; then
+    echo "Required container is not running: ${container_name}" >&2
+    docker compose --env-file "${ENV_FILE}" --project-name luopan logs --tail=120 >&2
+    exit 1
+  fi
+done
+
+dashboard_port="$(awk -F= '$1 == "LUOPAN_DASHBOARD_PORT" { print substr($0, index($0, "=") + 1); exit }' "${ENV_FILE}")"
+dashboard_port="${dashboard_port:-8501}"
+dashboard_ready=false
+collector_ready=false
+for _ in $(seq 1 30); do
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${dashboard_port}/healthz" >/dev/null; then
+    dashboard_ready=true
+  fi
+  if [[ -f "${DATA_DIR}/output/collection/heartbeat.json" ]] && \
+     find "${DATA_DIR}/output/collection/heartbeat.json" -mmin -2 -print -quit | grep -q .; then
+    collector_ready=true
+  fi
+  if [[ "${dashboard_ready}" = "true" && "${collector_ready}" = "true" ]]; then
+    break
+  fi
+  sleep 2
+done
+if [[ "${dashboard_ready}" != "true" || "${collector_ready}" != "true" ]]; then
+  echo "Deployment health check failed: dashboard=${dashboard_ready}, collector=${collector_ready}" >&2
+  docker compose --env-file "${ENV_FILE}" --project-name luopan logs --tail=120 >&2
+  exit 1
+fi
+
+# Production Caddy runs in the shared proxy network. The base Compose file does
+# not require that network so local `docker compose up` remains self-contained.
+PROXY_NETWORK="${LUOPAN_PROXY_NETWORK:-proxy}"
+if docker network inspect "${PROXY_NETWORK}" >/dev/null 2>&1; then
+  if ! docker inspect douyin-compass \
+    --format '{{json .NetworkSettings.Networks}}' | grep -q "\"${PROXY_NETWORK}\""; then
+    docker network connect --alias douyin-compass --alias compass-dashboard \
+      "${PROXY_NETWORK}" douyin-compass
+  fi
+fi
 
 docker compose --env-file "${ENV_FILE}" --project-name luopan ps
 if [[ -n "${DEPLOY_REF}" ]]; then

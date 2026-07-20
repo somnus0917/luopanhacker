@@ -17,7 +17,7 @@ echo ""
 
 # 运行抓取脚本
 PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python}"
-"$PYTHON_BIN" apps/scraper_py/daily_compass.py "$@"
+"$PYTHON_BIN" apps/collector_py/compass.py "$@"
 
 echo ""
 echo "========================================"

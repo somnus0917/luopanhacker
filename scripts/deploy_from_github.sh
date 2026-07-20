@@ -27,9 +27,9 @@ rsync -a \
 
 cd "$APP_DIR"
 python3 -m py_compile \
-
-  apps/legacy_metrics_py/dashboard.py \
-  apps/scraper_py/scheduler_run.py \
+  apps/collector_py/compass.py \
+  apps/collector_py/scheduler.py \
+  apps/collector_py/service.py \
   apps/scraper_py/scraper.py
 bash -n docker/cron_scrape.sh
-docker compose up -d --build compass-dashboard
+docker compose up -d --build --remove-orphans

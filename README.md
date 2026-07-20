@@ -6,20 +6,22 @@
 
 ### 1. 配置、构建并启动服务
 
-启动前在项目根目录创建 `.env`，并设置不少于 12 位且不等于 `admin123` 的管理员密码：
+启动前复制环境示例，并设置不少于 12 位且不等于 `admin123` 的管理员密码：
 
 ```bash
+cp .env.example .env
 ADMIN_PASSWORD="请替换为强密码"
 ```
 
 然后构建并启动：
 
 ```bash
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 ```
 
 容器会拒绝空密码、`admin123` 和少于 12 位的密码。
+Compose 默认仅在宿主机 `127.0.0.1` 映射看板 `8501` 和 noVNC `6080`，不需要预先创建 Docker 网络。可通过 `.env` 中的 `LUOPAN_HOST_BIND`、`LUOPAN_DASHBOARD_PORT` 和 `LUOPAN_NOVNC_PORT` 调整；只有在配置了防火墙或额外认证时才应把 `LUOPAN_HOST_BIND` 改为 `0.0.0.0`。
 
 ### 2. 首次登录
 
@@ -27,13 +29,15 @@ docker-compose up -d
 2. 使用管理员账户登录：
    - 用户名：`admin`
    - 密码：启动前在 `.env` 中设置的 `ADMIN_PASSWORD`
-3. 首次登录后可在侧边栏修改密码。
-4. 如需添加其他用户，管理员可在侧边栏“用户管理”中添加
+3. 首次登录后可在“账户设置”修改密码。
+4. 如需添加其他用户，管理员可在“账户设置”中添加；`viewer` 账户只能查看数据。
 
 ### 3. 访问服务
 
-- **数据看板**: `http://YOUR_SERVER_IP:8501`（需要登录）
-- **noVNC 远程桌面**: `http://YOUR_SERVER_IP:6080`（用于扫码登录抖音）
+- **数据看板/API 服务**: `http://YOUR_SERVER_IP:8501`（需要登录）
+- **独立采集服务 noVNC**: `http://YOUR_SERVER_IP:6080`（用于扫码登录抖音）
+
+Compose 会启动 `compass-dashboard` 与 `compass-collector` 两个容器。前者只负责账户、API 和看板，后者独立持有 Chromium、采集队列、定时任务和 noVNC；两者通过持久化目录共享任务状态与采集结果。
 
 ### 4. 定时任务
 
@@ -66,9 +70,11 @@ uv run python -m playwright install chromium
 
 脚本会打开有头浏览器。如果出现登录页，请手动扫码登录；登录态会保存在 `session/`，后续通常可以复用。
 
-默认抓取两家店铺：
+默认抓取四家店铺：
 
 - 华硕凡飞笔记本电脑专卖店
+- 惠普办公设备旗舰店
+- HYPERX极度未知凡飞专卖店
 - acer宏碁凡飞专卖店
 
 也可以只抓某一家：
@@ -83,6 +89,8 @@ uv run python -m playwright install chromium
 
 ```text
 output/daily/<数据日期>/
+output/channel/<数据日期>/
+output/collection/
 ```
 
 每次运行会生成一份 JSON 和一份 CSV，例如：
@@ -108,9 +116,11 @@ http://127.0.0.1:8501
 - 用户名：`admin`
 - 密码：启动前在 `.env` 中设置的 `ADMIN_PASSWORD`
 
-登录后可以在侧边栏修改密码和管理用户。
+登录后可以在“账户设置”修改密码；管理员还可以添加或删除用户。
 
 当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。前端源码位于 `apps/web/src/main.ts`，运行时静态产物仍提交在 `web/static/`。
+
+“采集中心”是独立入口：管理员可单独采集经营模块或渠道模块，查看采集服务在线状态、队列、各模块最近结果与终端日志。业务看板刷新只读取本地 SQLite/JSON，不会触发浏览器采集。
 
 部署后可以用一条命令检查核心状态：
 
@@ -128,7 +138,7 @@ pnpm dev
 
 ## 订单数据
 
-订单明细上传、预览、确认写入和撤销都在当前数据看板中完成。Excel 解析仍由 Python 完成，确认写入与撤销默认优先走 Rust API。
+订单明细上传、Rust Excel 解析、预览、确认写入和撤销都在当前数据看板中完成。
 
 ## 结算数据
 

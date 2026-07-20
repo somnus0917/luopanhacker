@@ -1,43 +1,49 @@
+x-luopan-volumes: &luopan-volumes
+  - ${LUOPAN_DATA_DIR:-.}/output:/app/output
+  - ${LUOPAN_DATA_DIR:-.}/session:/app/session
+  - ${LUOPAN_DATA_DIR:-.}/logs:/app/logs
+  - ${LUOPAN_DATA_DIR:-.}/config:/app/config
+  - ${LUOPAN_DATA_DIR:-.}/state:/app/state
+
 services:
   compass-dashboard:
     build:
       context: .
       dockerfile: Dockerfile
+    image: luopan-compass-dashboard
     container_name: douyin-compass
-    volumes:
-      # 生产环境通过 LUOPAN_DATA_DIR 指向代码仓库外的持久目录；
-      # 本地未设置时保持当前项目内目录，方便开发调试。
-      - ${LUOPAN_DATA_DIR:-.}/output:/app/output
-      - ${LUOPAN_DATA_DIR:-.}/session:/app/session
-      - ${LUOPAN_DATA_DIR:-.}/logs:/app/logs
-      - ${LUOPAN_DATA_DIR:-.}/config:/app/config
-      - ${LUOPAN_DATA_DIR:-.}/state:/app/state
+    ports:
+      - "${LUOPAN_HOST_BIND:-127.0.0.1}:${LUOPAN_DASHBOARD_PORT:-8501}:8501"
+    volumes: *luopan-volumes
     environment:
-      - TZ=Asia/Shanghai            # 时区设置
-      - DISPLAY=:99
+      - TZ=Asia/Shanghai
+      - LUOPAN_SERVICE_ROLE=api
       - LUOPAN_STATE_DIR=/app/state
-      - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}  # 从 .env 读取或使用默认值
-      # 必须在 .env 中设置；容器启动时会拒绝空值、默认值及短密码。
+      - NOVNC_URL=${NOVNC_URL:-http://127.0.0.1:6080}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - LUOPAN_API_RS_HOST=${LUOPAN_API_RS_HOST:-0.0.0.0}
       - LUOPAN_API_RS_PORT=8501
       - LUOPAN_API_RS_STORAGE_READS=${LUOPAN_API_RS_STORAGE_READS:-true}
-      - MANUAL_SCRAPE_COMMAND=${MANUAL_SCRAPE_COMMAND:-luopan-worker-rs compass-scrape}
+      - LUOPAN_STORAGE_DB=${LUOPAN_STORAGE_DB:-/app/state/luopan.db}
+    depends_on:
+      - compass-collector
+    restart: unless-stopped
+
+  compass-collector:
+    image: luopan-compass-dashboard
+    container_name: douyin-compass-collector
+    ports:
+      - "${LUOPAN_HOST_BIND:-127.0.0.1}:${LUOPAN_NOVNC_PORT:-6080}:6080"
+    volumes: *luopan-volumes
+    environment:
+      - TZ=Asia/Shanghai
+      - LUOPAN_SERVICE_ROLE=collector
+      - DISPLAY=:99
+      - CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
       - STATUS_UPDATE_COMMAND=${STATUS_UPDATE_COMMAND:-luopan-worker-rs status-update}
+      - COLLECTION_WORKER_COMMAND=${COLLECTION_WORKER_COMMAND:-luopan-worker-rs compass-collect}
       - SCHEDULED_SCRAPE_RUST_WORKER=${SCHEDULED_SCRAPE_RUST_WORKER:-true}
       - STORAGE_SYNC_AFTER_SCRAPE=${STORAGE_SYNC_AFTER_SCRAPE:-true}
+      - LUOPAN_STATE_DIR=/app/state
       - LUOPAN_STORAGE_DB=${LUOPAN_STORAGE_DB:-/app/state/luopan.db}
     restart: unless-stopped
-    networks:
-      - default
-      - proxy
-    # 资源限制（可选）
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: '2'
-    #       memory: 4G
-
-networks:
-  proxy:
-    external: true

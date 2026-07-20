@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd /app
 
-mkdir -p /app/output
-exec > >(tee /app/output/progress.log) 2>&1
+mkdir -p /app/output/collection
+exec > >(tee -a /app/output/collection/progress.log) 2>&1
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] start scheduled compass scrape"
 
@@ -15,10 +15,10 @@ export DISPLAY="${DISPLAY:-:99}"
 USED_RUST_WORKER=false
 if [[ "${SCHEDULED_SCRAPE_RUST_WORKER:-true}" == "true" ]] && command -v luopan-worker-rs >/dev/null 2>&1; then
   USED_RUST_WORKER=true
-  PYTHONUNBUFFERED=1 luopan-worker-rs compass-scrape \
+  PYTHONUNBUFFERED=1 luopan-worker-rs compass-collect \
     --login-timeout-minutes 30
 else
-  PYTHONUNBUFFERED=1 "$PYTHON_BIN" apps/scraper_py/scheduler_run.py \
+  PYTHONUNBUFFERED=1 "$PYTHON_BIN" apps/collector_py/scheduler.py \
     --login-timeout-minutes 30
 fi
 

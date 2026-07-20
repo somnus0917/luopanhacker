@@ -7,10 +7,16 @@ WORKDIR /src
 
 # Build only the Rust control-plane binaries. The Python Playwright code remains
 # the production scraper runtime.
+COPY docker/cargo-config.toml /usr/local/cargo/config.toml
 COPY Cargo.toml Cargo.lock ./
 COPY apps ./apps
 COPY crates ./crates
-RUN cargo build --release -p luopan-api-rs -p luopan-worker-rs
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p luopan-api-rs -p luopan-worker-rs && \
+    mkdir -p /artifacts && \
+    cp /src/target/release/luopan-api-rs /artifacts/ && \
+    cp /src/target/release/luopan-worker-rs /artifacts/
 
 
 FROM ${PYTHON_IMAGE}
@@ -78,18 +84,23 @@ ENV PATH="/app/.venv/bin:${PATH}"
 # Lockfile-first dependency installation. `uv.lock` is committed, so a Docker
 # build cannot silently resolve a different dependency graph.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv venv --python /usr/local/bin/python3 && \
+    uv export --locked --no-dev --no-emit-project \
+      --output-file /tmp/requirements.txt && \
+    uv pip install --python /app/.venv/bin/python --require-hashes \
+      --default-index https://mirrors.cloud.tencent.com/pypi/simple \
+      --requirement /tmp/requirements.txt && \
+    rm -f /tmp/requirements.txt
 
 # 复制应用代码
 COPY . .
-RUN uv sync --locked --no-dev
 
 # Rust control-plane binaries. Python remains only for browser automation.
-COPY --from=rust-builder /src/target/release/luopan-worker-rs /usr/local/bin/luopan-worker-rs
-COPY --from=rust-builder /src/target/release/luopan-api-rs /usr/local/bin/luopan-api-rs
+COPY --from=rust-builder /artifacts/luopan-worker-rs /usr/local/bin/luopan-worker-rs
+COPY --from=rust-builder /artifacts/luopan-api-rs /usr/local/bin/luopan-api-rs
 
 # 创建必要目录
-RUN mkdir -p /app/output/daily /app/session /app/logs /app/config /app/state
+RUN mkdir -p /app/output/daily /app/output/channel /app/output/collection /app/session /app/logs /app/config /app/state
 
 # 复制并设置 crontab
 COPY docker/crontab /etc/cron.d/compass-cron
@@ -97,7 +108,8 @@ RUN chmod 0644 /etc/cron.d/compass-cron && \
     crontab /etc/cron.d/compass-cron
 
 # 创建 supervisor 配置
-COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/supervisord-api.conf /etc/supervisor/conf.d/supervisord-api.conf
+COPY docker/supervisord-collector.conf /etc/supervisor/conf.d/supervisord-collector.conf
 
 # 创建启动脚本
 COPY docker/start.sh /start.sh

@@ -61,14 +61,18 @@ enum Commands {
         #[arg(long)]
         refresh_only: bool,
     },
-    /// Run the existing Python scheduler for Playwright compass scraping.
-    CompassScrape {
+    /// Run the independent Playwright Compass collection service.
+    #[command(name = "compass-collect", alias = "compass-scrape")]
+    CompassCollect {
         /// Random delay in seconds before scraping starts.
         #[arg(long, default_value_t = 0)]
         random_delay_seconds: u64,
         /// Login timeout in minutes.
         #[arg(long, default_value_t = 30)]
         login_timeout_minutes: u64,
+        /// Collection module to run. Repeat for multiple modules; default is all.
+        #[arg(long = "module", value_parser = ["operations", "channel"])]
+        modules: Vec<String>,
     },
     /// Print the Rust采集状态 payload as JSON.
     StatusJson {
@@ -168,20 +172,22 @@ async fn main() -> Result<()> {
             }
             run_python(&paths, args)
         }
-        Commands::CompassScrape {
+        Commands::CompassCollect {
             random_delay_seconds,
             login_timeout_minutes,
+            modules,
         } => {
-            run_python(
-                &paths,
-                vec![
-                    "apps/scraper_py/scheduler_run.py".to_string(),
-                    "--random-delay-seconds".to_string(),
-                    random_delay_seconds.to_string(),
-                    "--login-timeout-minutes".to_string(),
-                    login_timeout_minutes.to_string(),
-                ],
-            )?;
+            let mut args = vec![
+                "apps/collector_py/scheduler.py".to_string(),
+                "--random-delay-seconds".to_string(),
+                random_delay_seconds.to_string(),
+                "--login-timeout-minutes".to_string(),
+                login_timeout_minutes.to_string(),
+            ];
+            for module in modules {
+                args.extend(["--module".to_string(), module]);
+            }
+            run_python(&paths, args)?;
             sync_storage_after_scrape(&paths).await
         }
         Commands::StatusJson { terminal_output } => {
