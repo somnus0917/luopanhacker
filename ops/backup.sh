@@ -12,7 +12,11 @@ ARCHIVE="${DAILY_DIR}/luopan-data-${STAMP}.tar.gz"
 TEMP_ARCHIVE="${ARCHIVE}.partial"
 
 mkdir -p "${DAILY_DIR}" "${WEEKLY_DIR}" "${DATA_DIR}/state"
-git -C "${APP_DIR}" rev-parse HEAD > "${DATA_DIR}/state/deployed_commit.txt"
+if [[ -s "${APP_DIR}/.deploy-revision" ]]; then
+  head -n 1 "${APP_DIR}/.deploy-revision" > "${DATA_DIR}/state/deployed_commit.txt"
+else
+  git -C "${APP_DIR}" rev-parse HEAD > "${DATA_DIR}/state/deployed_commit.txt"
+fi
 date --iso-8601=seconds > "${DATA_DIR}/state/last_backup_requested_at.txt"
 
 # Chromium writes parts of the session as root.  sudo is intentionally

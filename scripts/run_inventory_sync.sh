@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Resolve the repository root so every relative path below works whether this
+# script is launched from cron, an interactive shell, or another directory.
+cd "$(dirname "$0")/.."
 
 if [[ -n "${PYTHON:-}" ]]; then
-  PY="$PYTHON"
+  "$PYTHON" apps/inventory_py/inventory_sync.py "$@"
 elif command -v uv >/dev/null 2>&1; then
-  exec uv run --locked python apps/inventory_py/inventory_sync.py "$@"
+  uv run --locked python apps/inventory_py/inventory_sync.py "$@"
 elif [[ -x ".venv/bin/python" ]]; then
-  PY=".venv/bin/python"
+  .venv/bin/python apps/inventory_py/inventory_sync.py "$@"
 else
-  PY="python3"
+  python3 apps/inventory_py/inventory_sync.py "$@"
 fi
 
-# Credentials remain environment variables or secret-manager values. They are
-# never accepted as command-line arguments and are never written to disk.
-exec "$PY" apps/inventory_py/inventory_sync.py "$@"
+# Keep the SQLite-backed API in step with the freshly written JSON snapshot.
+# Development environments without the production worker still get a usable
+# JSON snapshot and simply skip this import.
+if command -v luopan-worker-rs >/dev/null 2>&1; then
+  luopan-worker-rs storage-sync
+fi
