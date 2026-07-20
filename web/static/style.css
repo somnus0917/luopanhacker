@@ -62,6 +62,7 @@ main { padding-top: 20px; }
 .empty-panel { display: grid; min-height: 300px; place-items: center; padding: 32px; text-align: center; border: 1px dashed var(--line-strong); border-radius: 13px; background: linear-gradient(135deg, rgba(28, 35, 64, .68), rgba(16, 21, 41, .68)); }
 .empty-panel strong { display: block; margin-bottom: 9px; font-size: 17px; }
 .empty-panel span { color: var(--muted); font-size: 14px; }
+.compact-empty { min-height: 220px; margin-bottom: 20px; }
 .collection-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
 .collection-health { position: relative; display: flex; min-height: 118px; flex-direction: column; justify-content: center; gap: 8px; padding: 18px 20px; overflow: hidden; background: linear-gradient(142deg, #1d2340, #151a30); border: 1px solid var(--line); border-radius: 12px; }
 .collection-health small { color: var(--faint); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
@@ -94,6 +95,7 @@ main { padding-top: 20px; }
 .filter-disclosure summary small { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 650; }
 .filter-disclosure .chip-list { padding: 13px 15px 15px; }
 .order-import-panel { margin: -10px 0 24px; padding: 0; overflow: hidden; background: var(--surface-quiet); }
+#order-import-panel .order-import-panel { margin: 24px 0 0; }
 .order-import-panel summary { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 0 17px; cursor: pointer; color: #e6ebfa; font-size: 14px; font-weight: 800; list-style: none; }
 .order-import-panel summary::-webkit-details-marker { display: none; }
 .order-import-panel summary::after { content: "⌄"; order: 3; margin-left: 2px; color: var(--muted); font-size: 16px; transition: transform .16s ease; }
@@ -147,6 +149,21 @@ main { padding-top: 20px; }
 .table-filter-panel label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
 .table-filter-panel select { min-width: 150px; height: 34px; padding: 0 28px 0 9px; overflow: hidden; color: #e8edfc; background: #1a213b; border: 1px solid var(--line-strong); border-radius: 6px; outline: none; text-overflow: ellipsis; }
 .table-filter-panel select:focus { border-color: var(--pink); box-shadow: 0 0 0 3px rgba(240, 70, 105, .12); }
+.operations-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0 0 24px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.operations-tab { display: grid; gap: 4px; min-height: 58px; padding: 10px 14px; text-align: left; color: var(--muted); background: #11172b; border: 1px solid var(--line); border-radius: 9px; transition: border-color .16s ease, background .16s ease, transform .16s ease; }
+.operations-tab:hover { color: var(--text); border-color: var(--line-strong); transform: translateY(-1px); }
+.operations-tab span { color: inherit; font-size: 14px; font-weight: 800; }
+.operations-tab small { color: var(--faint); font-size: 10px; font-weight: 650; }
+.operations-tab.active { color: #fff; border-color: rgba(240, 70, 105, .64); background: linear-gradient(135deg, rgba(240, 70, 105, .22), rgba(61, 167, 245, .12)); box-shadow: inset 3px 0 var(--pink); }
+.operations-tab.active small { color: #b8c3df; }
+.section-context { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 5px 0 14px; }
+.section-context span { color: #edf1fd; font-size: 17px; font-weight: 820; letter-spacing: -.03em; }
+.section-context small { color: var(--faint); font-size: 11px; text-align: right; }
+.platform-pill { display: inline-flex; min-height: 23px; align-items: center; padding: 0 8px; color: #d8e9ff; background: rgba(61, 167, 245, .12); border: 1px solid rgba(61, 167, 245, .3); border-radius: 99px; font-weight: 750; }
+.advanced-filter { margin-top: 22px; padding: 0 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-quiet); }
+.advanced-filter > summary { min-height: 50px; display: flex; align-items: center; cursor: pointer; color: #dfe6f9; font-size: 13px; font-weight: 750; }
+.advanced-filter > p { margin: -4px 0 12px; color: var(--faint); font-size: 11px; }
+.advanced-filter .filter-accordion { margin-bottom: 16px; }
 .detail-table-stack { display: grid; gap: 12px; margin-top: 16px; }
 .detail-table-disclosure { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
 .detail-table-disclosure summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 56px; padding: 0 17px; cursor: pointer; color: #edf1fb; list-style: none; }
@@ -269,5 +286,5 @@ tbody tr:last-child td { border-bottom: 0; }
 .user-row strong { color: #e8edfb; font-size: 13px; }
 .user-row span, .user-row small { margin-top: 4px; color: var(--faint); font-size: 11px; }
 @media (max-width: 1350px) { .metric-grid.six { grid-template-columns: repeat(3, 1fr); } .chart-grid { grid-template-columns: 1fr; } }
-@media (max-width: 900px) { .account-grid { grid-template-columns: 1fr; } .account-form-user { grid-template-columns: 1fr 1fr; } .collection-health-grid { grid-template-columns: 1fr; } }
-@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 18px; } .filter-accordion { grid-template-columns: 1fr; gap: 9px; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .table-filter-panel { align-items: stretch; } .table-filter-panel > div { width: 100%; } .table-filter-panel label, .table-filter-panel select { width: 100%; } .detail-table-disclosure summary { align-items: flex-start; flex-wrap: wrap; gap: 4px 10px; padding: 12px 14px; } .detail-table-disclosure summary small { width: calc(100% - 28px); margin-left: 0; } .detail-table-content { padding: 10px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } .account-form-user { grid-template-columns: 1fr; } .collection-modules { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .account-grid { grid-template-columns: 1fr; } .account-form-user { grid-template-columns: 1fr 1fr; } .collection-health-grid { grid-template-columns: 1fr; } .operations-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .app-shell { padding: 0 16px 36px; } .topbar { height: 62px; } .brand { font-size: 17px; } .account { font-size: 12px; } .nav-tabs { min-height: 58px; margin: 0 -16px; padding: 0 16px; } .nav-tab { padding: 0 12px; font-size: 13px; } main { padding-top: 18px; } .filter-accordion { grid-template-columns: 1fr; gap: 9px; } .metric-grid.six, .metric-grid.four { grid-template-columns: repeat(2, 1fr); gap: 10px; } .metric-card { min-height: 118px; padding: 15px; } .metric-value { margin-top: 14px; } .chart { height: 220px; } .chart-y-axis, .chart-x-axis { font-size: 10px; } .chart-y-axis span { width: 56px; } .table-filter-panel { align-items: stretch; } .table-filter-panel > div { width: 100%; } .table-filter-panel label, .table-filter-panel select { width: 100%; } .operations-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; } .operations-tab { flex: 0 0 148px; } .section-context { align-items: flex-start; flex-direction: column; } .section-context small { text-align: left; } .detail-table-disclosure summary { align-items: flex-start; flex-wrap: wrap; gap: 4px 10px; padding: 12px 14px; } .detail-table-disclosure summary small { width: calc(100% - 28px); margin-left: 0; } .detail-table-content { padding: 10px; } .health-row { grid-template-columns: minmax(120px, 1fr) minmax(65px, 1fr); gap: 7px; padding: 5px 0; } .health-row > span { grid-column: 1 / -1; } .inventory-tabs { flex-wrap: nowrap; overflow-x: auto; } .inventory-tab { flex: 0 0 auto; } .sales-days { gap: 6px; padding: 0; } .account-form-user { grid-template-columns: 1fr; } .collection-modules { grid-template-columns: 1fr; } }

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#090b16" />
-    <title>罗盘数据中心</title>
+    <title>数据中心</title>
     <link rel="stylesheet" href="/assets/style.css" />
   </head>
   <body>
@@ -12,7 +12,7 @@
       <form id="login-form" class="login-card">
         <div class="brand-mark">◈</div>
         <p class="eyebrow">DOUYIN COMMERCE</p>
-        <h1>罗盘数据中心</h1>
+        <h1>数据中心</h1>
         <p class="login-copy">请登录以访问经营数据</p>
         <label>用户名<input name="username" autocomplete="username" required /></label>
         <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
@@ -23,41 +23,35 @@
 
     <div id="app-shell" class="app-shell hidden">
       <header class="topbar">
-        <a class="brand" href="#operations" aria-label="罗盘数据中心首页"><span class="brand-mark">◈</span><span>罗盘数据中心</span></a>
+        <a class="brand" href="#operations" aria-label="数据中心首页"><span class="brand-mark">◈</span><span>数据中心</span></a>
         <div class="account"><span id="account-name"></span><button id="logout-button" class="text-button" type="button">退出</button></div>
       </header>
 
       <nav class="nav-tabs" aria-label="数据看板导航">
-        <button class="nav-tab" data-page="inventory" type="button">📦 <span>库存周转</span></button>
+        <button class="nav-tab" data-page="inventory" type="button">📦 <span>库存看板</span></button>
         <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
         <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
-        <button class="nav-tab" data-page="channel" type="button">🎬 <span>抖音渠道</span></button>
         <button class="nav-tab" data-page="collection" type="button">⟳ <span>采集中心</span></button>
         <button class="nav-tab" data-page="account" type="button">👤 <span>账户设置</span></button>
       </nav>
 
       <main>
         <section class="dashboard-page" id="page-inventory" data-page="inventory">
-          <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><h2>库存周转</h2><p id="inventory-summary">正在读取本地库存快照。</p></div>
+          <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><h2>库存看板</h2><p id="inventory-summary">正在读取本地库存快照。</p></div>
           <div id="inventory-content"><div class="empty-panel"><strong>正在读取库存快照</strong><span>页面只从服务器本地快照读取，不会在浏览器中调用旺店通。</span></div></div>
         </section>
 
         <section class="dashboard-page" id="page-operations" data-page="operations">
-          <div class="page-heading"><p class="eyebrow">OPERATIONS OVERVIEW</p><h2>经营看板</h2><p id="operations-summary">正在读取经营数据。</p></div>
+          <div class="page-heading"><p class="eyebrow">OMNICHANNEL OPERATIONS</p><h2>经营看板</h2><p id="operations-summary">正在融合销售、流量与投放数据。</p></div>
           <div id="detail-filters" class="table-filter-container"></div>
-          <div id="order-import-panel"></div>
           <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将读取罗盘日维度数据与已导入的订单明细汇总。</span></div></div>
+          <div id="order-import-panel"></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">
           <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>结算看板</h2><p>按月核对品牌结算、返利、国补及平台补贴。</p></div>
           <div id="settlement-summary-cards" class="metric-grid six" data-placeholder="结算净额|收入合计|支出合计|订单数|平台补贴|政府补贴"></div>
           <div id="settlement-content"><div class="empty-panel"><strong>正在读取结算数据</strong><span>将读取服务器 output/settlement 目录下的抖音结算 CSV。</span></div></div>
-        </section>
-
-        <section class="dashboard-page" id="page-channel" data-page="channel">
-          <div class="page-heading"><p class="eyebrow">CHANNEL INTELLIGENCE</p><h2>抖音渠道</h2><p id="channel-summary">正在读取流量、商品与搜索数据。</p></div>
-          <div id="channel-content"><div class="empty-panel"><strong>正在读取渠道数据</strong><span>页面从服务器SQLite快照读取，不会在浏览器中请求罗盘。</span></div></div>
         </section>
 
         <section class="dashboard-page" id="page-collection" data-page="collection">

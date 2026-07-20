@@ -763,19 +763,21 @@ async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value
     }
 }
 
-async fn channel_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+async fn load_channel_payload(state: &AppState) -> Result<Value, ApiError> {
     if let Some(pool) = &state.storage_pool {
         match kv_value(pool, "channel_dashboard").await {
-            Ok(Some(value)) => return Ok(Json(value)),
+            Ok(Some(value)) => return Ok(value),
             Ok(None) => tracing::warn!("SQLite channel payload is missing; falling back to JSON"),
             Err(error) => {
                 tracing::warn!(%error, "SQLite channel read failed; falling back to JSON")
             }
         }
     }
-    Ok(Json(
-        load_channel_dashboard(&state.paths).map_err(ApiError::internal)?,
-    ))
+    load_channel_dashboard(&state.paths).map_err(ApiError::internal)
+}
+
+async fn channel_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    Ok(Json(load_channel_payload(&state).await?))
 }
 
 async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -794,8 +796,10 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
     } else {
         load_operations_records(&state.paths).map_err(ApiError::internal)?
     };
+    let channel = load_channel_payload(&state).await?;
     Ok(Json(json!({
         "records": records,
+        "channel": channel,
         "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
     })))
 }

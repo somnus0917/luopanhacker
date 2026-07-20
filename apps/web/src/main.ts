@@ -14,11 +14,14 @@ type AppState = {
   accountMessage: string;
   records: OperationRecord[];
   operationDates: Set<string>;
+  operationPlatforms: Set<string>;
   operationShops: Set<string>;
   operationSources: Set<string>;
   operationFilterOpen: Set<string>;
   tableDate: string;
+  tablePlatform: string;
   tableShop: string;
+  operationSection: "overview" | "sales" | "traffic" | "ads";
   status: AnyRecord | null;
   collectionModules: Set<string>;
   collectionMessage: string;
@@ -33,11 +36,9 @@ type AppState = {
   orderPreview: AnyRecord | null;
   orderImportMessage: string;
   channel: AnyRecord | null;
-  channelDate: string;
-  channelShop: string;
 };
 
-const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tableShop: "", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, channelDate: "", channelShop: "" };
+const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer: number | null = null;
 
@@ -59,6 +60,17 @@ const isAdmin = () => state.currentUser?.role === "admin";
 
 function recordSourceLabel(item) {
   return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
+}
+
+function recordPlatform(item) {
+  const explicit = item.platform || item.channel || item.content?.platform;
+  if (explicit) return String(explicit);
+  if (item.source !== "external_orders") return "抖音";
+  const source = `${item.source_key || ""} ${item.source_label || ""} ${item.shop_name || ""}`.toLowerCase();
+  if (/(jingdong|\bjd\b|京东)/.test(source)) return "京东";
+  if (/(pinduoduo|\bpdd\b|拼多多)/.test(source)) return "拼多多";
+  if (/(tmall|taobao|天猫|喵速达|优品|国际)/.test(source)) return "天猫";
+  return "其他";
 }
 
 function compactMoney(cents) {
@@ -84,7 +96,7 @@ function chartDateTicks(dates, maxLabels = 6) {
 
 function aggregate(records: OperationRecord[]): Record<string, number> {
   const totals: Record<string, number> = {};
-  const sumKeys = ["income_amt", "pay_amt", "settlement_amt_pay_time", "pay_cnt", "pay_ucnt", "refund_amt", "platform_subsidy_amt", "talent_subsidy_amt", "pay_item_cnt", "product_show_ucnt", "product_click_ucnt", "expense_amt"];
+  const sumKeys = ["income_amt", "pay_amt", "settlement_amt_pay_time", "pay_cnt", "pay_ucnt", "refund_amt", "refund_order_cnt", "refund_order_cnt_pay_time", "platform_subsidy_amt", "talent_subsidy_amt", "pay_item_cnt", "product_show_ucnt", "product_click_ucnt", "product_show_cnt", "product_click_cnt", "expense_amt", "ad_cost_amt"];
   sumKeys.forEach((key) => totals[key] = records.reduce((sum, item) => sum + number(item.metrics?.[key]), 0));
   totals.per_usr_pay_amt = totals.pay_ucnt ? totals.pay_amt / totals.pay_ucnt : 0;
   const weightedRefundRate = records.reduce((sum, item) => sum + number(item.metrics?.income_amt) * number(item.metrics?.refund_amt_rate), 0);
@@ -115,16 +127,18 @@ function activatePage(name) {
 }
 
 function operationFilteredRecords() {
-  return state.records.filter((item) => state.operationDates.has(item.date) && state.operationShops.has(item.shop_name) && state.operationSources.has(recordSourceLabel(item)));
+  return state.records.filter((item) => state.operationDates.has(item.date) && state.operationPlatforms.has(recordPlatform(item)) && state.operationShops.has(item.shop_name) && state.operationSources.has(recordSourceLabel(item)));
 }
 
 function operationFilterSet(kind) {
-  return kind === "date" ? state.operationDates : kind === "shop" ? state.operationShops : state.operationSources;
+  return kind === "date" ? state.operationDates : kind === "platform" ? state.operationPlatforms : kind === "shop" ? state.operationShops : state.operationSources;
 }
 
 function operationFilterItems(kind, records = state.records): string[] {
-  if (kind === "date") return [...new Set(records.map((item) => item.date))].sort();
-  if (kind === "shop") return [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const channelRecords = state.channel?.records || [];
+  if (kind === "date") return [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
+  if (kind === "platform") return [...new Set([...records.map(recordPlatform), ...(channelRecords.length ? ["抖音"] : [])])].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  if (kind === "shop") return [...new Set([...records.map((item) => item.shop_name), ...channelRecords.map((item) => item.shop_name)])].sort((a, b) => a.localeCompare(b, "zh-CN"));
   return [...new Set(records.map(recordSourceLabel))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
@@ -142,18 +156,16 @@ function applySingleOperationFilter(kind, value) {
 
 function operationsFiltersMarkup() {
   const dates = operationFilterItems("date");
+  const platforms = operationFilterItems("platform");
   const shops = operationFilterItems("shop");
   const sources = operationFilterItems("source");
   const openAttr = (kind) => state.operationFilterOpen.has(kind) ? " open" : "";
   const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
   const buildDropdown = (title, items, selected, kind) => `<details class="filter-disclosure filter-dropdown" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="dropdown-panel"><div class="dropdown-actions"><button type="button" class="dropdown-action" data-operation-select-all="${kind}">全选</button><button type="button" class="dropdown-action" data-operation-clear="${kind}">仅保留一个</button></div><div class="dropdown-list">${items.map((item) => `<label class="dropdown-option"><input type="checkbox" data-operation-filter="${kind}" data-value="${escapeHtml(item)}" ${selected.has(item) ? "checked" : ""}><span>${escapeHtml(item)}</span></label>`).join("")}</div></div></details>`;
-  return buildGroup("业务日期", dates, state.operationDates, "date") + buildDropdown("店铺", shops, state.operationShops, "shop") + buildGroup("数据来源", sources, state.operationSources, "source");
+  return `<div class="filter-accordion">${buildGroup("业务日期", dates, state.operationDates, "date")}${buildGroup("平台", platforms, state.operationPlatforms, "platform")}${buildDropdown("店铺", shops, state.operationShops, "shop")}${buildGroup("数据来源", sources, state.operationSources, "source")}</div>`;
 }
 
 function bindOperationsFilterEvents() {
-  const dates = operationFilterItems("date");
-  const shops = operationFilterItems("shop");
-  const sources = operationFilterItems("source");
   $$('[data-operation-filter]').forEach((control) => control.addEventListener(control.type === "checkbox" ? "change" : "click", () => {
     const selected = operationFilterSet(control.dataset.operationFilter);
     const value = control.dataset.value;
@@ -164,14 +176,14 @@ function bindOperationsFilterEvents() {
   }));
   $$('[data-operation-select-all]').forEach((button) => button.addEventListener("click", () => {
     const kind = button.dataset.operationSelectAll;
-    const items = kind === "date" ? dates : kind === "shop" ? shops : sources;
+    const items = operationFilterItems(kind);
     const selected = operationFilterSet(kind);
     items.forEach((item) => selected.add(item));
     renderOperations();
   }));
   $$('[data-operation-clear]').forEach((button) => button.addEventListener("click", () => {
     const kind = button.dataset.operationClear;
-    const items = kind === "date" ? dates : kind === "shop" ? shops : sources;
+    const items = operationFilterItems(kind);
     const selected = operationFilterSet(kind);
     selected.clear();
     if (items.length) selected.add(items[0]);
@@ -196,6 +208,7 @@ function importDateRange(value) {
 function renderOrderImportPanel() {
   const target = $("#order-import-panel");
   if (!target) return;
+  target.classList.toggle("hidden", state.operationSection !== "sales");
   const preview = state.orderPreview;
   const batches = state.orderImports?.batches || [];
   const summary = state.orderImports?.summary || {};
@@ -262,71 +275,32 @@ function operatingRatio(value) {
   return value === null || value === undefined ? "—" : `${number(value).toFixed(2)}×`;
 }
 
-function detailTableRecords(records) {
-  return records.filter((item) =>
-    state.operationDates.has(item.date) &&
-    state.operationShops.has(item.shop_name)
-  );
-}
-
 function detailTableFilters() {
   const dates = operationFilterItems("date");
+  const platforms = operationFilterItems("platform");
   const shops = operationFilterItems("shop");
   state.tableDate = operationSingleFilterValue("date");
+  state.tablePlatform = operationSingleFilterValue("platform");
   state.tableShop = operationSingleFilterValue("shop");
   const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="看板筛选"><div><strong>看板筛选</strong><span>筛选卡片、趋势、对比与下方明细表</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong><span>销售、流量和投放共用同一组筛选条件</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
 }
 
 function bindDetailTableFilters() {
   $$('[data-table-filter]').forEach((select) => select.addEventListener("change", () => {
     const kind = select.dataset.tableFilter;
     if (kind === "date") state.tableDate = select.value;
+    else if (kind === "platform") state.tablePlatform = select.value;
     else state.tableShop = select.value;
     applySingleOperationFilter(kind, select.value);
     renderOperations();
   }));
 }
 
-function renderOperations() {
-  const records = operationFilteredRecords();
-  const target = $("#operations-content");
-  const detailFiltersTarget = $("#detail-filters");
-  if (!records.length) {
-    if (detailFiltersTarget) detailFiltersTarget.innerHTML = "";
-    target.innerHTML = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请选择至少一个业务日期和店铺。</span></div>${operationsFiltersMarkup()}`;
-    bindOperationsFilterEvents();
-    return;
-  }
-  if (detailFiltersTarget) {
-    detailFiltersTarget.innerHTML = detailTableFilters();
-    bindDetailTableFilters();
-  }
-  const totals = aggregate(records);
-  const returnOnSpend = totals.expense_amt ? totals.pay_amt / totals.expense_amt : null;
-  const latestDate = [...new Set(records.map((item) => item.date))].sort().at(-1);
-  $("#operations-summary").textContent = `数据来源：${[...new Set(records.map(recordSourceLabel))].join("、")} · 最新业务日期：${latestDate || "—"} · 已选择 ${new Set(records.map((item) => item.shop_name)).size} 家店铺、${new Set(records.map((item) => item.date)).size} 个业务日`;
-  const metrics = [
-    ["成交金额", money(totals.income_amt), "按成交口径汇总"],
-    ["用户支付金额", money(totals.pay_amt), "按支付口径汇总"],
-    ["结算金额", money(totals.settlement_amt_pay_time), "按支付时间结算口径"],
-    ["成交订单", whole(totals.pay_cnt), `成交件数：${whole(totals.pay_item_cnt)}`],
-    ["投产比", operatingRatio(returnOnSpend), totals.expense_amt ? `支付金额 ÷ 投放消耗 ${money(totals.expense_amt)}` : "暂无投放消耗数据"],
-    ["退款率", ratio(totals.refund_amt_rate), "按成交金额加权汇总"],
-  ];
-  const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
-  const sourceNote = `<section class="panel operations-note"><h3>数据口径</h3><p>经营看板同时使用已采集的罗盘日维度数据和外部订单明细汇总；筛选“数据来源”可分别查看。</p><p>外部订单仅按支付日期与店铺汇总已支付、未关闭订单，不保存原始订单、买家、地址或联系方式；其未提供的流量、结算与内容归因指标显示为“—”。</p><p>当前数据维度为日期与店铺；品牌维度在罗盘源数据中尚未提供，因此未做品牌归因。</p></section>`;
-  const detailRecords = detailTableRecords(records);
-  const tableCount = whole(detailRecords.length);
-  const detailTables = `<details class="detail-table-disclosure"><summary><span>店铺经营明细</span><small>按日期与店铺查看关键经营指标 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${tableCount} 条</small></summary><div class="detail-table-content">${renderTable(detailRecords, true)}</div></details>`;
-  target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${operationsFiltersMarkup()}<div class="detail-table-stack">${detailTables}</div>`;
-  bindLineChartHover(records);
-  bindOperationsFilterEvents();
-}
-
 function channelSelectedRecords() {
   const records = state.channel?.records || [];
-  return records.filter((record) => (!state.channelDate || record.date === state.channelDate) && (!state.channelShop || record.shop_name === state.channelShop));
+  if (!state.operationPlatforms.has("抖音")) return [];
+  return records.filter((record) => state.operationDates.has(record.date) && state.operationShops.has(record.shop_name));
 }
 
 function channelGroup(records, key) {
@@ -345,14 +319,6 @@ function channelGroup(records, key) {
   return { value: available ? value : null, ratio: weight ? weightedRatio / weight : null };
 }
 
-function channelFilters(records) {
-  const allRecords = state.channel?.records || [];
-  const dates = [...new Set<string>(allRecords.map((record) => record.date))].sort().reverse();
-  const shops = [...new Set<string>(allRecords.map((record) => record.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel channel-filter" aria-label="渠道筛选"><div><strong>渠道筛选</strong><span>当前展示 ${whole(records.length)} 条店铺日数据</span></div><label>业务日期<select data-channel-filter="date">${options(dates, state.channelDate, "全部日期")}</select></label><label>店铺<select data-channel-filter="shop">${options(shops, state.channelShop, "全部店铺")}</select></label></section>`;
-}
-
 function simpleTable(headers, rows, empty = "暂无数据") {
   const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
   return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -369,23 +335,8 @@ function channelTrendRecords(records) {
   }));
 }
 
-function renderChannel() {
-  const target = $("#channel-content");
-  const allRecords = state.channel?.records || [];
-  if (!target) return;
-  if (!allRecords.length) {
-    $("#channel-summary").textContent = "尚未生成渠道接口采集数据。";
-    target.innerHTML = `<div class="empty-panel"><strong>等待首次渠道采集</strong><span>下一次罗盘采集将同时读取看流量、看商品和看搜索。</span></div>`;
-    return;
-  }
-  if (!state.channelDate) state.channelDate = [...new Set<string>(allRecords.map((record) => record.date))].sort().at(-1) || "";
-  const records = channelSelectedRecords();
-  if (!records.length) {
-    target.innerHTML = `${channelFilters(records)}<div class="empty-panel"><strong>当前筛选没有渠道数据</strong><span>请选择其他日期或店铺。</span></div>`;
-    bindChannelFilters();
-    return;
-  }
-
+function channelInsightsMarkup(records) {
+  if (!records.length) return `<div class="empty-panel compact-empty"><strong>当前范围没有抖音渠道数据</strong><span>请选择抖音平台、其他日期或店铺；首次采集后会补充看流量、看商品和看搜索。</span></div>`;
   const organic = channelGroup(records, "organic_search");
   const recommendation = channelGroup(records, "recommendation");
   const paid = channelGroup(records, "paid");
@@ -422,33 +373,174 @@ function renderChannel() {
     .sort((a, b) => number(a.rank) - number(b.rank))
     .map((term) => [escapeHtml(term.shop_name), wholeOrDash(term.rank), escapeHtml(term.word), wholeOrDash(term.show_ucnt), ratioOrDash(term.show_ucnt_change), moneyOrDash(term.pay_amt)]);
 
-  const periods = [...new Set(records.map((record) => {
+  const periods = [...new Set<string>(records.map((record) => {
     const period = record.search?.period || {};
     return period.begin_date && period.end_date ? `${period.begin_date} 至 ${period.end_date}` : "";
   }).filter(Boolean))];
-  $("#channel-summary").textContent = `最新业务日期：${state.channelDate || "—"} · ${new Set(records.map((record) => record.shop_name)).size} 家店铺 · 搜索口径：${periods.join("、") || "暂无"}`;
-  const trendSource = channelTrendRecords(allRecords.filter((record) => !state.channelShop || record.shop_name === state.channelShop));
+  const trendSource = channelTrendRecords(records);
   const charts = `<div class="chart-grid"><div class="chart-stack">${lineChart(trendSource, "organic_search", "自然搜索曝光趋势")}${lineChart(trendSource, "recommendation", "推荐流量曝光趋势")}</div><div class="chart-stack"><section class="panel"><div class="panel-head"><div><h3>商品卡流量来源</h3><span>按罗盘商品曝光人数口径</span></div></div>${simpleTable(["来源", "曝光人数", "占比"], sourceRows)}</section><section class="panel operations-note"><h3>渠道口径</h3><p>自然搜索对应“非投放时段-搜索”；推荐流量包含“猜你喜欢”和“顶Tab推荐”；广告流量包含全域投广及标准/品牌投放。</p><p>搜索模块采用罗盘独立周口径，日期可能晚于经营数据更新。</p></section></div></div>`;
   const details = `<div class="detail-table-stack"><details class="detail-table-disclosure" open><summary><span>商品表现</span><small>商品卡TOP商品 · ${whole(productRows.length)} 条</small></summary><div class="detail-table-content">${simpleTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率", "曝光变化"], productRows)}</div></details><details class="detail-table-disclosure"><summary><span>搜索渠道</span><small>商品卡、直播、短视频与图文搜索</small></summary><div class="detail-table-content">${simpleTable(["店铺", "搜索渠道", "曝光人数", "环比", "支付金额", "同行基准"], searchSourceRows)}</div></details><details class="detail-table-disclosure"><summary><span>本店搜索词</span><small>罗盘搜索周报TOP词</small></summary><div class="detail-table-content">${simpleTable(["店铺", "排名", "搜索词", "曝光人数", "环比", "支付金额"], searchTermRows)}</div></details></div>`;
-  target.innerHTML = `${channelFilters(records)}${cardHtml}${charts}${details}`;
-  bindChannelFilters();
-  bindLineChartHover(trendSource);
+  return `<section class="section-context"><span>抖音渠道下钻</span><small>${whole(records.length)} 条店铺日数据 · 搜索口径：${escapeHtml(periods.join("、") || "暂无")}</small></section>${cardHtml}${charts}${details}`;
 }
 
-function bindChannelFilters() {
-  $$('[data-channel-filter]').forEach((select) => select.addEventListener("change", () => {
-    if (select.dataset.channelFilter === "date") state.channelDate = select.value;
-    else state.channelShop = select.value;
-    renderChannel();
+function metricCards(metrics, columns = "six") {
+  return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+}
+
+function attributedAdMetrics(records) {
+  const platforms = new Set(records.filter((record) => number(record.metrics?.ad_cost_amt) > 0).map(recordPlatform));
+  const scoped = records.filter((record) => platforms.has(recordPlatform(record)));
+  return {
+    spend: scoped.reduce((sum, record) => sum + number(record.metrics?.ad_cost_amt), 0),
+    pay: scoped.reduce((sum, record) => sum + number(record.metrics?.pay_amt), 0),
+    platforms,
+  };
+}
+
+function operationTabsMarkup() {
+  const tabs = [["overview", "经营总览", "跨模块概览"], ["sales", "销售", "成交与退款"], ["traffic", "流量", "曝光、商品与搜索"], ["ads", "投放", "消耗与投产"]];
+  return `<div class="operations-tabs" role="tablist" aria-label="经营分类">${tabs.map(([key, label, note]) => `<button class="operations-tab ${state.operationSection === key ? "active" : ""}" type="button" data-operation-section="${key}" role="tab" aria-selected="${state.operationSection === key}"><span>${label}</span><small>${note}</small></button>`).join("")}</div>`;
+}
+
+function platformMatrixMarkup(records, channelRecords) {
+  const groups = new Map<string, Set<string>>();
+  records.forEach((record) => {
+    const platform = recordPlatform(record);
+    const shops = groups.get(platform) || new Set<string>();
+    shops.add(record.shop_name);
+    groups.set(platform, shops);
+  });
+  channelRecords.forEach((record) => {
+    const shops = groups.get("抖音") || new Set<string>();
+    shops.add(record.shop_name);
+    groups.set("抖音", shops);
+  });
+  const rows = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "zh-CN")).map(([platform, shops]) => [
+    `<span class="platform-pill">${escapeHtml(platform)}</span>`,
+    whole(shops.size),
+    escapeHtml([...shops].sort((a, b) => a.localeCompare(b, "zh-CN")).join("、")),
+  ]);
+  return `<section class="panel"><div class="panel-head"><div><h3>店铺矩阵</h3><span>平台 → 店铺的经营范围</span></div></div>${simpleTable(["平台", "店铺数", "已接入店铺"], rows, "当前范围没有店铺")}</section>`;
+}
+
+function operationSourceNote() {
+  return `<section class="panel operations-note"><h3>数据口径</h3><p>销售使用罗盘日维度数据和已导入订单汇总；流量融合罗盘经营指标，以及抖音“看流量、看商品、看搜索”的渠道快照；投放只展示已采集的投放消耗和广告曝光。</p><p>外部订单只保存日期、店铺和汇总指标，不保存订单号、买家、地址或原始文件。不同平台尚未接入的指标统一显示“—”。</p><p>当前数据维度为日期与店铺；源数据尚未提供稳定品牌字段，因此不做推测性品牌归因。</p></section>`;
+}
+
+function overviewSectionMarkup(records, channelRecords) {
+  const totals = aggregate(records);
+  const organic = channelGroup(channelRecords, "organic_search");
+  const ads = attributedAdMetrics(records);
+  const metrics = [
+    ["成交金额", money(totals.income_amt), "销售 · 成交口径"],
+    ["去退后成交", money(Math.max(totals.income_amt - totals.refund_amt, 0)), "销售 · 成交金额减退款"],
+    ["成交订单", whole(totals.pay_cnt), `销售 · ${whole(totals.pay_item_cnt)} 件商品`],
+    ["商品曝光人数", whole(totals.product_show_ucnt), "流量 · 罗盘经营口径"],
+    ["自然搜索曝光", wholeOrDash(organic.value), "流量 · 抖音渠道下钻"],
+    ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"],
+  ];
+  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}</div></div>` : `${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}`;
+  return `${metricCards(metrics)}${charts}`;
+}
+
+function salesSectionMarkup(records) {
+  if (!records.length) return `<div class="empty-panel compact-empty"><strong>当前范围没有销售数据</strong><span>请调整平台、日期、店铺或数据来源。</span></div>`;
+  const totals = aggregate(records);
+  const refundOrders = totals.refund_order_cnt_pay_time || totals.refund_order_cnt;
+  const netOrders = Math.max(totals.pay_cnt - refundOrders, 0);
+  const netSales = Math.max(totals.income_amt - totals.refund_amt, 0);
+  const metrics = [
+    ["成交订单数", whole(totals.pay_cnt), `成交件数 ${whole(totals.pay_item_cnt)}`],
+    ["成交金额", money(totals.income_amt), "按成交口径汇总"],
+    ["退款订单数", whole(refundOrders), "优先使用支付时间退款口径"],
+    ["退款金额", money(totals.refund_amt), `退款率 ${ratio(totals.refund_amt_rate)}`],
+    ["去退后订单数", whole(netOrders), "成交订单减退款订单"],
+    ["去退后成交金额", money(netSales), "成交金额减退款金额"],
+    ["平台补贴", money(totals.platform_subsidy_amt), "已采集平台补贴金额"],
+    ["客单价", money(totals.per_usr_pay_amt), `成交人数 ${whole(totals.pay_ucnt)}`],
+  ];
+  const count = whole(records.length);
+  const details = `<div class="detail-table-stack"><details class="detail-table-disclosure"><summary><span>店铺销售明细</span><small>按日期与店铺 · ${count} 条</small></summary><div class="detail-table-content">${renderTable(records)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${count} 条</small></summary><div class="detail-table-content">${renderTable(records, true)}</div></details></div>`;
+  return `${metricCards(metrics, "four")}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}</div></div>${details}`;
+}
+
+function trafficSectionMarkup(records, channelRecords) {
+  const totals = aggregate(records);
+  const organic = channelGroup(channelRecords, "organic_search");
+  const recommendation = channelGroup(channelRecords, "recommendation");
+  const metrics = [
+    ["商品曝光人数", whole(totals.product_show_ucnt), "经营日维度"],
+    ["商品点击人数", whole(totals.product_click_ucnt), "经营日维度"],
+    ["成交人数", whole(totals.pay_ucnt), "经营日维度"],
+    ["曝光-点击转化率", ratio(totals.product_show_ucnt ? totals.product_click_ucnt / totals.product_show_ucnt : 0), "点击人数 ÷ 曝光人数"],
+    ["点击-成交转化率", ratio(totals.product_click_ucnt ? totals.pay_ucnt / totals.product_click_ucnt : 0), "成交人数 ÷ 点击人数"],
+    ["自然 / 推荐曝光", `${wholeOrDash(organic.value)} / ${wholeOrDash(recommendation.value)}`, "抖音渠道下钻"],
+  ];
+  return `${metricCards(metrics)}${channelInsightsMarkup(channelRecords)}`;
+}
+
+function adsSectionMarkup(records, channelRecords) {
+  const totals = aggregate(records);
+  const paid = channelGroup(channelRecords, "paid");
+  const ads = attributedAdMetrics(records);
+  const adSpend = ads.spend;
+  const metrics = [
+    ["投放金额", adSpend ? money(adSpend) : "—", adSpend ? "投放消耗（店铺被投）" : "当前范围未采到投放消耗"],
+    ["广告曝光", wholeOrDash(paid.value), "抖音全域、标准及品牌投放来源"],
+    ["广告点击", "—", "当前采集接口未提供广告点击"],
+    ["广告点击率", "—", "等待广告点击口径接入"],
+    ["投放 ROI", operatingRatio(adSpend ? ads.pay / adSpend : null), adSpend ? `${[...ads.platforms].join("、")}支付金额 ÷ 投放金额` : "暂无可计算的投放金额"],
+    ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"],
+  ];
+  const note = `<section class="panel operations-note"><h3>投放边界</h3><p>“广告曝光”来自抖音渠道流量来源；“投放金额”来自罗盘的“投放消耗（店铺被投）”。两者能够进入同一板块，但不是同一接口的完整广告报表。</p><p>当前没有稳定的广告点击、点击率字段，因此明确显示为“—”；经营页的商品点击不会替代广告点击。</p></section>`;
+  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}${note}</div></div>` : note;
+  return `${metricCards(metrics)}${charts}`;
+}
+
+function renderOperations() {
+  const records = operationFilteredRecords();
+  const channelRecords = channelSelectedRecords();
+  const target = $("#operations-content");
+  const detailFiltersTarget = $("#detail-filters");
+  const allDates = [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
+  const allShops = new Set([...records.map((item) => item.shop_name), ...channelRecords.map((item) => item.shop_name)]);
+  const allPlatforms = new Set([...records.map(recordPlatform), ...(channelRecords.length ? ["抖音"] : [])]);
+  if (detailFiltersTarget) {
+    detailFiltersTarget.innerHTML = detailTableFilters();
+    bindDetailTableFilters();
+  }
+  renderOrderImportPanel();
+  $("#operations-summary").textContent = `最新业务日期：${allDates.at(-1) || "—"} · ${allPlatforms.size} 个平台 · ${allShops.size} 家店铺 · ${allDates.length} 个业务日`;
+  let content = "";
+  if (!records.length && !channelRecords.length) {
+    content = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请调整日期、平台、店铺或数据来源。</span></div>`;
+  } else if (state.operationSection === "sales") {
+    content = salesSectionMarkup(records);
+  } else if (state.operationSection === "traffic") {
+    content = trafficSectionMarkup(records, channelRecords);
+  } else if (state.operationSection === "ads") {
+    content = adsSectionMarkup(records, channelRecords);
+  } else {
+    content = overviewSectionMarkup(records, channelRecords);
+  }
+  target.innerHTML = `${operationTabsMarkup()}${content}<details class="advanced-filter"><summary>高级筛选</summary><p>可同时选择多个日期、平台、店铺和数据来源。</p>${operationsFiltersMarkup()}</details>`;
+  $$('[data-operation-section]').forEach((button) => button.addEventListener("click", () => {
+    state.operationSection = button.dataset.operationSection;
+    renderOperations();
   }));
+  bindOperationsFilterEvents();
+  const hoverRecords = state.operationSection === "traffic" ? channelTrendRecords(channelRecords) : records;
+  if (hoverRecords.length) bindLineChartHover(hoverRecords);
 }
 
 async function loadChannel() {
   const response = await fetch("/api/channel");
   if (response.status === 401) return showLogin();
-  const payload = await response.json().catch(() => ({}));
-  state.channel = response.ok ? payload : { records: [] };
-  renderChannel();
+  state.channel = response.ok ? await response.json().catch(() => ({ records: [] })) : { records: [] };
+  operationFilterItems("date").forEach((item) => state.operationDates.add(item));
+  operationFilterItems("platform").forEach((item) => state.operationPlatforms.add(item));
+  operationFilterItems("shop").forEach((item) => state.operationShops.add(item));
+  renderOperations();
 }
 
 function lineChart(records: OperationRecord[], metricKey, title) {
@@ -787,7 +879,6 @@ function renderSettlement(payload) {
   $('[data-settlement-filter="shop"]')?.addEventListener("change", (event) => {
     state.settlementShop = event.currentTarget.value;
     loadSettlement();
-    loadChannel();
   });
 }
 
@@ -943,9 +1034,12 @@ async function loadCompass() {
   if (response.status === 401) return showLogin();
   const payload = await response.json();
   state.records = payload.records || [];
-  state.operationDates = new Set(state.records.map((item) => item.date));
-  state.operationShops = new Set(state.records.map((item) => item.shop_name));
+  state.channel = payload.channel || null;
+  state.operationDates = new Set(operationFilterItems("date"));
+  state.operationPlatforms = new Set(operationFilterItems("platform"));
+  state.operationShops = new Set(operationFilterItems("shop"));
   state.operationSources = new Set(state.records.map(recordSourceLabel));
+  if (!payload.channel) return loadChannel();
   renderOperations();
 }
 
@@ -1023,7 +1117,7 @@ function showApp(user) {
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  activatePage(["inventory", "operations", "settlement", "channel", "collection", "account"].includes(desired) ? desired : "operations");
+  activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
   $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
   $("#logout-button").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); showLogin(); });
   $("#login-form").addEventListener("submit", async (event) => {
@@ -1038,11 +1132,10 @@ async function initialise() {
     loadOrderImports();
     loadInventory();
     loadSettlement();
-    loadChannel();
     refreshCollectionStatus();
   });
   const me = await fetch("/api/me").then((response) => response.json());
-  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadChannel(); refreshCollectionStatus(); } else showLogin();
+  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); refreshCollectionStatus(); } else showLogin();
 }
 
 initialise();
