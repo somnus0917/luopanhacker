@@ -2,6 +2,7 @@
 members = [
   "apps/api-rs",
   "apps/worker-rs",
+  "crates/channels",
   "crates/jobs",
   "crates/inventory",
   "crates/operations",

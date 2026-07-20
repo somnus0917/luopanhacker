@@ -56,15 +56,31 @@ impl RuntimePaths {
     }
 
     pub fn task_status_path(&self) -> PathBuf {
-        self.output_dir.join("task_status.json")
+        self.collection_dir().join("status.json")
     }
 
     pub fn daily_lock_path(&self) -> PathBuf {
-        self.output_dir.join("daily_job.lock")
+        self.collection_dir().join("job.lock")
     }
 
     pub fn progress_log_path(&self) -> PathBuf {
-        self.output_dir.join("progress.log")
+        self.collection_dir().join("progress.log")
+    }
+
+    pub fn collection_dir(&self) -> PathBuf {
+        self.output_dir.join("collection")
+    }
+
+    pub fn collection_request_path(&self) -> PathBuf {
+        self.collection_dir().join("request.json")
+    }
+
+    pub fn collection_running_request_path(&self) -> PathBuf {
+        self.collection_dir().join("request.running.json")
+    }
+
+    pub fn collection_heartbeat_path(&self) -> PathBuf {
+        self.collection_dir().join("heartbeat.json")
     }
 
     pub fn storage_db_path(&self) -> PathBuf {
@@ -105,10 +121,10 @@ pub fn read_text_tail(path: &Path, max_bytes: u64) -> Result<Option<String>> {
         .with_context(|| format!("read {}", path.display()))?;
 
     let mut text = String::from_utf8_lossy(&bytes).into_owned();
-    if start > 0 {
-        if let Some((_, rest)) = text.split_once('\n') {
-            text = format!("... truncated earlier output ...\n{rest}");
-        }
+    if start > 0
+        && let Some((_, rest)) = text.split_once('\n')
+    {
+        text = format!("... truncated earlier output ...\n{rest}");
     }
     Ok(Some(text))
 }

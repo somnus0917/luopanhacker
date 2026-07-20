@@ -377,7 +377,7 @@ fn preview_public(preview: &Value) -> Value {
         .flatten()
         .filter_map(|file| file.get("duplicate_orders").and_then(Value::as_i64))
         .sum::<i64>();
-    Ok::<Value, anyhow::Error>(json!({
+    json!({
         "preview_token": preview["token"],
         "expires_at": preview["expires_at"],
         "files": files,
@@ -389,7 +389,7 @@ fn preview_public(preview: &Value) -> Value {
             "date_range": if dates.is_empty() { json!([]) } else { json!([dates.first(), dates.last()]) },
             "source_labels": source_labels,
         }
-    })).expect("JSON construction")
+    })
 }
 
 pub fn public_imports(paths: &RuntimePaths) -> Result<Value> {

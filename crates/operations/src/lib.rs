@@ -66,10 +66,10 @@ fn load_daily_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
             }
 
             let key = (shop_name.clone(), date.clone());
-            if let Some(previous) = records_by_key.get(&key) {
-                if previous.captured_at >= captured_at {
-                    continue;
-                }
+            if let Some(previous) = records_by_key.get(&key)
+                && previous.captured_at >= captured_at
+            {
+                continue;
             }
 
             records_by_key.insert(

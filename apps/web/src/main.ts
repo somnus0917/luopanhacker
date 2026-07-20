@@ -9,6 +9,9 @@ type OperationRecord = AnyRecord & {
 };
 
 type AppState = {
+  currentUser: { username: string; role: string } | null;
+  users: AnyRecord[];
+  accountMessage: string;
   records: OperationRecord[];
   operationDates: Set<string>;
   operationShops: Set<string>;
@@ -17,6 +20,8 @@ type AppState = {
   tableDate: string;
   tableShop: string;
   status: AnyRecord | null;
+  collectionModules: Set<string>;
+  collectionMessage: string;
   page: string;
   inventory: AnyRecord | null;
   inventoryView: string;
@@ -27,9 +32,12 @@ type AppState = {
   orderImports: { batches: AnyRecord[]; summary: AnyRecord };
   orderPreview: AnyRecord | null;
   orderImportMessage: string;
+  channel: AnyRecord | null;
+  channelDate: string;
+  channelShop: string;
 };
 
-const state: AppState = { records: [], operationDates: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tableShop: "", status: null, page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "" };
+const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tableShop: "", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, channelDate: "", channelShop: "" };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer: number | null = null;
 
@@ -47,6 +55,7 @@ const settlementMoney = (yuan) => `¥${number(yuan).toLocaleString("zh-CN", { mi
 const settlementMoneyOrDash = (value) => hasValue(value) ? settlementMoney(value) : "—";
 const wholeOrDash = (value) => hasValue(value) ? whole(value) : "—";
 const ratioOrDash = (value) => hasValue(value) ? ratio(value) : "—";
+const isAdmin = () => state.currentUser?.role === "admin";
 
 function recordSourceLabel(item) {
   return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
@@ -101,6 +110,8 @@ function activatePage(name) {
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   $$(".nav-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
   history.replaceState(null, "", `#${name}`);
+  if (name === "collection" && state.currentUser) refreshCollectionStatus();
+  else window.clearTimeout(statusRefreshTimer);
 }
 
 function operationFilteredRecords() {
@@ -189,9 +200,10 @@ function renderOrderImportPanel() {
   const batches = state.orderImports?.batches || [];
   const summary = state.orderImports?.summary || {};
   const message = state.orderImportMessage ? `<p class="order-import-message">${escapeHtml(state.orderImportMessage)}</p>` : "";
-  const previewBlock = preview ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
-  const history = batches.length ? `<div class="import-history"><div class="import-history-head"><strong>导入历史</strong><span>累计 ${whole(summary.orders)} 单 · ${money(summary.pay_amt)}</span></div>${batches.map((batch) => `<div class="import-history-row"><div><strong>${escapeHtml((batch.source_labels || []).join("、"))}</strong><span>${escapeHtml(importTime(batch.created_at))} · ${escapeHtml(importDateRange(batch.date_range))} · 新增 ${whole(batch.added_orders)} 单</span></div><button class="text-button import-delete" type="button" data-delete-order-import="${escapeHtml(batch.id)}">撤销</button></div>`).join("")}</div>` : `<p class="import-help">暂无线上导入批次。可上传喵速达、天猫订单明细；抖店罗盘继续由现有采集任务更新。</p>`;
-  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>上传 Excel → 预览去重 → 确认写入</small></summary><div class="order-import-body"><form id="order-upload-form" class="order-upload-form"><label class="file-picker"><span>选择订单明细（.xlsx，可多选）</span><input id="order-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${message}${previewBlock}${history}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>`;
+  const previewBlock = isAdmin() && preview ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
+  const history = batches.length ? `<div class="import-history"><div class="import-history-head"><strong>导入历史</strong><span>累计 ${whole(summary.orders)} 单 · ${money(summary.pay_amt)}</span></div>${batches.map((batch) => `<div class="import-history-row"><div><strong>${escapeHtml((batch.source_labels || []).join("、"))}</strong><span>${escapeHtml(importTime(batch.created_at))} · ${escapeHtml(importDateRange(batch.date_range))} · 新增 ${whole(batch.added_orders)} 单</span></div>${isAdmin() ? `<button class="text-button import-delete" type="button" data-delete-order-import="${escapeHtml(batch.id)}">撤销</button>` : ""}</div>`).join("")}</div>` : `<p class="import-help">暂无线上导入批次。${isAdmin() ? "可上传喵速达、天猫订单明细；" : ""}抖店罗盘继续由现有采集任务更新。</p>`;
+  const uploadForm = isAdmin() ? `<form id="order-upload-form" class="order-upload-form"><label class="file-picker"><span>选择订单明细（.xlsx，可多选）</span><input id="order-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>` : `<p class="import-help">当前为只读账户，可查看导入历史，不能上传或撤销订单数据。</p>`;
+  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>${isAdmin() ? "上传 Excel → 预览去重 → 确认写入" : "导入历史（只读）"}</small></summary><div class="order-import-body">${uploadForm}${message}${previewBlock}${history}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>`;
   $("#order-upload-form")?.addEventListener("submit", previewOrderImport);
   $("[data-commit-order-import]")?.addEventListener("click", commitOrderImport);
   $("[data-cancel-order-preview]")?.addEventListener("click", () => { state.orderPreview = null; state.orderImportMessage = "已取消本次预览，尚未写入任何数据。"; renderOrderImportPanel(); });
@@ -310,6 +322,133 @@ function renderOperations() {
   target.innerHTML = `${cards}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}${lineChart(records, "expense_amt", "投放消耗趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}${sourceNote}</div></div>${operationsFiltersMarkup()}<div class="detail-table-stack">${detailTables}</div>`;
   bindLineChartHover(records);
   bindOperationsFilterEvents();
+}
+
+function channelSelectedRecords() {
+  const records = state.channel?.records || [];
+  return records.filter((record) => (!state.channelDate || record.date === state.channelDate) && (!state.channelShop || record.shop_name === state.channelShop));
+}
+
+function channelGroup(records, key) {
+  let value = 0, weightedRatio = 0, weight = 0, available = 0;
+  records.forEach((record) => {
+    const group = record.traffic?.groups?.[key];
+    if (!group) return;
+    available += 1;
+    value += number(group?.value);
+    if (hasValue(group?.ratio)) {
+      const currentWeight = Math.max(number(record.traffic?.source_total), 1);
+      weightedRatio += number(group.ratio) * currentWeight;
+      weight += currentWeight;
+    }
+  });
+  return { value: available ? value : null, ratio: weight ? weightedRatio / weight : null };
+}
+
+function channelFilters(records) {
+  const allRecords = state.channel?.records || [];
+  const dates = [...new Set<string>(allRecords.map((record) => record.date))].sort().reverse();
+  const shops = [...new Set<string>(allRecords.map((record) => record.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
+  return `<section class="table-filter-panel channel-filter" aria-label="渠道筛选"><div><strong>渠道筛选</strong><span>当前展示 ${whole(records.length)} 条店铺日数据</span></div><label>业务日期<select data-channel-filter="date">${options(dates, state.channelDate, "全部日期")}</select></label><label>店铺<select data-channel-filter="shop">${options(shops, state.channelShop, "全部店铺")}</select></label></section>`;
+}
+
+function simpleTable(headers, rows, empty = "暂无数据") {
+  const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
+  return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function channelTrendRecords(records) {
+  return records.map((record) => ({
+    date: record.date,
+    shop_name: record.shop_name,
+    metrics: {
+      organic_search: number(record.traffic?.groups?.organic_search?.value),
+      recommendation: number(record.traffic?.groups?.recommendation?.value),
+    },
+  }));
+}
+
+function renderChannel() {
+  const target = $("#channel-content");
+  const allRecords = state.channel?.records || [];
+  if (!target) return;
+  if (!allRecords.length) {
+    $("#channel-summary").textContent = "尚未生成渠道接口采集数据。";
+    target.innerHTML = `<div class="empty-panel"><strong>等待首次渠道采集</strong><span>下一次罗盘采集将同时读取看流量、看商品和看搜索。</span></div>`;
+    return;
+  }
+  if (!state.channelDate) state.channelDate = [...new Set<string>(allRecords.map((record) => record.date))].sort().at(-1) || "";
+  const records = channelSelectedRecords();
+  if (!records.length) {
+    target.innerHTML = `${channelFilters(records)}<div class="empty-panel"><strong>当前筛选没有渠道数据</strong><span>请选择其他日期或店铺。</span></div>`;
+    bindChannelFilters();
+    return;
+  }
+
+  const organic = channelGroup(records, "organic_search");
+  const recommendation = channelGroup(records, "recommendation");
+  const paid = channelGroup(records, "paid");
+  const shortVideoViews = records.reduce((sum, record) => sum + number(record.traffic?.carriers?.short_video?.watch_ucnt || record.traffic?.groups?.short_video?.value), 0);
+  const shortVideoPay = records.reduce((sum, record) => sum + number(record.traffic?.carriers?.short_video?.pay_amt), 0);
+  const cards = [
+    ["自然搜索曝光", wholeOrDash(organic.value), `商品卡来源占比 ${ratioOrDash(organic.ratio)}`],
+    ["推荐流量曝光", wholeOrDash(recommendation.value), `猜你喜欢/推荐页占比 ${ratioOrDash(recommendation.ratio)}`],
+    ["广告流量曝光", wholeOrDash(paid.value), `投放渠道占比 ${ratioOrDash(paid.ratio)}`],
+    ["短视频观看", whole(shortVideoViews), `短视频支付 ${money(shortVideoPay)}`],
+  ];
+  const cardHtml = `<div class="metric-grid four">${cards.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+
+  const sourceMap = new Map<string, AnyRecord>();
+  records.forEach((record) => (record.traffic?.sources || []).forEach((source) => {
+    if (source.parent === null) return;
+    const current = sourceMap.get(source.name) || { name: source.name, value: 0, weightedRatio: 0, weight: 0 };
+    const currentWeight = Math.max(number(record.traffic?.source_total), 1);
+    current.value += number(source.value);
+    current.weightedRatio += number(source.source_ratio) * currentWeight;
+    current.weight += currentWeight;
+    sourceMap.set(source.name, current);
+  }));
+  const sourceRows = [...sourceMap.values()].sort((a, b) => b.value - a.value).map((source) => [escapeHtml(source.name), whole(source.value), ratioOrDash(source.weight ? source.weightedRatio / source.weight : null)]);
+
+  const productRows = records.flatMap((record) => (record.products || []).map((product) => ({ ...product, shop_name: record.shop_name })))
+    .sort((a, b) => number(b.pay_amt) - number(a.pay_amt) || number(b.show_ucnt) - number(a.show_ucnt))
+    .slice(0, 30)
+    .map((product) => [escapeHtml(product.shop_name), `<span class="table-primary">${escapeHtml(product.product_name || product.product_id)}</span><small>${escapeHtml(product.product_id)}</small>`, moneyOrDash(product.pay_amt), wholeOrDash(product.show_ucnt), wholeOrDash(product.click_ucnt), ratioOrDash(product.click_rate), ratioOrDash(product.click_pay_rate), ratioOrDash(product.show_ucnt_change)]);
+
+  const searchSourceRows = records.flatMap((record) => (record.search?.sources || []).map((source) => ({ ...source, shop_name: record.shop_name })))
+    .map((source) => [escapeHtml(source.shop_name), escapeHtml(source.name), wholeOrDash(source.show_ucnt), ratioOrDash(source.show_ucnt_change), moneyOrDash(source.pay_amt), moneyOrDash(source.pay_amt_benchmark)]);
+  const searchTermRows = records.flatMap((record) => (record.search?.shop_terms || []).map((term) => ({ ...term, shop_name: record.shop_name })))
+    .sort((a, b) => number(a.rank) - number(b.rank))
+    .map((term) => [escapeHtml(term.shop_name), wholeOrDash(term.rank), escapeHtml(term.word), wholeOrDash(term.show_ucnt), ratioOrDash(term.show_ucnt_change), moneyOrDash(term.pay_amt)]);
+
+  const periods = [...new Set(records.map((record) => {
+    const period = record.search?.period || {};
+    return period.begin_date && period.end_date ? `${period.begin_date} 至 ${period.end_date}` : "";
+  }).filter(Boolean))];
+  $("#channel-summary").textContent = `最新业务日期：${state.channelDate || "—"} · ${new Set(records.map((record) => record.shop_name)).size} 家店铺 · 搜索口径：${periods.join("、") || "暂无"}`;
+  const trendSource = channelTrendRecords(allRecords.filter((record) => !state.channelShop || record.shop_name === state.channelShop));
+  const charts = `<div class="chart-grid"><div class="chart-stack">${lineChart(trendSource, "organic_search", "自然搜索曝光趋势")}${lineChart(trendSource, "recommendation", "推荐流量曝光趋势")}</div><div class="chart-stack"><section class="panel"><div class="panel-head"><div><h3>商品卡流量来源</h3><span>按罗盘商品曝光人数口径</span></div></div>${simpleTable(["来源", "曝光人数", "占比"], sourceRows)}</section><section class="panel operations-note"><h3>渠道口径</h3><p>自然搜索对应“非投放时段-搜索”；推荐流量包含“猜你喜欢”和“顶Tab推荐”；广告流量包含全域投广及标准/品牌投放。</p><p>搜索模块采用罗盘独立周口径，日期可能晚于经营数据更新。</p></section></div></div>`;
+  const details = `<div class="detail-table-stack"><details class="detail-table-disclosure" open><summary><span>商品表现</span><small>商品卡TOP商品 · ${whole(productRows.length)} 条</small></summary><div class="detail-table-content">${simpleTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率", "曝光变化"], productRows)}</div></details><details class="detail-table-disclosure"><summary><span>搜索渠道</span><small>商品卡、直播、短视频与图文搜索</small></summary><div class="detail-table-content">${simpleTable(["店铺", "搜索渠道", "曝光人数", "环比", "支付金额", "同行基准"], searchSourceRows)}</div></details><details class="detail-table-disclosure"><summary><span>本店搜索词</span><small>罗盘搜索周报TOP词</small></summary><div class="detail-table-content">${simpleTable(["店铺", "排名", "搜索词", "曝光人数", "环比", "支付金额"], searchTermRows)}</div></details></div>`;
+  target.innerHTML = `${channelFilters(records)}${cardHtml}${charts}${details}`;
+  bindChannelFilters();
+  bindLineChartHover(trendSource);
+}
+
+function bindChannelFilters() {
+  $$('[data-channel-filter]').forEach((select) => select.addEventListener("change", () => {
+    if (select.dataset.channelFilter === "date") state.channelDate = select.value;
+    else state.channelShop = select.value;
+    renderChannel();
+  }));
+}
+
+async function loadChannel() {
+  const response = await fetch("/api/channel");
+  if (response.status === 401) return showLogin();
+  const payload = await response.json().catch(() => ({}));
+  state.channel = response.ok ? payload : { records: [] };
+  renderChannel();
 }
 
 function lineChart(records: OperationRecord[], metricKey, title) {
@@ -599,6 +738,7 @@ function settlementShopFilter(payload) {
 }
 
 function settlementUploadPanel() {
+  if (!isAdmin()) return "";
   const message = state.settlementUploadMessage ? `<p class="order-import-message">${escapeHtml(state.settlementUploadMessage)}</p>` : "";
   const defaultShop = state.settlementShop || "";
   return `<details class="panel order-import-panel"><summary><span>结算 CSV 导入</span><small>填写店铺 → 上传 CSV → 自动刷新</small></summary><div class="order-import-body"><form id="settlement-upload-form" class="order-upload-form"><label>店铺名称<input name="shop_name" value="${escapeHtml(defaultShop)}" required /></label><label class="file-picker"><span>选择结算 CSV</span><input id="settlement-upload-file" type="file" name="file" accept=".csv,text/csv" required /></label><button class="button" type="submit">上传并解析</button></form>${message}<p class="import-help">上传后文件保存在服务器 <code>output/settlement/</code>，店铺名会保存为本地映射，用于后续筛选与汇总。</p></div></details>`;
@@ -647,6 +787,7 @@ function renderSettlement(payload) {
   $('[data-settlement-filter="shop"]')?.addEventListener("change", (event) => {
     state.settlementShop = event.currentTarget.value;
     loadSettlement();
+    loadChannel();
   });
 }
 
@@ -673,7 +814,9 @@ async function uploadSettlement(event) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    state.settlementUploadMessage = payload.error || "结算 CSV 上传失败，请检查文件格式。";
+    state.settlementUploadMessage = response.status === 413
+      ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。"
+      : payload.error || "结算 CSV 上传失败，请检查文件格式。";
     if (state.settlement) renderSettlement(state.settlement);
     return;
   }
@@ -702,48 +845,97 @@ function statusTerminal(status, logMessage) {
     const lineCount = status.terminal_output.split("\n").length;
     return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><small>最近 ${escapeHtml(String(lineCount))} 行</small></div><pre>${escapeHtml(status.terminal_output)}</pre></div>`;
   }
-  return `<p class="status-log-empty">${escapeHtml(logMessage || "展开后读取本次采集终端输出。")}</p>`;
+  return `<p class="status-log-empty">${escapeHtml(logMessage || "当前还没有采集终端输出。")}</p>`;
 }
 
-function placeCollectionStatus(status, { open = false, logMessage = "" } = {}) {
-  const slot = $("#collection-status");
+function collectionModuleCard(name, title, description, status) {
+  const result = status.modules?.[name] || {};
+  const selected = state.collectionModules.has(name);
+  const finished = number(result.success_count) + number(result.error_count);
+  const resultLabel = finished
+    ? `${whole(result.success_count)} 个成功 · ${whole(result.error_count)} 个异常`
+    : "等待下一次采集";
+  return `<label class="collection-module ${selected ? "selected" : ""}">
+    <input type="checkbox" data-collection-module="${name}" ${selected ? "checked" : ""} ${isAdmin() ? "" : "disabled"} />
+    <span class="collection-module-check">${selected ? "✓" : ""}</span>
+    <span class="collection-module-copy"><strong>${title}</strong><small>${description}</small><em>${resultLabel}</em></span>
+  </label>`;
+}
+
+function collectionStateLabel(status) {
+  const labels = { unknown: "等待首次运行", manual_requested: "请求已排队", waiting_random: "等待启动", running: "采集中", success: "采集成功", partial_success: "部分成功", failed: "采集失败", skipped: "已跳过" };
+  return labels[status.state] || status.state || "未知";
+}
+
+function renderCollectionCenter(status, { logMessage = "" } = {}) {
+  const slot = $("#collection-center");
   if (!slot) return;
   state.status = status;
-  const message = status.message || "暂无采集状态";
-  const html = `<details class="panel status-panel"><summary>采集状态 · ${escapeHtml(status.state || "unknown")}</summary><div class="status-body"><p>${escapeHtml(message)}</p><p>最近成功采集：${escapeHtml(status.last_success_at || "—")}</p>${statusTerminal(status, logMessage)}<div class="status-actions"><button id="scrape-button" class="button button-primary" ${status.job_running ? "disabled" : ""}>${status.job_running ? "采集任务进行中" : "手动补采今天数据"}</button><a class="button" href="${escapeHtml(status.novnc_url || "#")}" target="_blank" rel="noreferrer">打开远程浏览器</a></div></div></details>`;
-  slot.innerHTML = html;
-  const details = $(".status-panel", slot);
-  if (open) details.open = true;
-  $("#scrape-button")?.addEventListener("click", startScrape);
-  details.addEventListener("toggle", () => {
-    if (details.open && !Object.prototype.hasOwnProperty.call(state.status || {}, "terminal_output")) {
-      refreshCollectionStatus({ open: true });
-    }
-  });
+  const online = Boolean(status.collector_online);
+  const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+  const health = online ? "采集服务在线" : "采集服务离线";
+  const request = status.request_pending ? "有任务等待或执行中" : "队列为空";
+  const feedback = state.collectionMessage ? `<p class="collection-feedback">${escapeHtml(state.collectionMessage)}</p>` : "";
+  const permission = isAdmin() ? "选择本次要更新的数据；模块异常互不影响。" : "当前账户为只读权限，可查看状态但不能提交任务。";
+  slot.innerHTML = `${feedback}
+    <div class="collection-health-grid">
+      <article class="collection-health"><span class="health-indicator ${online ? "online" : "offline"}"></span><small>服务状态</small><strong>${health}</strong></article>
+      <article class="collection-health"><small>任务状态</small><strong>${escapeHtml(collectionStateLabel(status))}</strong><span>${escapeHtml(status.message || "暂无采集记录")}</span></article>
+      <article class="collection-health"><small>任务队列</small><strong>${request}</strong><span>最近成功：${escapeHtml(status.last_success_at || "—")}</span></article>
+    </div>
+    <section class="panel collection-control"><div class="panel-head"><div><h3>手动采集</h3><span>${permission}</span></div></div>
+      <div class="collection-modules">
+        ${collectionModuleCard("operations", "经营数据", "成交、退款、客单价及转化等近 1 天指标", status)}
+        ${collectionModuleCard("channel", "渠道数据", "看流量、看商品和看搜索的渠道洞察", status)}
+      </div>
+      <div class="status-actions">
+        ${isAdmin() ? `<button id="collection-run-button" class="button button-primary" ${busy || !online ? "disabled" : ""}>${busy ? "采集任务进行中" : online ? "开始采集所选模块" : "采集服务离线"}</button>` : ""}
+        <a class="button" href="${escapeHtml(status.novnc_url || "#")}" target="_blank" rel="noreferrer">打开远程浏览器</a>
+      </div>
+    </section>
+    <details class="panel status-panel" open><summary>采集终端与诊断</summary><div class="status-body">
+      <p>状态更新时间：${escapeHtml(status.updated_at || "—")} · 请求模块：${escapeHtml((status.requested_modules || []).join("、") || "—")}</p>
+      ${status.last_error ? `<p class="collection-error">${escapeHtml(status.last_error)}</p>` : ""}
+      ${statusTerminal(status, logMessage)}
+    </div></details>`;
+  $$('[data-collection-module]', slot).forEach((input) => input.addEventListener("change", () => {
+    if (input.checked) state.collectionModules.add(input.dataset.collectionModule);
+    else state.collectionModules.delete(input.dataset.collectionModule);
+    renderCollectionCenter(state.status || {});
+  }));
+  $("#collection-run-button")?.addEventListener("click", startCollection);
 }
 
-async function refreshCollectionStatus({ open = false } = {}) {
+async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer);
   try {
-    const response = await fetch("/api/status");
+    const response = await fetch("/api/collection/status", { cache: "no-store" });
+    if (response.status === 401) return showLogin();
     if (!response.ok) throw new Error("status unavailable");
     const status = await response.json();
-    placeCollectionStatus(status, { open });
-    const shouldRefresh = Boolean(status.job_running) || ["manual_requested", "waiting_random", "running"].includes(status.state);
-    if (shouldRefresh && open) statusRefreshTimer = window.setTimeout(() => refreshCollectionStatus({ open: true }), 5000);
+    renderCollectionCenter(status);
+    const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+    if (state.page === "collection") statusRefreshTimer = window.setTimeout(refreshCollectionStatus, busy ? 5000 : 15000);
   } catch {
-    if (state.status) placeCollectionStatus(state.status, { open, logMessage: "暂时无法读取终端输出，稍后可再次展开重试。" });
+    if (state.status) renderCollectionCenter(state.status, { logMessage: "暂时无法读取采集服务状态，请稍后重试。" });
   }
 }
 
-async function startScrape() {
-  const button = $("#scrape-button");
+async function startCollection() {
+  const button = $("#collection-run-button");
+  const modules = [...state.collectionModules];
+  if (!modules.length) {
+    state.collectionMessage = "请至少选择一个采集模块。";
+    renderCollectionCenter(state.status || {});
+    return;
+  }
   button.disabled = true;
-  button.textContent = "正在启动…";
-  const response = await fetch("/api/scrape", { method: "POST" });
+  button.textContent = "正在提交…";
+  const response = await fetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
   const payload = await response.json().catch(() => ({}));
-  button.textContent = payload.message || payload.error || "请求已发送";
-  window.setTimeout(() => refreshCollectionStatus({ open: true }), 700);
+  state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
+  if (payload.status) renderCollectionCenter(payload.status);
+  window.setTimeout(refreshCollectionStatus, 700);
 }
 
 async function loadCompass() {
@@ -751,21 +943,87 @@ async function loadCompass() {
   if (response.status === 401) return showLogin();
   const payload = await response.json();
   state.records = payload.records || [];
-  state.status = payload.status || state.status;
   state.operationDates = new Set(state.records.map((item) => item.date));
   state.operationShops = new Set(state.records.map((item) => item.shop_name));
   state.operationSources = new Set(state.records.map(recordSourceLabel));
   renderOperations();
-  if (state.status) placeCollectionStatus(state.status);
 }
 
-function showLogin() { $("#login-layer").classList.remove("hidden"); $("#app-shell").classList.add("hidden"); }
-function showApp(user) { $("#login-layer").classList.add("hidden"); $("#app-shell").classList.remove("hidden"); $("#account-name").textContent = `已登录：${user.username}`; }
+function renderAccount() {
+  const target = $("#account-content");
+  if (!target || !state.currentUser) return;
+  const message = state.accountMessage ? `<p class="order-import-message">${escapeHtml(state.accountMessage)}</p>` : "";
+  const passwordPanel = `<section class="panel account-panel"><div class="panel-head"><div><h3>修改密码</h3><span>更新后其他设备上的登录会话将失效</span></div></div><form id="password-change-form" class="account-form"><label>当前密码<input name="current_password" type="password" autocomplete="current-password" required /></label><label>新密码<input name="new_password" type="password" autocomplete="new-password" minlength="12" required /></label><button class="button button-primary" type="submit">更新密码</button></form></section>`;
+  const userRows = state.users.map((user) => `<div class="user-row"><div><strong>${escapeHtml(user.username)}</strong><span>${user.role === "admin" ? "管理员" : "只读用户"} · 创建于 ${escapeHtml(importTime(user.created_at))}</span></div>${user.username === state.currentUser?.username ? `<small>当前账户</small>` : `<button class="text-button import-delete" type="button" data-delete-user="${escapeHtml(user.username)}">删除</button>`}</div>`).join("");
+  const adminPanel = isAdmin() ? `<section class="panel account-panel"><div class="panel-head"><div><h3>用户管理</h3><span>管理员可新增账户；viewer 只能读取看板</span></div></div><form id="user-create-form" class="account-form account-form-user"><label>用户名<input name="username" maxlength="64" required /></label><label>初始密码<input name="password" type="password" autocomplete="new-password" minlength="12" required /></label><label>角色<select name="role"><option value="viewer">viewer · 只读</option><option value="admin">admin · 管理员</option></select></label><button class="button" type="submit">新增用户</button></form><div class="user-list">${userRows || `<p class="import-help">正在读取用户列表…</p>`}</div></section>` : `<section class="panel account-panel"><div class="panel-head"><div><h3>账户权限</h3><span>viewer · 只读</span></div></div><p class="import-help">你可以查看经营、库存和结算数据；上传、撤销、补采及用户管理由管理员执行。</p></section>`;
+  target.innerHTML = `${message}<div class="account-grid">${passwordPanel}${adminPanel}</div>`;
+  $("#password-change-form")?.addEventListener("submit", changePassword);
+  $("#user-create-form")?.addEventListener("submit", createUser);
+  $$('[data-delete-user]').forEach((button) => button.addEventListener("click", () => deleteUser(button.dataset.deleteUser)));
+}
+
+async function loadUsers() {
+  if (!isAdmin()) return;
+  const response = await fetch("/api/users");
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    state.accountMessage = payload.error || "用户列表读取失败。";
+  } else {
+    state.users = payload.users || [];
+  }
+  renderAccount();
+}
+
+async function changePassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+  const payload = await response.json().catch(() => ({}));
+  state.accountMessage = response.ok ? (payload.message || "密码已更新。") : (payload.error || "密码更新失败。");
+  if (response.ok) form.reset();
+  renderAccount();
+}
+
+async function createUser(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+  const payload = await response.json().catch(() => ({}));
+  state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : (payload.error || "新增用户失败。");
+  if (response.ok) form.reset();
+  await loadUsers();
+}
+
+async function deleteUser(username) {
+  if (!username || !window.confirm(`确定删除用户“${username}”吗？该用户的登录会话会立即失效。`)) return;
+  const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+  const payload = await response.json().catch(() => ({}));
+  state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : (payload.error || "删除用户失败。");
+  await loadUsers();
+}
+
+function showLogin() {
+  state.currentUser = null;
+  state.users = [];
+  state.accountMessage = "";
+  state.orderPreview = null;
+  $("#login-layer").classList.remove("hidden");
+  $("#app-shell").classList.add("hidden");
+}
+
+function showApp(user) {
+  state.currentUser = { username: user.username, role: user.role };
+  $("#login-layer").classList.add("hidden");
+  $("#app-shell").classList.remove("hidden");
+  $("#account-name").textContent = `${user.username} · ${user.role === "admin" ? "管理员" : "只读"}`;
+  renderAccount();
+  if (isAdmin()) loadUsers();
+}
 
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  activatePage(["inventory", "operations", "settlement", "channel"].includes(desired) ? desired : "operations");
+  activatePage(["inventory", "operations", "settlement", "channel", "collection", "account"].includes(desired) ? desired : "operations");
   $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
   $("#logout-button").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); showLogin(); });
   $("#login-form").addEventListener("submit", async (event) => {
@@ -780,9 +1038,11 @@ async function initialise() {
     loadOrderImports();
     loadInventory();
     loadSettlement();
+    loadChannel();
+    refreshCollectionStatus();
   });
   const me = await fetch("/api/me").then((response) => response.json());
-  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); } else showLogin();
+  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadChannel(); refreshCollectionStatus(); } else showLogin();
 }
 
 initialise();

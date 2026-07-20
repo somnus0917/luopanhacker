@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, time::Duration};
 
 use anyhow::{Context, Result, bail};
 use chrono::Local;
@@ -19,8 +19,8 @@ pub fn write_task_status(
     paths: &RuntimePaths,
     patch: Map<String, Value>,
 ) -> Result<Map<String, Value>> {
-    fs::create_dir_all(&paths.output_dir)
-        .with_context(|| format!("create {}", paths.output_dir.display()))?;
+    fs::create_dir_all(paths.collection_dir())
+        .with_context(|| format!("create {}", paths.collection_dir().display()))?;
 
     let mut current = read_task_status(paths)?;
     for (key, value) in patch {
@@ -49,6 +49,20 @@ pub fn status_payload(
         "novnc_url".to_string(),
         Value::String(novnc_url.to_string()),
     );
+    payload.insert(
+        "collector_online".to_string(),
+        Value::Bool(is_recent_file(
+            &paths.collection_heartbeat_path(),
+            Duration::from_secs(30),
+        )),
+    );
+    payload.insert(
+        "request_pending".to_string(),
+        Value::Bool(
+            paths.collection_request_path().exists()
+                || paths.collection_running_request_path().exists(),
+        ),
+    );
     if include_terminal_output {
         payload.insert(
             "terminal_output".to_string(),
@@ -56,6 +70,13 @@ pub fn status_payload(
         );
     }
     Ok(Value::Object(payload))
+}
+
+fn is_recent_file(path: &Path, max_age: Duration) -> bool {
+    path.metadata()
+        .and_then(|metadata| metadata.modified())
+        .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+        .is_ok_and(|elapsed| elapsed <= max_age)
 }
 
 pub fn progress_log_tail(paths: &RuntimePaths) -> Result<Option<String>> {
@@ -119,17 +140,24 @@ mod tests {
     use std::{
         fs,
         path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::*;
+
+    static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
     fn temp_paths() -> RuntimePaths {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("luopan-jobs-test-{nonce}"));
+        let sequence = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "luopan-jobs-test-{}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         RuntimePaths {
             app_dir: root.clone(),
             output_dir: root.join("output"),
@@ -169,7 +197,7 @@ mod tests {
     #[test]
     fn status_payload_adds_runtime_fields() {
         let paths = temp_paths();
-        fs::create_dir_all(&paths.output_dir).unwrap();
+        fs::create_dir_all(paths.collection_dir()).unwrap();
         fs::write(paths.progress_log_path(), "line1\nline2\n").unwrap();
 
         let payload = status_payload(&paths, "http://127.0.0.1:6080", true).unwrap();

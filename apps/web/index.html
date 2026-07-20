@@ -32,6 +32,8 @@
         <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
         <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
         <button class="nav-tab" data-page="channel" type="button">🎬 <span>抖音渠道</span></button>
+        <button class="nav-tab" data-page="collection" type="button">⟳ <span>采集中心</span></button>
+        <button class="nav-tab" data-page="account" type="button">👤 <span>账户设置</span></button>
       </nav>
 
       <main>
@@ -42,7 +44,6 @@
 
         <section class="dashboard-page" id="page-operations" data-page="operations">
           <div class="page-heading"><p class="eyebrow">OPERATIONS OVERVIEW</p><h2>经营看板</h2><p id="operations-summary">正在读取经营数据。</p></div>
-          <div id="collection-status" class="collection-status"><details class="panel status-panel"><summary>采集状态 · 加载中</summary></details></div>
           <div id="detail-filters" class="table-filter-container"></div>
           <div id="order-import-panel"></div>
           <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将读取罗盘日维度数据与已导入的订单明细汇总。</span></div></div>
@@ -54,10 +55,19 @@
           <div id="settlement-content"><div class="empty-panel"><strong>正在读取结算数据</strong><span>将读取服务器 output/settlement 目录下的抖音结算 CSV。</span></div></div>
         </section>
 
-        <section class="dashboard-page placeholder-page" id="page-channel" data-page="channel">
-          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>抖音渠道</h2><p>查看商品卡流量来源、点击率和商品成交表现。</p></div>
-          <div class="metric-grid four" data-placeholder="自然搜索|推荐流量|广告投放|短视频引流"></div>
-          <div class="empty-panel"><strong>该页暂未接入数据</strong><span>渠道数据接入后，将展示来源占比、点击率和商品表现。</span></div>
+        <section class="dashboard-page" id="page-channel" data-page="channel">
+          <div class="page-heading"><p class="eyebrow">CHANNEL INTELLIGENCE</p><h2>抖音渠道</h2><p id="channel-summary">正在读取流量、商品与搜索数据。</p></div>
+          <div id="channel-content"><div class="empty-panel"><strong>正在读取渠道数据</strong><span>页面从服务器SQLite快照读取，不会在浏览器中请求罗盘。</span></div></div>
+        </section>
+
+        <section class="dashboard-page" id="page-collection" data-page="collection">
+          <div class="page-heading"><p class="eyebrow">DATA COLLECTION</p><h2>采集中心</h2><p>统一管理罗盘经营与渠道数据采集，采集任务在独立服务中运行。</p></div>
+          <div id="collection-center"><div class="empty-panel"><strong>正在连接采集服务</strong><span>这里可以查看服务健康、模块结果及终端输出。</span></div></div>
+        </section>
+
+        <section class="dashboard-page" id="page-account" data-page="account">
+          <div class="page-heading"><p class="eyebrow">ACCOUNT &amp; ACCESS</p><h2>账户设置</h2><p>修改当前密码；管理员可以维护用户及只读权限。</p></div>
+          <div id="account-content"></div>
         </section>
       </main>
     </div>

@@ -982,6 +982,8 @@ dependencies = [
  "argon2",
  "axum",
  "chrono",
+ "fs2",
+ "luopan-channels",
  "luopan-inventory",
  "luopan-jobs",
  "luopan-operations",
@@ -999,6 +1001,16 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "luopan-channels"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "luopan-runtime",
+ "serde_json",
 ]
 
 [[package]]
@@ -1071,6 +1083,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "luopan-channels",
  "luopan-inventory",
  "luopan-jobs",
  "luopan-operations",

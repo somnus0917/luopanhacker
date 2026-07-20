@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
+use luopan_channels::load_channel_dashboard;
 use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::status_payload;
 use luopan_operations::{OperationRecord, load_operations_records};
@@ -71,6 +72,50 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     .await?;
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS channel_daily (
+            shop_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            shop_name TEXT NOT NULL,
+            captured_at TEXT NOT NULL,
+            traffic_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (shop_id, date)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS channel_product_daily (
+            shop_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            product_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (shop_id, date, product_id)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS channel_search_daily (
+            shop_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            row_key TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (shop_id, date, kind, row_key)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS order_import_batches (
             id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
@@ -116,6 +161,10 @@ pub async fn sync_all(paths: &RuntimePaths, pool: &SqlitePool) -> Result<Storage
     migrate(pool).await?;
     let operations = load_operations_records(paths)?;
     sync_operations(pool, &operations).await?;
+
+    let channels = load_channel_dashboard(paths)?;
+    sync_channels(pool, &channels).await?;
+    upsert_kv(pool, "channel_dashboard", &channels).await?;
 
     let order_imports = public_imports(paths)?;
     sync_order_imports(pool, &order_imports).await?;
@@ -232,6 +281,109 @@ pub async fn sync_order_imports(pool: &SqlitePool, payload: &Value) -> Result<()
     Ok(())
 }
 
+pub async fn sync_channels(pool: &SqlitePool, payload: &Value) -> Result<()> {
+    let records = payload
+        .get("records")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut transaction = pool.begin().await?;
+    for table in [
+        "channel_daily",
+        "channel_product_daily",
+        "channel_search_daily",
+    ] {
+        sqlx::query(&format!("DELETE FROM {table}"))
+            .execute(&mut *transaction)
+            .await?;
+    }
+    let updated_at = now();
+    for record in records {
+        let shop_id = record.get("shop_id").and_then(Value::as_str).unwrap_or("");
+        let shop_name = record
+            .get("shop_name")
+            .and_then(Value::as_str)
+            .unwrap_or(shop_id);
+        let date = record.get("date").and_then(Value::as_str).unwrap_or("");
+        let captured_at = record
+            .get("captured_at")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if shop_id.is_empty() || date.is_empty() {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO channel_daily (shop_id, date, shop_name, captured_at, traffic_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(shop_id)
+        .bind(date)
+        .bind(shop_name)
+        .bind(captured_at)
+        .bind(serde_json::to_string(record.get("traffic").unwrap_or(&Value::Null))?)
+        .bind(&updated_at)
+        .execute(&mut *transaction)
+        .await?;
+
+        for product in record
+            .get("products")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let product_id = product
+                .get("product_id")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if product_id.is_empty() {
+                continue;
+            }
+            sqlx::query(
+                "INSERT INTO channel_product_daily (shop_id, date, product_id, payload_json, updated_at) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(shop_id)
+            .bind(date)
+            .bind(product_id)
+            .bind(serde_json::to_string(product)?)
+            .bind(&updated_at)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        let search = record.get("search").unwrap_or(&Value::Null);
+        for (kind, rows, key_name) in [
+            ("source", search.get("sources"), "name"),
+            ("shop_term", search.get("shop_terms"), "word"),
+            ("industry_term", search.get("industry_terms"), "word"),
+        ] {
+            for (index, row) in rows
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                let row_key = row
+                    .get(key_name)
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| index.to_string());
+                sqlx::query(
+                    "INSERT INTO channel_search_daily (shop_id, date, kind, row_key, payload_json, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                )
+                .bind(shop_id)
+                .bind(date)
+                .bind(kind)
+                .bind(row_key)
+                .bind(serde_json::to_string(row)?)
+                .bind(&updated_at)
+                .execute(&mut *transaction)
+                .await?;
+            }
+        }
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
 pub async fn upsert_kv(pool: &SqlitePool, key: &str, value: &Value) -> Result<()> {
     sqlx::query(
         r#"
@@ -252,10 +404,17 @@ pub async fn upsert_kv(pool: &SqlitePool, key: &str, value: &Value) -> Result<()
 
 pub async fn summary(pool: &SqlitePool) -> Result<StorageSummary> {
     let operations = scalar_count(pool, "SELECT COUNT(*) FROM operation_records").await?;
+    let channel_days = scalar_count(pool, "SELECT COUNT(*) FROM channel_daily").await?;
+    let channel_products = scalar_count(pool, "SELECT COUNT(*) FROM channel_product_daily").await?;
+    let channel_search_rows =
+        scalar_count(pool, "SELECT COUNT(*) FROM channel_search_daily").await?;
     let order_batches = scalar_count(pool, "SELECT COUNT(*) FROM order_import_batches").await?;
     let kv_entries = scalar_count(pool, "SELECT COUNT(*) FROM app_kv").await?;
     Ok(StorageSummary {
         operations,
+        channel_days,
+        channel_products,
+        channel_search_rows,
         order_batches,
         kv_entries,
     })
@@ -321,6 +480,9 @@ fn now() -> String {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct StorageSummary {
     pub operations: i64,
+    pub channel_days: i64,
+    pub channel_products: i64,
+    pub channel_search_rows: i64,
     pub order_batches: i64,
     pub kv_entries: i64,
 }
@@ -330,6 +492,9 @@ impl StorageSummary {
         json!({
             "db_path": paths.storage_db_path(),
             "operations": self.operations,
+            "channel_days": self.channel_days,
+            "channel_products": self.channel_products,
+            "channel_search_rows": self.channel_search_rows,
             "order_batches": self.order_batches,
             "kv_entries": self.kv_entries,
         })

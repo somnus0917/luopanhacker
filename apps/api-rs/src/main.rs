@@ -1,22 +1,19 @@
-use std::{
-    env, fs,
-    net::SocketAddr,
-    process::{Command, Stdio},
-    sync::Arc,
-};
+use std::{env, fs, io::Write, net::SocketAddr, sync::Arc};
 
 use anyhow::{Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
-    extract::{Multipart, Path as AxumPath, Query, Request, State},
+    extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{Next, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{delete, get, get_service, post},
 };
+use fs2::FileExt;
+use luopan_channels::load_channel_dashboard;
 use luopan_inventory::load_inventory_dashboard;
-use luopan_jobs::{progress_log_tail, status_payload};
+use luopan_jobs::{progress_log_tail, status_payload, write_task_status};
 use luopan_operations::load_operations_records;
 use luopan_orders::{
     UploadedWorkbook, commit_preview, delete_batch, preview_upload, public_imports,
@@ -28,7 +25,7 @@ use luopan_storage::{
 };
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use subtle::ConstantTimeEq;
@@ -50,6 +47,7 @@ struct AppState {
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
 const SESSION_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
+const ADMIN_UPLOAD_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct LoginPayload {
@@ -79,6 +77,19 @@ struct MeResponse {
     username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChangePasswordPayload {
+    current_password: String,
+    new_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateUserPayload {
+    username: String,
+    password: String,
+    role: String,
 }
 
 fn default_role() -> String {
@@ -137,6 +148,12 @@ struct SettlementUploadPayload {
     content: String,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct CollectionRunPayload {
+    #[serde(default)]
+    modules: Vec<String>,
+}
+
 fn default_terminal_output() -> bool {
     true
 }
@@ -179,23 +196,36 @@ async fn main() -> Result<()> {
         .route("/api/runtime/paths", get(runtime_paths))
         .route("/api/compass", get(compass_dashboard))
         .route("/api/inventory", get(inventory_dashboard))
+        .route("/api/channel", get(channel_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
         .route("/api/settlement", get(settlement_dashboard))
+        .route("/api/orders/imports", get(order_imports))
+        .route("/api/diagnostics", get(diagnostics))
+        .route("/api/storage/summary", get(storage_summary))
+        .route("/api/status", get(status))
+        .route("/api/status/raw", get(status_raw))
+        .route("/api/status/log-tail", get(status_log_tail))
+        .route("/api/collection/status", get(status))
+        .route("/api/collection/status/raw", get(status_raw))
+        .route("/api/collection/status/log-tail", get(status_log_tail))
+        .route_layer(from_fn_with_state(state.clone(), require_auth));
+    let account = Router::new()
+        .route("/api/account/password", post(change_password))
+        .route_layer(from_fn_with_state(state.clone(), require_auth));
+    let admin_only = Router::new()
         .route("/api/settlement/uploads", post(upload_settlement))
         .route("/api/orders/preview", post(preview_order_import))
-        .route("/api/orders/imports", get(order_imports))
         .route("/api/orders/imports", post(commit_order_import))
         .route(
             "/api/orders/imports/{batch_id}",
             delete(remove_order_import),
         )
-        .route("/api/diagnostics", get(diagnostics))
-        .route("/api/storage/summary", get(storage_summary))
-        .route("/api/status", get(status))
         .route("/api/scrape", post(scrape))
-        .route("/api/status/raw", get(status_raw))
-        .route("/api/status/log-tail", get(status_log_tail))
-        .route_layer(from_fn_with_state(state.clone(), require_auth));
+        .route("/api/collection/run", post(run_collection))
+        .route("/api/users", get(list_users).post(create_user))
+        .route("/api/users/{username}", delete(remove_user))
+        .layer(DefaultBodyLimit::max(ADMIN_UPLOAD_LIMIT_BYTES))
+        .route_layer(from_fn_with_state(state.clone(), require_admin));
     let static_dir = paths.app_dir.join("web").join("static");
     let static_files = Router::new()
         .route_service(
@@ -213,6 +243,8 @@ async fn main() -> Result<()> {
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
         .merge(protected)
+        .merge(account)
+        .merge(admin_only)
         .merge(static_files)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
@@ -283,14 +315,13 @@ async fn login(
 }
 
 async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(token) = session_token(&headers) {
-        if let Err(error) = sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
+    if let Some(token) = session_token(&headers)
+        && let Err(error) = sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
             .bind(token_hash(&token))
             .execute(&*state.auth_pool)
             .await
-        {
-            tracing::warn!(%error, "could not remove session during logout");
-        }
+    {
+        tracing::warn!(%error, "could not remove session during logout");
     }
     let mut response = StatusCode::NO_CONTENT.into_response();
     response
@@ -320,19 +351,192 @@ async fn me(
     }
 }
 
-async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    match authenticated_user(&state.auth_pool, request.headers()).await {
-        Ok(Some(_)) => next.run(request).await,
-        Ok(None) => (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "error": "请先登录" })),
-        )
-            .into_response(),
-        Err(error) => {
-            tracing::error!(%error, "session validation failed");
-            ApiError::internal(error).into_response()
+async fn change_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ChangePasswordPayload>,
+) -> Result<Json<Value>, ApiError> {
+    let (username, _) = authorized_user(&state.auth_pool, &headers, None).await?;
+    validate_password(&payload.new_password).map_err(ApiError::bad_request)?;
+    let stored_hash: String =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE username = ?")
+            .bind(&username)
+            .fetch_one(&*state.auth_pool)
+            .await
+            .map_err(|error| ApiError::internal(error.into()))?;
+    if !verify_password(&payload.current_password, &stored_hash) {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "当前密码错误".to_string(),
+        });
+    }
+    let new_hash = hash_password(&payload.new_password).map_err(ApiError::internal)?;
+    sqlx::query("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE username = ?")
+        .bind(new_hash)
+        .bind(now_string())
+        .bind(&username)
+        .execute(&*state.auth_pool)
+        .await
+        .map_err(|error| ApiError::internal(error.into()))?;
+
+    if let Some(token) = session_token(&headers) {
+        sqlx::query("DELETE FROM sessions WHERE username = ? AND token_hash != ?")
+            .bind(&username)
+            .bind(token_hash(&token))
+            .execute(&*state.auth_pool)
+            .await
+            .map_err(|error| ApiError::internal(error.into()))?;
+    }
+    Ok(Json(json!({ "message": "密码已更新" })))
+}
+
+async fn list_users(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let rows = sqlx::query(
+        "SELECT username, role, created_at, password_changed_at FROM users ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, username",
+    )
+    .fetch_all(&*state.auth_pool)
+    .await
+    .map_err(|error| ApiError::internal(error.into()))?;
+    let users = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "username": row.get::<String, _>("username"),
+                "role": row.get::<String, _>("role"),
+                "created_at": row.get::<String, _>("created_at"),
+                "password_changed_at": row.get::<Option<String>, _>("password_changed_at"),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({ "users": users })))
+}
+
+async fn create_user(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateUserPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let username = validate_username(&payload.username)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+    validate_password(&payload.password).map_err(ApiError::bad_request)?;
+    let role = payload.role.trim();
+    if !matches!(role, "admin" | "viewer") {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "角色必须为 admin 或 viewer".to_string(),
+        });
+    }
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)")
+        .bind(&username)
+        .fetch_one(&*state.auth_pool)
+        .await
+        .map_err(|error| ApiError::internal(error.into()))?;
+    if exists {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "用户名已存在".to_string(),
+        });
+    }
+    let created_at = now_string();
+    sqlx::query(
+        "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&username)
+    .bind(hash_password(&payload.password).map_err(ApiError::internal)?)
+    .bind(role)
+    .bind(&created_at)
+    .execute(&*state.auth_pool)
+    .await
+    .map_err(|error| ApiError::internal(error.into()))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "user": { "username": username, "role": role, "created_at": created_at } })),
+    ))
+}
+
+async fn remove_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(username): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let (current_username, _) = authorized_user(&state.auth_pool, &headers, Some("admin")).await?;
+    let username = validate_username(&username)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+    if username == current_username {
+        return Err(ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: "不能删除当前登录账户".to_string(),
+        });
+    }
+    let role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE username = ?")
+        .bind(&username)
+        .fetch_optional(&*state.auth_pool)
+        .await
+        .map_err(|error| ApiError::internal(error.into()))?;
+    let Some(role) = role else {
+        return Err(ApiError {
+            status: StatusCode::NOT_FOUND,
+            message: "用户不存在".to_string(),
+        });
+    };
+    if role == "admin" {
+        let admin_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                .fetch_one(&*state.auth_pool)
+                .await
+                .map_err(|error| ApiError::internal(error.into()))?;
+        if admin_count <= 1 {
+            return Err(ApiError {
+                status: StatusCode::BAD_REQUEST,
+                message: "必须至少保留一个管理员账户".to_string(),
+            });
         }
     }
+    sqlx::query("DELETE FROM users WHERE username = ?")
+        .bind(&username)
+        .execute(&*state.auth_pool)
+        .await
+        .map_err(|error| ApiError::internal(error.into()))?;
+    Ok(Json(json!({ "deleted": username })))
+}
+
+async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    match authorized_user(&state.auth_pool, request.headers(), None).await {
+        Ok(_) => next.run(request).await,
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn require_admin(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    match authorized_user(&state.auth_pool, request.headers(), Some("admin")).await {
+        Ok(_) => next.run(request).await,
+        Err(error) => error.into_response(),
+    }
+}
+
+async fn authorized_user(
+    pool: &StoragePool,
+    headers: &HeaderMap,
+    required_role: Option<&str>,
+) -> Result<(String, String), ApiError> {
+    let user = authenticated_user(pool, headers)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, "session validation failed");
+            ApiError::internal(error)
+        })?
+        .ok_or_else(|| ApiError {
+            status: StatusCode::UNAUTHORIZED,
+            message: "请先登录".to_string(),
+        })?;
+    if required_role.is_some_and(|role| user.1 != role) {
+        return Err(ApiError {
+            status: StatusCode::FORBIDDEN,
+            message: "当前账户没有执行此操作的权限".to_string(),
+        });
+    }
+    Ok(user)
 }
 
 fn invalid_credentials() -> ApiError {
@@ -353,6 +557,7 @@ async fn ensure_initial_admin(pool: &StoragePool, password: Option<&str>) -> Res
     let password = password
         .filter(|value| !value.trim().is_empty())
         .context("ADMIN_PASSWORD must be set when initializing the first dashboard account")?;
+    validate_password(password)?;
     sqlx::query(
         "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
     )
@@ -384,7 +589,7 @@ async fn import_legacy_users(pool: &StoragePool, paths: &RuntimePaths) -> Result
         )
         .bind(username)
         .bind(user.password_hash)
-        .bind(if user.role.trim().is_empty() { default_role() } else { user.role })
+        .bind(normalize_role(&user.role))
         .bind(user.created_at.unwrap_or_else(now_string))
         .execute(pool)
         .await?;
@@ -423,6 +628,35 @@ fn hash_password(password: &str) -> Result<String> {
         .hash_password(password.as_bytes(), &salt)
         .map_err(|error| anyhow::anyhow!("hash password: {error}"))?
         .to_string())
+}
+
+fn normalize_role(role: &str) -> &'static str {
+    if role.trim() == "admin" {
+        "admin"
+    } else {
+        "viewer"
+    }
+}
+
+fn validate_password(password: &str) -> Result<()> {
+    if password.chars().count() < 12 {
+        anyhow::bail!("密码至少需要 12 个字符");
+    }
+    if password == "admin123" {
+        anyhow::bail!("不能使用默认密码 admin123");
+    }
+    Ok(())
+}
+
+fn validate_username(username: &str) -> Result<&str> {
+    let username = username.trim();
+    if username.is_empty() || username.chars().count() > 64 {
+        anyhow::bail!("用户名长度必须为 1 到 64 个字符");
+    }
+    if username.chars().any(char::is_control) {
+        anyhow::bail!("用户名不能包含控制字符");
+    }
+    Ok(username)
 }
 
 async fn create_session(pool: &StoragePool, username: &str) -> Result<String> {
@@ -483,9 +717,11 @@ fn token_hash(token: &str) -> String {
 }
 
 fn session_cookie(token: &str) -> HeaderValue {
-    let secure = env_bool("SESSION_COOKIE_SECURE", false)
-        .then_some("; Secure")
-        .unwrap_or("");
+    let secure = if env_bool("SESSION_COOKIE_SECURE", false) {
+        "; Secure"
+    } else {
+        ""
+    };
     HeaderValue::from_str(&format!(
         "{SESSION_COOKIE_NAME}={token}; Path=/; Max-Age={SESSION_LIFETIME_SECONDS}; HttpOnly; SameSite=Lax{secure}"
     ))
@@ -527,6 +763,21 @@ async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value
     }
 }
 
+async fn channel_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    if let Some(pool) = &state.storage_pool {
+        match kv_value(pool, "channel_dashboard").await {
+            Ok(Some(value)) => return Ok(Json(value)),
+            Ok(None) => tracing::warn!("SQLite channel payload is missing; falling back to JSON"),
+            Err(error) => {
+                tracing::warn!(%error, "SQLite channel read failed; falling back to JSON")
+            }
+        }
+    }
+    Ok(Json(
+        load_channel_dashboard(&state.paths).map_err(ApiError::internal)?,
+    ))
+}
+
 async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let records = if let Some(pool) = &state.storage_pool {
         match load_operations_records_from_db(pool).await {
@@ -543,11 +794,8 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
     } else {
         load_operations_records(&state.paths).map_err(ApiError::internal)?
     };
-    let status =
-        status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
     Ok(Json(json!({
         "records": records,
-        "status": status,
         "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
     })))
 }
@@ -693,148 +941,137 @@ async fn status(
 }
 
 async fn scrape(State(state): State<AppState>) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let current_status =
+    enqueue_collection(
+        &state,
+        vec!["operations".to_string(), "channel".to_string()],
+    )
+    .await
+}
+
+async fn run_collection(
+    State(state): State<AppState>,
+    Json(payload): Json<CollectionRunPayload>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    enqueue_collection(&state, payload.modules).await
+}
+
+async fn enqueue_collection(
+    state: &AppState,
+    modules: Vec<String>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let modules = validate_collection_modules(modules).map_err(ApiError::bad_request)?;
+    let current =
         status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
-    if current_status
+    let busy = current
         .get("job_running")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || current
+            .get("request_pending")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+    if busy {
+        return Err(ApiError {
+            status: StatusCode::CONFLICT,
+            message: "已有采集任务或待处理请求".to_string(),
+        });
+    }
+    if !current
+        .get("collector_online")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
         return Err(ApiError {
-            status: StatusCode::CONFLICT,
-            message: "已有采集任务在运行".to_string(),
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "独立采集服务当前不在线".to_string(),
         });
     }
-
     let paths = state.paths.clone();
-    tokio::task::spawn_blocking(move || write_manual_scrape_requested_status(&paths))
+    let request_modules = modules.clone();
+    tokio::task::spawn_blocking(move || write_collection_request(&paths, &request_modules))
         .await
         .map_err(|error| ApiError::internal(error.into()))?
         .map_err(ApiError::internal)?;
-    spawn_manual_scrape(&state.paths).map_err(ApiError::internal)?;
-
+    let status =
+        status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
     Ok((
         StatusCode::ACCEPTED,
-        Json(json!({ "message": "已启动手动补采任务" })),
+        Json(json!({
+            "message": "采集请求已提交给独立采集服务",
+            "modules": modules,
+            "status": status,
+        })),
     ))
 }
 
-fn write_manual_scrape_requested_status(paths: &RuntimePaths) -> Result<()> {
-    let (program, mut args) =
-        configured_command("STATUS_UPDATE_COMMAND", "luopan-worker-rs status-update")?;
-    args.extend([
-        "--state".to_string(),
-        "manual_requested".to_string(),
-        "--message".to_string(),
-        "已收到手动补采请求，正在启动采集任务".to_string(),
-        "--last-error".to_string(),
-        String::new(),
-    ]);
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(&paths.app_dir)
-        .env("LUOPAN_APP_DIR", &paths.app_dir)
-        .stdin(Stdio::null())
-        .output()
-        .context("run rust worker status-update")?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "rust worker status-update exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+fn validate_collection_modules(modules: Vec<String>) -> Result<Vec<String>> {
+    let requested = if modules.is_empty() {
+        vec!["operations".to_string(), "channel".to_string()]
+    } else {
+        modules
+    };
+    let mut result = Vec::new();
+    for module in requested {
+        if !matches!(module.as_str(), "operations" | "channel") {
+            anyhow::bail!("不支持的采集模块: {module}");
+        }
+        if !result.contains(&module) {
+            result.push(module);
+        }
     }
-    Ok(())
+    Ok(result)
 }
 
-fn spawn_manual_scrape(paths: &RuntimePaths) -> Result<()> {
-    let (program, mut args) =
-        configured_command("MANUAL_SCRAPE_COMMAND", "luopan-worker-rs compass-scrape")?;
-    args.extend([
-        "--random-delay-seconds".to_string(),
-        "0".to_string(),
-        "--login-timeout-minutes".to_string(),
-        "30".to_string(),
-    ]);
-
-    fs::create_dir_all(&paths.output_dir)
-        .with_context(|| format!("create {}", paths.output_dir.display()))?;
-    let log_file = fs::OpenOptions::new()
+fn write_collection_request(paths: &RuntimePaths, modules: &[String]) -> Result<()> {
+    fs::create_dir_all(paths.collection_dir())
+        .with_context(|| format!("create {}", paths.collection_dir().display()))?;
+    let guard_path = paths.collection_dir().join("request.enqueue.lock");
+    let mut guard = fs::OpenOptions::new()
+        .write(true)
         .create(true)
-        .append(true)
-        .open(paths.progress_log_path())
-        .with_context(|| format!("open {}", paths.progress_log_path().display()))?;
-    let stderr = log_file.try_clone().context("clone progress log handle")?;
-    Command::new(program)
-        .args(args)
-        .current_dir(&paths.app_dir)
-        .env("LUOPAN_APP_DIR", &paths.app_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log_file))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .context("spawn manual compass scrape")?;
-    Ok(())
-}
-
-fn configured_command(key: &str, default: &str) -> Result<(String, Vec<String>)> {
-    let value = env::var(key).unwrap_or_else(|_| default.to_string());
-    let mut parts = parse_command(&value)?;
-    let program = parts.remove(0);
-    Ok((program, parts))
-}
-
-fn parse_command(value: &str) -> Result<Vec<String>> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut escaped = false;
-    let mut has_content = false;
-
-    for character in value.chars() {
-        if escaped {
-            current.push(character);
-            has_content = true;
-            escaped = false;
-            continue;
+        .truncate(false)
+        .open(&guard_path)
+        .context("open collection request queue lock")?;
+    guard
+        .try_lock_exclusive()
+        .context("another collection request is being enqueued")?;
+    writeln!(guard, "{}", std::process::id()).ok();
+    let temporary = paths.collection_dir().join("request.json.tmp");
+    let result = (|| {
+        if paths.collection_request_path().exists()
+            || paths.collection_running_request_path().exists()
+            || paths.daily_lock_path().exists()
+        {
+            anyhow::bail!("已有采集任务或待处理请求");
         }
-        match (quote, character) {
-            (_, '\\') => escaped = true,
-            (Some(quote_character), character) if character == quote_character => quote = None,
-            (Some(_), character) => {
-                current.push(character);
-                has_content = true;
-            }
-            (None, '\'' | '"') => {
-                quote = Some(character);
-                has_content = true;
-            }
-            (None, character) if character.is_whitespace() => {
-                if has_content {
-                    parts.push(std::mem::take(&mut current));
-                    has_content = false;
-                }
-            }
-            (None, character) => {
-                current.push(character);
-                has_content = true;
-            }
-        }
+        let request = json!({
+            "created_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            "source": "dashboard",
+            "modules": modules,
+        });
+        fs::write(
+            &temporary,
+            format!("{}\n", serde_json::to_string_pretty(&request)?),
+        )
+        .with_context(|| format!("write {}", temporary.display()))?;
+        fs::rename(&temporary, paths.collection_request_path())
+            .with_context(|| format!("publish {}", paths.collection_request_path().display()))?;
+        let mut patch = Map::new();
+        patch.insert("state".to_string(), json!("manual_requested"));
+        patch.insert(
+            "message".to_string(),
+            json!("采集请求已进入独立采集服务队列"),
+        );
+        patch.insert("requested_modules".to_string(), json!(modules));
+        patch.insert("last_error".to_string(), json!(""));
+        write_task_status(paths, patch)?;
+        Ok(())
+    })();
+    drop(guard);
+    if result.is_err() {
+        fs::remove_file(&temporary).ok();
     }
-
-    if escaped {
-        anyhow::bail!("command ends with an escape character");
-    }
-    if quote.is_some() {
-        anyhow::bail!("command has an unterminated quote");
-    }
-    if has_content {
-        parts.push(current);
-    }
-    if parts.is_empty() {
-        anyhow::bail!("command must not be empty");
-    }
-    Ok(parts)
+    result
 }
 
 async fn status_log_tail(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -897,10 +1134,10 @@ async fn diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiEr
 }
 
 async fn sync_storage_best_effort(state: &AppState) {
-    if let Some(pool) = &state.storage_pool {
-        if let Err(error) = luopan_storage::sync_all(&state.paths, pool).await {
-            tracing::warn!(%error, "SQLite storage sync failed after order write");
-        }
+    if let Some(pool) = &state.storage_pool
+        && let Err(error) = luopan_storage::sync_all(&state.paths, pool).await
+    {
+        tracing::warn!(%error, "SQLite storage sync failed after order write");
     }
 }
 
@@ -1055,15 +1292,132 @@ mod tests {
         assert_eq!(authenticated_user(&pool, &headers).await.unwrap(), None);
     }
 
-    #[test]
-    fn parses_configured_commands_without_invoking_a_shell() {
-        assert_eq!(
-            parse_command("worker --label 'manual scrape' --path \"a b\"").unwrap(),
-            ["worker", "--label", "manual scrape", "--path", "a b"]
+    #[tokio::test]
+    async fn viewer_sessions_cannot_pass_admin_authorization() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("viewer-user")
+        .bind(hash_password("viewer-password-123").unwrap())
+        .bind("viewer")
+        .bind(now_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let token = create_session(&pool, "viewer-user").await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SESSION_COOKIE_NAME}={token}")).unwrap(),
         );
-        assert_eq!(parse_command("worker \"\"").unwrap(), ["worker", ""]);
-        assert!(parse_command("worker 'unterminated").is_err());
-        assert!(parse_command("   ").is_err());
+
+        assert!(authorized_user(&pool, &headers, None).await.is_ok());
+        let error = authorized_user(&pool, &headers, Some("admin"))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn manages_users_and_changes_current_password() {
+        let pool = Arc::new(test_pool().await);
+        sqlx::query(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("admin")
+        .bind(hash_password("initial-admin-password").unwrap())
+        .bind("admin")
+        .bind(now_string())
+        .execute(&*pool)
+        .await
+        .unwrap();
+        let token = create_session(&pool, "admin").await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SESSION_COOKIE_NAME}={token}")).unwrap(),
+        );
+        let root = std::env::temp_dir().join("luopan-account-management-test");
+        let state = AppState {
+            paths: Arc::new(RuntimePaths {
+                app_dir: root.clone(),
+                output_dir: root.join("output"),
+                state_dir: root.join("state"),
+                config_dir: root.join("config"),
+                logs_dir: root.join("logs"),
+                session_dir: root.join("session"),
+            }),
+            novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
+            auth_pool: pool.clone(),
+            storage_pool: None,
+        };
+
+        let (status, _) = create_user(
+            State(state.clone()),
+            Json(CreateUserPayload {
+                username: "reader".to_string(),
+                password: "reader-password-123".to_string(),
+                role: "viewer".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        let users = list_users(State(state.clone())).await.unwrap().0;
+        assert_eq!(users["users"].as_array().unwrap().len(), 2);
+
+        let _ = change_password(
+            State(state.clone()),
+            headers.clone(),
+            Json(ChangePasswordPayload {
+                current_password: "initial-admin-password".to_string(),
+                new_password: "updated-admin-password".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let updated_hash: String =
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE username = 'admin'")
+                .fetch_one(&*pool)
+                .await
+                .unwrap();
+        assert!(verify_password("updated-admin-password", &updated_hash));
+
+        let _ = remove_user(State(state), headers, AxumPath("reader".to_string()))
+            .await
+            .unwrap();
+        let reader_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE username = 'reader'")
+                .fetch_one(&*pool)
+                .await
+                .unwrap();
+        assert_eq!(reader_count, 0);
+    }
+
+    #[test]
+    fn validates_account_inputs() {
+        assert!(validate_password("long-enough-password").is_ok());
+        assert!(validate_password("short").is_err());
+        assert!(validate_password("admin123").is_err());
+        assert_eq!(validate_username(" alice ").unwrap(), "alice");
+        assert!(validate_username("").is_err());
+        assert!(validate_username("bad\nname").is_err());
+        assert_eq!(normalize_role("admin"), "admin");
+        assert_eq!(normalize_role("unexpected"), "viewer");
+    }
+
+    #[test]
+    fn validates_collection_modules() {
+        assert_eq!(
+            validate_collection_modules(vec!["channel".into(), "channel".into()]).unwrap(),
+            ["channel"]
+        );
+        assert_eq!(
+            validate_collection_modules(Vec::new()).unwrap(),
+            ["operations", "channel"]
+        );
+        assert!(validate_collection_modules(vec!["unknown".into()]).is_err());
     }
 
     #[tokio::test]
@@ -1083,7 +1437,7 @@ mod tests {
             logs_dir: root.join("logs"),
             session_dir: root.join("session"),
         };
-        fs::create_dir_all(&paths.output_dir).unwrap();
+        fs::create_dir_all(paths.collection_dir()).unwrap();
         fs::write(paths.daily_lock_path(), "busy").unwrap();
         let state = AppState {
             paths: Arc::new(paths),
@@ -1094,7 +1448,52 @@ mod tests {
 
         let error = scrape(State(state)).await.unwrap_err();
         assert_eq!(error.status, StatusCode::CONFLICT);
-        assert_eq!(error.message, "已有采集任务在运行");
+        assert_eq!(error.message, "已有采集任务或待处理请求");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn collection_request_is_atomically_queued_for_online_service() {
+        let root = std::env::temp_dir().join(format!(
+            "luopan-api-collection-queue-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = RuntimePaths {
+            app_dir: root.clone(),
+            output_dir: root.join("output"),
+            state_dir: root.join("state"),
+            config_dir: root.join("config"),
+            logs_dir: root.join("logs"),
+            session_dir: root.join("session"),
+        };
+        fs::create_dir_all(paths.collection_dir()).unwrap();
+        fs::write(paths.collection_heartbeat_path(), "{}").unwrap();
+        let state = AppState {
+            paths: Arc::new(paths.clone()),
+            novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
+            auth_pool: Arc::new(test_pool().await),
+            storage_pool: None,
+        };
+
+        let (status, payload) = run_collection(
+            State(state),
+            Json(CollectionRunPayload {
+                modules: vec!["channel".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(payload.0["modules"], json!(["channel"]));
+        let request = read_json_file(&paths.collection_request_path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(request["modules"], json!(["channel"]));
+        assert!(!paths.collection_dir().join("request.json.tmp").exists());
         let _ = fs::remove_dir_all(root);
     }
 

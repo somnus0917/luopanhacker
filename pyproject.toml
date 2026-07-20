@@ -11,6 +11,11 @@ dependencies = [
     "playwright",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
+
 [tool.uv]
 # This is an application repository, not a distributable Python package.
 package = false
