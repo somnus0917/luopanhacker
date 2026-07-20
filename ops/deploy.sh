@@ -97,7 +97,9 @@ for _ in $(seq 1 30); do
   fi
   if [[ -f "${DATA_DIR}/output/collection/heartbeat.json" ]] && \
      find "${DATA_DIR}/output/collection/heartbeat.json" -mmin -2 -print -quit | grep -q .; then
-    collector_ready=true
+    if docker exec douyin-compass-collector pgrep -f 'apps.collector_py.service' >/dev/null; then
+      collector_ready=true
+    fi
   fi
   if [[ "${dashboard_ready}" = "true" && "${collector_ready}" = "true" ]]; then
     break

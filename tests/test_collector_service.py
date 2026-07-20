@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,22 @@ from apps.collector_py import channel, scheduler, service
 
 
 class CollectorServiceTest(unittest.TestCase):
+    def test_service_entrypoint_resolves_project_package_from_any_directory(self) -> None:
+        service_path = Path(service.__file__).resolve()
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    f"import runpy; runpy.run_path({str(service_path)!r}, run_name='collector_import_check')",
+                ],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_scheduler_lock_is_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             lock = Path(directory) / "job.lock"

@@ -3,13 +3,17 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+APP_DIR = Path(__file__).resolve().parents[2]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
 from apps.collector_py.status import COLLECTION_DIR, write_status
 
-APP_DIR = Path(__file__).resolve().parents[2]
 REQUEST_PATH = COLLECTION_DIR / "request.json"
 RUNNING_REQUEST_PATH = COLLECTION_DIR / "request.running.json"
 HEARTBEAT_PATH = COLLECTION_DIR / "heartbeat.json"
