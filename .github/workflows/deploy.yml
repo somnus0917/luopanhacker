@@ -65,6 +65,8 @@ jobs:
           docker compose config >/dev/null
           LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | \
             grep -q '/srv/luopan-data/state'
+          grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
+          grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh
 
   deploy:
     needs: ci

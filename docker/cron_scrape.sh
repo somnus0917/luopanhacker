@@ -11,6 +11,10 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] start scheduled compass scrape"
 PYTHON_BIN="${PYTHON_BIN:-/usr/local/bin/python}"
 export CHROMIUM_EXECUTABLE_PATH="${CHROMIUM_EXECUTABLE_PATH:-/usr/bin/chromium}"
 export DISPLAY="${DISPLAY:-:99}"
+# cron starts jobs with a minimal environment and does not reliably inherit
+# Docker Compose variables. Keep storage sync enabled for scheduled runs so a
+# successful JSON capture cannot leave the SQLite-backed dashboard stale.
+export STORAGE_SYNC_AFTER_SCRAPE="${STORAGE_SYNC_AFTER_SCRAPE:-true}"
 
 USED_RUST_WORKER=false
 if [[ "${SCHEDULED_SCRAPE_RUST_WORKER:-true}" == "true" ]] && command -v luopan-worker-rs >/dev/null 2>&1; then

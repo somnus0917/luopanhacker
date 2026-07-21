@@ -2,6 +2,7 @@
 PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
 CRON_TZ=Asia/Shanghai
 TZ=Asia/Shanghai
+STORAGE_SYNC_AFTER_SCRAPE=true
 0 9 * * * /app/docker/cron_scrape.sh >> /app/logs/cron_scrape.log 2>&1
 # 库存日结：只调用 allow-list 内的标准只读旺店通接口。
 0 3 * * * /app/docker/cron_inventory_sync.sh >> /app/logs/inventory_sync.log 2>&1
