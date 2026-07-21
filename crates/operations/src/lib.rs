@@ -126,8 +126,15 @@ fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
 
     let mut records = Vec::new();
     for item in rows {
-        let shop_id = string_value(item.get("shop_id")).unwrap_or_default();
-        let shop_name = string_value(item.get("shop_name")).unwrap_or_default();
+        let source_key =
+            string_value(item.get("source_key")).unwrap_or_else(|| "external_orders".to_string());
+        let raw_shop_name = string_value(item.get("shop_name")).unwrap_or_default();
+        let shop_name = canonical_external_shop_name(&source_key, &raw_shop_name);
+        let shop_id = if source_key == "miaosuda" {
+            format!("external:{source_key}:{shop_name}")
+        } else {
+            string_value(item.get("shop_id")).unwrap_or_default()
+        };
         let Some(date) = parse_daily_date(string_value(item.get("date")).as_deref()) else {
             continue;
         };
@@ -148,10 +155,7 @@ fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
             content: Map::new(),
             trend: Map::new(),
             source: "external_orders".to_string(),
-            source_key: Some(
-                string_value(item.get("source_key"))
-                    .unwrap_or_else(|| "external_orders".to_string()),
-            ),
+            source_key: Some(source_key),
             source_label: Some(
                 string_value(item.get("source_label")).unwrap_or_else(|| "订单明细".to_string()),
             ),
@@ -159,6 +163,14 @@ fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
         });
     }
     Ok(records)
+}
+
+fn canonical_external_shop_name(source_key: &str, shop_name: &str) -> String {
+    if source_key == "miaosuda" || shop_name == "羚稀官方旗舰店" {
+        "喵速达".to_string()
+    } else {
+        shop_name.to_string()
+    }
 }
 
 fn merge_records(record_groups: Vec<Vec<OperationRecord>>) -> Vec<OperationRecord> {
@@ -388,5 +400,17 @@ mod tests {
         assert!((parse_daily_metric("5.95%", "ratio").unwrap() - 0.0595).abs() < 0.000001);
         assert_eq!(parse_daily_metric("1.16万", "count"), Some(11600.0));
         assert_eq!(parse_daily_metric("-", "money"), None);
+    }
+
+    #[test]
+    fn canonicalizes_miaosuda_shop_name() {
+        assert_eq!(
+            canonical_external_shop_name("miaosuda", "羚稀官方旗舰店"),
+            "喵速达"
+        );
+        assert_eq!(
+            canonical_external_shop_name("tmall_global", "天猫国际进口超市"),
+            "天猫国际进口超市"
+        );
     }
 }

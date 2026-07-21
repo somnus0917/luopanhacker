@@ -62,6 +62,13 @@ function recordSourceLabel(item) {
   return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
 }
 
+function canonicalOperationRecord(item: OperationRecord): OperationRecord {
+  if (item.source_key === "miaosuda" || item.shop_name === "羚稀官方旗舰店") {
+    return { ...item, shop_name: "喵速达" };
+  }
+  return item;
+}
+
 function recordPlatform(item) {
   const explicit = item.platform || item.channel || item.content?.platform;
   if (explicit) return String(explicit);
@@ -138,7 +145,11 @@ function operationFilterItems(kind, records = state.records): string[] {
   const channelRecords = state.channel?.records || [];
   if (kind === "date") return [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
   if (kind === "platform") return [...new Set([...records.map(recordPlatform), ...(channelRecords.length ? ["抖音"] : [])])].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  if (kind === "shop") return [...new Set([...records.map((item) => item.shop_name), ...channelRecords.map((item) => item.shop_name)])].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  if (kind === "shop") {
+    const operationShops = records.filter((item) => state.operationPlatforms.has(recordPlatform(item))).map((item) => item.shop_name);
+    const channelShops = state.operationPlatforms.has("抖音") ? channelRecords.map((item) => item.shop_name) : [];
+    return [...new Set([...operationShops, ...channelShops])].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  }
   return [...new Set(records.map(recordSourceLabel))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
@@ -152,6 +163,12 @@ function applySingleOperationFilter(kind, value) {
   selected.clear();
   if (value) selected.add(value);
   else operationFilterItems(kind).forEach((item) => selected.add(item));
+  if (kind === "platform") resetOperationShopsForPlatforms();
+}
+
+function resetOperationShopsForPlatforms() {
+  state.operationShops.clear();
+  operationFilterItems("shop").forEach((item) => state.operationShops.add(item));
 }
 
 function operationsFiltersMarkup() {
@@ -172,6 +189,7 @@ function bindOperationsFilterEvents() {
     const shouldSelect = control.type === "checkbox" ? control.checked : !selected.has(value);
     if (!shouldSelect && selected.size <= 1) { control.checked = true; return; }
     if (shouldSelect) selected.add(value); else selected.delete(value);
+    if (control.dataset.operationFilter === "platform") resetOperationShopsForPlatforms();
     renderOperations();
   }));
   $$('[data-operation-select-all]').forEach((button) => button.addEventListener("click", () => {
@@ -179,6 +197,7 @@ function bindOperationsFilterEvents() {
     const items = operationFilterItems(kind);
     const selected = operationFilterSet(kind);
     items.forEach((item) => selected.add(item));
+    if (kind === "platform") resetOperationShopsForPlatforms();
     renderOperations();
   }));
   $$('[data-operation-clear]').forEach((button) => button.addEventListener("click", () => {
@@ -187,6 +206,7 @@ function bindOperationsFilterEvents() {
     const selected = operationFilterSet(kind);
     selected.clear();
     if (items.length) selected.add(items[0]);
+    if (kind === "platform") resetOperationShopsForPlatforms();
     renderOperations();
   }));
   $$('[data-filter-kind]').forEach((details) => details.addEventListener("toggle", () => {
@@ -1033,7 +1053,7 @@ async function loadCompass() {
   const response = await fetch("/api/compass");
   if (response.status === 401) return showLogin();
   const payload = await response.json();
-  state.records = payload.records || [];
+  state.records = (payload.records || []).map(canonicalOperationRecord);
   state.channel = payload.channel || null;
   state.operationDates = new Set(operationFilterItems("date"));
   state.operationPlatforms = new Set(operationFilterItems("platform"));
