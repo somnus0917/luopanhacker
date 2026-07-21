@@ -100,7 +100,7 @@ function operationFilterSet(kind) {
 function operationFilterItems(kind, records = state.records) {
     const channelRecords = state.channel?.records || [];
     if (kind === "date")
-        return [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
+        return [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort((a, b) => b.localeCompare(a));
     if (kind === "platform")
         return [...new Set([...records.map(recordPlatform), ...(channelRecords.length ? ["抖音"] : [])])].sort((a, b) => a.localeCompare(b, "zh-CN"));
     if (kind === "shop") {

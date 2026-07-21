@@ -227,16 +227,22 @@ async fn main() -> Result<()> {
         .layer(DefaultBodyLimit::max(ADMIN_UPLOAD_LIMIT_BYTES))
         .route_layer(from_fn_with_state(state.clone(), require_admin));
     let static_dir = paths.app_dir.join("web").join("static");
-    let static_files = Router::new()
+    let index_file = Router::new()
         .route_service(
             "/",
             get_service(ServeFile::new(static_dir.join("index.html"))),
         )
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+        ));
+    let static_assets = Router::new()
         .nest_service("/assets", ServeDir::new(static_dir))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CACHE_CONTROL,
             HeaderValue::from_static("public, max-age=3600"),
         ));
+    let static_files = index_file.merge(static_assets);
     let app = Router::new()
         .route("/healthz", get(healthz))
         .route("/api/login", post(login))
