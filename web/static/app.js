@@ -1,4 +1,4 @@
-const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set(), operationPlatforms: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
+const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set(), operationPlatforms: new Set(), operationShops: new Set(), operationSources: new Set(), operationFilterOpen: new Set(), tableDate: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer = null;
 const $ = (selector, scope = document) => scope.querySelector(selector);
@@ -615,13 +615,21 @@ const INVENTORY_HEALTH_NAMES = {
 function inventoryWarehouseOptions(payload) {
     return [...new Set((payload.rows || []).map((item) => item.warehouse_name || "未命名仓库"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
+function inventoryBrandOptions(payload) {
+    return [...new Set((payload.rows || []).map((item) => item.brand_name || "未归类品牌"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
 function inventoryFilteredRows(payload) {
     const warehouses = inventoryWarehouseOptions(payload);
+    const brands = inventoryBrandOptions(payload);
     if (state.inventoryWarehouse && !warehouses.includes(state.inventoryWarehouse))
         state.inventoryWarehouse = "";
-    return state.inventoryWarehouse
-        ? (payload.rows || []).filter((item) => (item.warehouse_name || "未命名仓库") === state.inventoryWarehouse)
-        : (payload.rows || []);
+    if (state.inventoryBrand && !brands.includes(state.inventoryBrand))
+        state.inventoryBrand = "";
+    return (payload.rows || []).filter((item) => {
+        const warehouseMatch = !state.inventoryWarehouse || (item.warehouse_name || "未命名仓库") === state.inventoryWarehouse;
+        const brandMatch = !state.inventoryBrand || (item.brand_name || "未归类品牌") === state.inventoryBrand;
+        return warehouseMatch && brandMatch;
+    });
 }
 function inventoryGroup(rows, keyName) {
     const groups = new Map();
@@ -670,14 +678,21 @@ function inventorySummary(rows) {
     };
 }
 function inventorySalesTrend(payload) {
-    return state.inventoryWarehouse
-        ? (payload.sales_trend_7d_by_warehouse?.[state.inventoryWarehouse] || [])
-        : (payload.sales_trend_7d || []);
+    if (state.inventoryWarehouse && state.inventoryBrand) {
+        return payload.sales_trend_7d_by_warehouse_brand?.[state.inventoryWarehouse]?.[state.inventoryBrand] || [];
+    }
+    if (state.inventoryWarehouse)
+        return payload.sales_trend_7d_by_warehouse?.[state.inventoryWarehouse] || [];
+    if (state.inventoryBrand)
+        return payload.sales_trend_7d_by_brand?.[state.inventoryBrand] || [];
+    return payload.sales_trend_7d || [];
 }
 function inventoryWarehouseFilter(payload) {
     const warehouses = inventoryWarehouseOptions(payload);
-    const options = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-    return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong><span>筛选总览、补货、积压与 SKU 明细</span></div><label>仓库<select data-inventory-filter="warehouse">${options}</select></label></section>`;
+    const brands = inventoryBrandOptions(payload);
+    const warehouseOptions = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
+    const brandOptions = `<option value="">全部品牌</option>${brands.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryBrand === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
+    return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong><span>筛选总览、补货、积压与 SKU 明细</span></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
 }
 function inventoryBarPanel(items, title, key, formatter = whole) {
     const top = [...items].sort((a, b) => number(b[key]) - number(a[key])).slice(0, 10);
@@ -730,7 +745,10 @@ function renderInventory(payload, view = state.inventoryView) {
     const warehouses = inventoryGroup(rows, "warehouse_name");
     const health = inventoryHealth(rows);
     const salesTrend = inventorySalesTrend(payload);
-    const scopeLabel = state.inventoryWarehouse || "全部仓库";
+    const scopeLabel = [
+        state.inventoryWarehouse ? `仓库：${state.inventoryWarehouse}` : "全部仓库",
+        state.inventoryBrand ? `品牌：${state.inventoryBrand}` : "全部品牌",
+    ].join(" · ");
     $("#inventory-summary").textContent = `快照时间：${payload.captured_at || "—"} · 当前范围：${scopeLabel} · 页面只读取服务器本地库存快照`;
     const metrics = [
         ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
@@ -754,6 +772,10 @@ function renderInventory(payload, view = state.inventoryView) {
     $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
     $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
         state.inventoryWarehouse = event.currentTarget.value;
+        renderInventory(payload);
+    });
+    $('[data-inventory-filter="brand"]')?.addEventListener("change", (event) => {
+        state.inventoryBrand = event.currentTarget.value;
         renderInventory(payload);
     });
     $$('[data-inventory-view]').forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView)));

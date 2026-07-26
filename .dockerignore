@@ -3,6 +3,10 @@
 .env
 .env.*
 .pytest_cache
+.codegraph
+.codex
+.idea
+.vscode
 .playwright-browsers
 .playwright-cli
 .venv

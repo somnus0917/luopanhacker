@@ -80,6 +80,16 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
             (warehouse_no, warehouse_name)
         })
         .collect();
+    let brand_names: HashMap<(String, String), String> = rows
+        .iter()
+        .map(|row| {
+            (
+                inventory_key(row),
+                first_text(row, &["brand_name", "brand_no"])
+                    .unwrap_or_else(|| "未归类品牌".to_string()),
+            )
+        })
+        .collect();
 
     let total_available: f64 = rows
         .iter()
@@ -132,6 +142,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
     }
 
     rows.sort_by(compare_inventory_rows);
+    let sales_trends = build_sales_trend(sales_rows, &warehouse_names, &brand_names);
 
     Ok(json!({
         "captured_at": snapshot.get("captured_at").cloned().unwrap_or(Value::Null),
@@ -140,8 +151,10 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         "warehouses": build_group(&rows, "warehouse_name"),
         "brands": build_group(&rows, "brand_name"),
         "health": build_health(&rows),
-        "sales_trend_7d": build_sales_trend(sales_rows, &warehouse_names).0,
-        "sales_trend_7d_by_warehouse": build_sales_trend(sales_rows, &warehouse_names).1,
+        "sales_trend_7d": sales_trends.total,
+        "sales_trend_7d_by_warehouse": sales_trends.by_warehouse,
+        "sales_trend_7d_by_brand": sales_trends.by_brand,
+        "sales_trend_7d_by_warehouse_brand": sales_trends.by_warehouse_brand,
         "settings": {"target_cover_days": TARGET_COVER_DAYS as i64, "safety_stock_days": SAFETY_STOCK_DAYS as i64},
         "history": history,
         "rows": rows,
@@ -316,12 +329,23 @@ fn health_names() -> HashMap<&'static str, &'static str> {
     ])
 }
 
+struct SalesTrends {
+    total: Vec<Value>,
+    by_warehouse: BTreeMap<String, Vec<Value>>,
+    by_brand: BTreeMap<String, Vec<Value>>,
+    by_warehouse_brand: BTreeMap<String, BTreeMap<String, Vec<Value>>>,
+}
+
 fn build_sales_trend(
     sales_rows: &[Value],
     warehouse_names: &HashMap<String, String>,
-) -> (Vec<Value>, BTreeMap<String, Vec<Value>>) {
+    brand_names: &HashMap<(String, String), String>,
+) -> SalesTrends {
     let mut totals: BTreeMap<String, f64> = BTreeMap::new();
     let mut by_warehouse: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut by_brand: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+    let mut by_warehouse_brand: BTreeMap<String, BTreeMap<String, BTreeMap<String, f64>>> =
+        BTreeMap::new();
 
     for row in sales_rows {
         let date = text(row.get("date"));
@@ -330,12 +354,29 @@ fn build_sales_trend(
         }
         let quantity = number(row.get("quantity"));
         *totals.entry(date.clone()).or_default() += quantity;
+        let key = inventory_key(row);
         let warehouse_name = warehouse_names
-            .get(&text(row.get("warehouse_no")))
+            .get(&key.0)
             .cloned()
             .unwrap_or_else(|| "未命名仓库".to_string());
+        let brand_name = brand_names
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| "未归类品牌".to_string());
         *by_warehouse
+            .entry(warehouse_name.clone())
+            .or_default()
+            .entry(date.clone())
+            .or_default() += quantity;
+        *by_brand
+            .entry(brand_name.clone())
+            .or_default()
+            .entry(date.clone())
+            .or_default() += quantity;
+        *by_warehouse_brand
             .entry(warehouse_name)
+            .or_default()
+            .entry(brand_name)
             .or_default()
             .entry(date)
             .or_default() += quantity;
@@ -345,17 +386,30 @@ fn build_sales_trend(
         .into_iter()
         .map(|(date, quantity)| json!({"date": date, "quantity": rounded(quantity)}))
         .collect();
-    let warehouse_rows = by_warehouse
+    SalesTrends {
+        total: total_rows,
+        by_warehouse: daily_series_by_group(by_warehouse),
+        by_brand: daily_series_by_group(by_brand),
+        by_warehouse_brand: by_warehouse_brand
+            .into_iter()
+            .map(|(warehouse, brands)| (warehouse, daily_series_by_group(brands)))
+            .collect(),
+    }
+}
+
+fn daily_series_by_group(
+    groups: BTreeMap<String, BTreeMap<String, f64>>,
+) -> BTreeMap<String, Vec<Value>> {
+    groups
         .into_iter()
-        .map(|(warehouse, values)| {
+        .map(|(name, values)| {
             let rows = values
                 .into_iter()
                 .map(|(date, quantity)| json!({"date": date, "quantity": rounded(quantity)}))
                 .collect();
-            (warehouse, rows)
+            (name, rows)
         })
-        .collect();
-    (total_rows, warehouse_rows)
+        .collect()
 }
 
 fn sum_rows(rows: &[Value], key: &str) -> f64 {
