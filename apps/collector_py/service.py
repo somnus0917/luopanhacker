@@ -2,6 +2,7 @@ import json
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -82,7 +83,8 @@ def lock_active():
     try:
         payload = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
         started = datetime.fromisoformat(payload["started_at"])
-        if (datetime.now() - started).total_seconds() > 3 * 3600:
+        hostname = payload.get("hostname")
+        if hostname and hostname != socket.gethostname():
             LOCK_PATH.unlink(missing_ok=True)
             return False
         os.kill(int(payload["pid"]), 0)

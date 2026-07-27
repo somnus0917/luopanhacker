@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,39 @@ from apps.scraper_py.scraper import (
 )
 
 AVAILABLE_MODULES = ("operations", "channel")
+CHROMIUM_SINGLETON_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
+
+
+def process_is_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def clear_stale_chromium_singletons(session_dir=SESSION_DIR):
+    lock_path = Path(session_dir) / "SingletonLock"
+    if not lock_path.is_symlink():
+        return False
+    try:
+        lock_target = os.readlink(lock_path)
+        lock_host, raw_pid = lock_target.rsplit("-", 1)
+        lock_pid = int(raw_pid)
+    except (OSError, ValueError):
+        lock_host, lock_pid = "", -1
+    if lock_host == socket.gethostname() and process_is_running(lock_pid):
+        return False
+    for name in CHROMIUM_SINGLETON_NAMES:
+        path = Path(session_dir) / name
+        if path.is_symlink():
+            path.unlink(missing_ok=True)
+    print(f"已清理旧 Chromium 配置锁: {lock_target}", flush=True)
+    return True
 
 
 def date_range_from_fields(fields):
@@ -129,70 +163,76 @@ async def run(args):
     requested = tuple(dict.fromkeys(args.module or AVAILABLE_MODULES))
     result = {"operations": [], "channel": [], "modules": module_state(requested), "requested_modules": list(requested)}
     async with async_playwright() as playwright:
+        clear_stale_chromium_singletons()
         options = {"user_data_dir": str(SESSION_DIR), "headless": False, "slow_mo": args.slow_mo, "viewport": {"width": 1440, "height": 1000}}
         chromium_path = os.getenv("CHROMIUM_EXECUTABLE_PATH")
         if chromium_path:
             options["executable_path"] = chromium_path
         context = await playwright.chromium.launch_persistent_context(**options)
-        context.set_default_timeout(60000)
-        page = context.pages[0] if context.pages else await context.new_page()
-        capture = channel.ResponseCapture() if "channel" in requested else None
-        if capture:
-            page.on("response", capture.handle_response)
-        print("打开抖音电商罗盘店铺页...", flush=True)
-        await page.goto(SHOP_URL, wait_until="domcontentloaded", timeout=90000)
-        await wait_network_quiet(page, timeout=45000)
-        await human_pause(5.0, 10.0)
-        await wait_for_login(page, args.login_timeout_minutes)
-        if "shop" not in page.url:
+        try:
+            context.set_default_timeout(60000)
+            page = context.pages[0] if context.pages else await context.new_page()
+            capture = channel.ResponseCapture() if "channel" in requested else None
+            if capture:
+                page.on("response", capture.handle_response)
+            print("打开抖音电商罗盘店铺页...", flush=True)
             await page.goto(SHOP_URL, wait_until="domcontentloaded", timeout=90000)
             await wait_network_quiet(page, timeout=45000)
             await human_pause(5.0, 10.0)
+            await wait_for_login(page, args.login_timeout_minutes)
+            if "shop" not in page.url:
+                await page.goto(SHOP_URL, wait_until="domcontentloaded", timeout=90000)
+                await wait_network_quiet(page, timeout=45000)
+                await human_pause(5.0, 10.0)
 
-        for shop_name in shops:
-            print(f"\n准备切换店铺: {shop_name}", flush=True)
-            if capture:
-                capture.start_shop(shop_name)
-            data_range = None
-            try:
-                await switch_shop(page, shop_name)
-                data_range = await choose_near_day(page)
-            except Exception as exc:
-                for name in requested:
-                    result["modules"][name]["error_count"] += 1
-                    result["modules"][name]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
+            for shop_name in shops:
+                print(f"\n准备切换店铺: {shop_name}", flush=True)
                 if capture:
-                    await capture.finish_shop()
-                continue
-
-            if "operations" in requested:
+                    capture.start_shop(shop_name)
+                data_range = None
                 try:
-                    item = await operations.collect(page, shop_name, data_range)
-                    result["operations"].append(item)
-                    result["modules"]["operations"]["success_count"] += 1
-                    print(f"{shop_name} 经营数据已读取，指标数: {len(item['metrics'])}", flush=True)
+                    await switch_shop(page, shop_name)
+                    data_range = await choose_near_day(page)
                 except Exception as exc:
-                    result["modules"]["operations"]["error_count"] += 1
-                    result["modules"]["operations"]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
-                    print(f"{shop_name} 经营模块失败，继续采集其他模块: {exc!r}", flush=True)
+                    for name in requested:
+                        result["modules"][name]["error_count"] += 1
+                        result["modules"][name]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
+                    if capture:
+                        await capture.finish_shop()
+                    continue
 
-            if "channel" in requested:
-                try:
-                    await channel.load(page)
-                except Exception as exc:
-                    result["modules"]["channel"]["error_count"] += 1
-                    result["modules"]["channel"]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
-                    print(f"{shop_name} 渠道页面加载失败，保留已捕获响应: {exc!r}", flush=True)
-                responses = await capture.finish_shop()
-                if responses:
-                    result["channel"].append({"shop_name": shop_name, "data_start": data_range[0], "data_end": data_range[1], "responses": responses})
-                    result["modules"]["channel"]["success_count"] += 1
-                print(f"{shop_name} 渠道接口已捕获: {len(responses)} 条", flush=True)
-            await human_pause(8.0, 14.0)
+                if "operations" in requested:
+                    try:
+                        item = await operations.collect(page, shop_name, data_range)
+                        result["operations"].append(item)
+                        result["modules"]["operations"]["success_count"] += 1
+                        print(f"{shop_name} 经营数据已读取，指标数: {len(item['metrics'])}", flush=True)
+                    except Exception as exc:
+                        result["modules"]["operations"]["error_count"] += 1
+                        result["modules"]["operations"]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
+                        print(f"{shop_name} 经营模块失败，继续采集其他模块: {exc!r}", flush=True)
 
-        if args.keep_open:
-            await asyncio.sleep(60)
-        await context.close()
+                if "channel" in requested:
+                    try:
+                        await channel.load(page)
+                    except Exception as exc:
+                        result["modules"]["channel"]["error_count"] += 1
+                        result["modules"]["channel"]["errors"].append({"shop_name": shop_name, "error": repr(exc)})
+                        print(f"{shop_name} 渠道页面加载失败，保留已捕获响应: {exc!r}", flush=True)
+                    responses = await capture.finish_shop()
+                    if responses:
+                        result["channel"].append({"shop_name": shop_name, "data_start": data_range[0], "data_end": data_range[1], "responses": responses})
+                        result["modules"]["channel"]["success_count"] += 1
+                    print(f"{shop_name} 渠道接口已捕获: {len(responses)} 条", flush=True)
+                await human_pause(8.0, 14.0)
+
+            if args.keep_open:
+                await asyncio.sleep(60)
+        finally:
+            try:
+                await asyncio.wait_for(context.close(), timeout=30)
+            except Exception as exc:
+                print(f"关闭 Chromium 上下文失败: {exc!r}", flush=True)
     return result
 
 

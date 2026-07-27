@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -10,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from apps.collector_py import channel, scheduler, service
+from apps.collector_py import channel, compass, scheduler, service
 
 
 class CollectorServiceTest(unittest.TestCase):
@@ -36,6 +38,52 @@ class CollectorServiceTest(unittest.TestCase):
             with patch.object(scheduler, "LOCK_PATH", lock):
                 self.assertTrue(scheduler.acquire_lock())
                 self.assertFalse(scheduler.acquire_lock())
+
+    def test_scheduler_does_not_expire_a_live_old_lock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / "job.lock"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "hostname": socket.gethostname(),
+                        "started_at": "2020-01-01T00:00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(scheduler, "LOCK_PATH", lock):
+                self.assertFalse(scheduler.stale_lock())
+
+    def test_service_removes_lock_from_previous_container(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / "job.lock"
+            lock.write_text(
+                json.dumps(
+                    {
+                        "pid": os.getpid(),
+                        "hostname": "previous-container",
+                        "started_at": "2020-01-01T00:00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(service, "LOCK_PATH", lock):
+                self.assertFalse(service.lock_active())
+            self.assertFalse(lock.exists())
+
+    def test_stale_chromium_singletons_are_removed_without_touching_session_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory)
+            (session / "Cookies").write_text("preserve me", encoding="utf-8")
+            (session / "SingletonLock").symlink_to("previous-container-1549")
+            (session / "SingletonSocket").symlink_to("/tmp/missing-chromium-socket")
+            (session / "SingletonCookie").symlink_to("123456789")
+
+            self.assertTrue(compass.clear_stale_chromium_singletons(session))
+            self.assertEqual((session / "Cookies").read_text(encoding="utf-8"), "preserve me")
+            for name in compass.CHROMIUM_SINGLETON_NAMES:
+                self.assertFalse((session / name).is_symlink())
 
     def test_channel_request_metadata_removes_credentials(self) -> None:
         value = channel.sanitized_post_data(

@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import random
+import socket
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,18 +19,37 @@ LOCK_PATH = COLLECTION_DIR / "job.lock"
 LOCK_EXPIRE_SECONDS = 3 * 3600
 
 
+def process_is_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def stale_lock():
     if not LOCK_PATH.exists():
         return False
     try:
-        started = datetime.fromisoformat(json.loads(LOCK_PATH.read_text(encoding="utf-8"))["started_at"])
-        return (datetime.now() - started).total_seconds() > LOCK_EXPIRE_SECONDS
-    except (OSError, json.JSONDecodeError, ValueError, KeyError):
+        payload = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+        started = datetime.fromisoformat(payload["started_at"])
+        pid = int(payload["pid"])
+        hostname = payload.get("hostname")
+        if hostname and hostname != socket.gethostname():
+            return True
+        if process_is_running(pid):
+            return False
+        return (datetime.now() - started).total_seconds() >= 0
+    except (OSError, json.JSONDecodeError, ValueError, KeyError, TypeError):
         return True
 
 
 def acquire_lock():
-    payload = json.dumps({"pid": os.getpid(), "started_at": datetime.now().isoformat(timespec="seconds")})
+    payload = json.dumps({"pid": os.getpid(), "hostname": socket.gethostname(), "started_at": datetime.now().isoformat(timespec="seconds")})
     for _ in range(2):
         try:
             with LOCK_PATH.open("x", encoding="utf-8") as lock:
@@ -63,7 +83,10 @@ async def main():
         print(f"随机等待 {delay} 秒后开始采集", flush=True)
         await asyncio.sleep(delay)
         write_status(state="running", message="正在运行罗盘采集服务", requested_modules=requested)
-        result = await run(args)
+        try:
+            result = await asyncio.wait_for(run(args), timeout=LOCK_EXPIRE_SECONDS)
+        except asyncio.TimeoutError as exc:
+            raise TimeoutError(f"采集运行超过 {LOCK_EXPIRE_SECONDS // 3600} 小时，已终止以避免浏览器会话长期占用") from exc
         outputs = save_run(result, args.output_dir)
         if not outputs:
             raise RuntimeError("所有采集模块均未生成输出")

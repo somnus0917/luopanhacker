@@ -105,9 +105,17 @@ async def click_with_pacing(locator, label, *, hover=True, force=False):
         raise RuntimeError(f"未找到可见的可点击元素: {label}")
 
     await human_pause(reason=f"正在点击 {label}")
+    # 抖音罗盘会在数据刷新时替换整组筛选节点。随机等待期间原先可见的
+    # locator 可能已经变成隐藏副本，因此在真正交互前重新定位一次。
+    target = await first_visible(locator, timeout=10000)
+    if target is None:
+        raise RuntimeError(f"等待后未找到可见的可点击元素: {label}")
     if hover:
-        await target.hover()
+        await target.hover(timeout=10000)
         await human_pause(0.5, 1.4)
+        target = await first_visible(locator, timeout=10000)
+        if target is None:
+            raise RuntimeError(f"悬停后未找到可见的可点击元素: {label}")
     await target.click(timeout=10000, force=force)
     print(f"已点击: {label}", flush=True)
     await human_pause(*AFTER_CLICK_DELAY_RANGE, reason=f"等待 {label} 点击后的页面响应")
