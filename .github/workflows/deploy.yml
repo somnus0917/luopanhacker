@@ -67,6 +67,9 @@ jobs:
             grep -q '/srv/luopan-data/state'
           grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
           grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh
+          for runtime_dir in config logs output session state; do
+            grep -q -- "--exclude='${runtime_dir}/'" ops/deploy.sh
+          done
 
   deploy:
     needs: ci

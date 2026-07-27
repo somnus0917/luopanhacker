@@ -54,7 +54,17 @@ if [[ -n "${DEPLOY_REF}" ]]; then
     --max-time 180 \
     "https://codeload.github.com/somnus0917/luopanhacker/tar.gz/${DEPLOY_REF}" \
     | tar -xzf - --strip-components=1 -C "${RELEASE_DIR}"
-  rsync -a --delete --exclude='.git' --exclude='.deploy-revision' \
+  # Runtime mounts may still have legacy directories in the worktree from
+  # earlier deployments. Preserve them: container-owned SQLite, Chromium
+  # profiles, and logs must never be considered stale release files.
+  rsync -a --delete \
+    --exclude='.git' \
+    --exclude='.deploy-revision' \
+    --exclude='config/' \
+    --exclude='logs/' \
+    --exclude='output/' \
+    --exclude='session/' \
+    --exclude='state/' \
     "${RELEASE_DIR}/" "${APP_DIR}/"
   printf '%s\n' "${DEPLOY_REF}" > "${APP_DIR}/.deploy-revision"
 else
