@@ -18,7 +18,9 @@ type AppState = {
   operationShops: Set<string>;
   operationSources: Set<string>;
   operationFilterOpen: Set<string>;
-  tableDate: string;
+  operationCalendarOpen: boolean;
+  operationCalendarCursor: string;
+  operationCalendarRangeStart: string;
   tablePlatform: string;
   tableShop: string;
   operationSection: "overview" | "sales" | "traffic" | "ads";
@@ -39,7 +41,7 @@ type AppState = {
   channel: AnyRecord | null;
 };
 
-const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), tableDate: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
+const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer: number | null = null;
 
@@ -296,26 +298,139 @@ function operatingRatio(value) {
   return value === null || value === undefined ? "—" : `${number(value).toFixed(2)}×`;
 }
 
-function detailTableFilters() {
+function calendarDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function calendarMonthStart(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1));
+}
+
+function shiftCalendarMonth(value: string, amount: number) {
+  const cursor = calendarMonthStart(value);
+  cursor.setUTCMonth(cursor.getUTCMonth() + amount);
+  return calendarDate(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1);
+}
+
+function selectedDateBounds() {
+  const dates = [...state.operationDates].sort();
+  return { start: dates[0] || "", end: dates.at(-1) || "" };
+}
+
+function operationDateLabel() {
+  const available = operationFilterItems("date");
+  const selected = [...state.operationDates].sort();
+  if (!selected.length) return "请选择日期";
+  if (selected.length === available.length && available.every((date) => state.operationDates.has(date))) return "全部日期";
+  if (selected.length === 1) return selected[0];
+  const isRange = available.filter((date) => date >= selected[0] && date <= selected.at(-1)).every((date) => state.operationDates.has(date));
+  return isRange ? `${selected[0]} 至 ${selected.at(-1)}` : `已选择 ${selected.length} 天`;
+}
+
+function calendarMonthMarkup(monthValue: string, availableDates: Set<string>, rangeStart: string, rangeEnd: string) {
+  const cursor = calendarMonthStart(monthValue);
+  const year = cursor.getUTCFullYear();
+  const month = cursor.getUTCMonth() + 1;
+  const firstWeekday = cursor.getUTCDay() || 7;
+  const gridStart = new Date(Date.UTC(year, month - 1, 2 - firstWeekday));
+  const today = calendarDate(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
+  const days = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setUTCDate(gridStart.getUTCDate() + index);
+    const value = calendarDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+    const inMonth = date.getUTCMonth() + 1 === month;
+    const available = availableDates.has(value);
+    const inRange = Boolean(rangeStart && rangeEnd && value >= rangeStart && value <= rangeEnd);
+    const isStart = value === rangeStart;
+    const isEnd = value === rangeEnd;
+    const classes = ["calendar-day", inMonth ? "" : "outside", available ? "available" : "unavailable", inRange ? "in-range" : "", isStart ? "range-start" : "", isEnd ? "range-end" : "", value === today ? "today" : ""].filter(Boolean).join(" ");
+    return `<button class="${classes}" type="button" data-calendar-date="${value}" aria-label="${value}" ${inMonth && available ? "" : "disabled"}><span>${date.getUTCDate()}</span></button>`;
+  }).join("");
+  return `<section class="calendar-month" aria-label="${year}年${month}月"><h4>${year}年 ${month}月</h4><div class="calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="calendar-days">${days}</div></section>`;
+}
+
+function operationCalendarMarkup() {
   const dates = operationFilterItems("date");
+  if (!dates.length) return `<div class="date-filter-field"><span>业务日期</span><button class="date-picker-trigger" type="button" disabled>暂无日期</button></div>`;
+  const availableDates = new Set(dates);
+  const latestDate = dates[0];
+  const cursor = state.operationCalendarCursor || `${latestDate.slice(0, 7)}-01`;
+  const selected = selectedDateBounds();
+  const rangeStart = state.operationCalendarRangeStart || selected.start;
+  const rangeEnd = state.operationCalendarRangeStart ? state.operationCalendarRangeStart : selected.end;
+  const hint = state.operationCalendarRangeStart ? `已选择 ${state.operationCalendarRangeStart}，可再选结束日期或直接确定单日` : "点击一天选择单日，或依次点击开始和结束日期";
+  return `<div class="date-filter-field"><span>业务日期</span><details class="date-range-picker" ${state.operationCalendarOpen ? "open" : ""}><summary class="date-picker-trigger"><span>${escapeHtml(operationDateLabel())}</span><i aria-hidden="true"></i></summary><div class="calendar-popover"><div class="calendar-toolbar"><button type="button" data-calendar-shift="-12" aria-label="上一年">«</button><button type="button" data-calendar-shift="-1" aria-label="上个月">‹</button><span>${escapeHtml(hint)}</span><button type="button" data-calendar-shift="1" aria-label="下个月">›</button><button type="button" data-calendar-shift="12" aria-label="下一年">»</button></div><div class="calendar-months">${calendarMonthMarkup(cursor, availableDates, rangeStart, rangeEnd)}${calendarMonthMarkup(shiftCalendarMonth(cursor, 1), availableDates, rangeStart, rangeEnd)}</div><div class="calendar-footer"><span>${state.operationDates.size} 个业务日</span><div><button type="button" data-calendar-all>全部日期</button><button class="calendar-confirm" type="button" data-calendar-confirm>确定</button></div></div></div></details></div>`;
+}
+
+function positionOperationCalendar() {
+  const popover = $(".calendar-popover");
+  if (!popover || window.matchMedia("(max-width: 760px)").matches) return;
+  popover.style.transform = "";
+  const bounds = popover.getBoundingClientRect();
+  const viewportMargin = 12;
+  if (bounds.right > window.innerWidth - viewportMargin) {
+    popover.style.transform = `translateX(-${Math.ceil(bounds.right - window.innerWidth + viewportMargin)}px)`;
+  } else if (bounds.left < viewportMargin) {
+    popover.style.transform = `translateX(${Math.ceil(viewportMargin - bounds.left)}px)`;
+  }
+}
+
+function detailTableFilters() {
   const platforms = operationFilterItems("platform");
   const shops = operationFilterItems("shop");
-  state.tableDate = operationSingleFilterValue("date");
   state.tablePlatform = operationSingleFilterValue("platform");
   state.tableShop = operationSingleFilterValue("shop");
   const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong><span>销售、流量和投放共用同一组筛选条件</span></div><label>业务日期<select data-table-filter="date">${options(dates, state.tableDate, "全部日期")}</select></label><label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong><span>销售、流量和投放共用同一组筛选条件</span></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
 }
 
 function bindDetailTableFilters() {
   $$('[data-table-filter]').forEach((select) => select.addEventListener("change", () => {
     const kind = select.dataset.tableFilter;
-    if (kind === "date") state.tableDate = select.value;
-    else if (kind === "platform") state.tablePlatform = select.value;
+    if (kind === "platform") state.tablePlatform = select.value;
     else state.tableShop = select.value;
     applySingleOperationFilter(kind, select.value);
     renderOperations();
   }));
+  const picker = $(".date-range-picker");
+  picker?.addEventListener("toggle", () => {
+    state.operationCalendarOpen = picker.open;
+    if (!picker.open) state.operationCalendarRangeStart = "";
+    else window.requestAnimationFrame(positionOperationCalendar);
+  });
+  $$("[data-calendar-shift]").forEach((button) => button.addEventListener("click", () => {
+    state.operationCalendarCursor = shiftCalendarMonth(state.operationCalendarCursor || `${operationFilterItems("date")[0].slice(0, 7)}-01`, number(button.dataset.calendarShift));
+    state.operationCalendarOpen = true;
+    renderOperations();
+  }));
+  $$("[data-calendar-date]").forEach((button) => button.addEventListener("click", () => {
+    const value = button.dataset.calendarDate;
+    if (!state.operationCalendarRangeStart) {
+      state.operationDates = new Set([value]);
+      state.operationCalendarRangeStart = value;
+      state.operationCalendarOpen = true;
+    } else {
+      const start = value < state.operationCalendarRangeStart ? value : state.operationCalendarRangeStart;
+      const end = value < state.operationCalendarRangeStart ? state.operationCalendarRangeStart : value;
+      state.operationDates = new Set(operationFilterItems("date").filter((date) => date >= start && date <= end));
+      state.operationCalendarRangeStart = "";
+      state.operationCalendarOpen = false;
+    }
+    renderOperations();
+  }));
+  $("[data-calendar-all]")?.addEventListener("click", () => {
+    state.operationDates = new Set(operationFilterItems("date"));
+    state.operationCalendarRangeStart = "";
+    state.operationCalendarOpen = false;
+    renderOperations();
+  });
+  $("[data-calendar-confirm]")?.addEventListener("click", () => {
+    state.operationCalendarRangeStart = "";
+    state.operationCalendarOpen = false;
+    renderOperations();
+  });
+  if (state.operationCalendarOpen) window.requestAnimationFrame(positionOperationCalendar);
 }
 
 function channelSelectedRecords() {
@@ -1077,6 +1192,9 @@ async function loadCompass() {
   state.records = (payload.records || []).map(canonicalOperationRecord);
   state.channel = payload.channel || null;
   state.operationDates = new Set(operationFilterItems("date"));
+  state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
+  state.operationCalendarRangeStart = "";
+  state.operationCalendarOpen = false;
   state.operationPlatforms = new Set(operationFilterItems("platform"));
   state.operationShops = new Set(operationFilterItems("shop"));
   state.operationSources = new Set(state.records.map(recordSourceLabel));
