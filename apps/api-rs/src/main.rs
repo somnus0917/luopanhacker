@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get, get_service, post},
 };
+use chrono::{Datelike, Local, NaiveDate};
 use fs2::FileExt;
 use luopan_channels::load_channel_dashboard;
 use luopan_inventory::load_inventory_dashboard;
@@ -152,6 +153,9 @@ struct SettlementUploadPayload {
 struct CollectionRunPayload {
     #[serde(default)]
     modules: Vec<String>,
+    date: Option<String>,
+    #[serde(default)]
+    shops: Vec<String>,
 }
 
 fn default_terminal_output() -> bool {
@@ -954,6 +958,8 @@ async fn scrape(State(state): State<AppState>) -> Result<(StatusCode, Json<Value
     enqueue_collection(
         &state,
         vec!["operations".to_string(), "channel".to_string()],
+        None,
+        Vec::new(),
     )
     .await
 }
@@ -962,14 +968,23 @@ async fn run_collection(
     State(state): State<AppState>,
     Json(payload): Json<CollectionRunPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    enqueue_collection(&state, payload.modules).await
+    enqueue_collection(&state, payload.modules, payload.date, payload.shops).await
 }
 
 async fn enqueue_collection(
     state: &AppState,
     modules: Vec<String>,
+    date: Option<String>,
+    shops: Vec<String>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let modules = validate_collection_modules(modules).map_err(ApiError::bad_request)?;
+    let date = validate_collection_date(date).map_err(ApiError::bad_request)?;
+    let shops = validate_collection_shops(shops).map_err(ApiError::bad_request)?;
+    if date.is_some() && modules != ["operations"] {
+        return Err(ApiError::bad_request(anyhow::anyhow!(
+            "指定日期补采目前只支持经营数据"
+        )));
+    }
     let current =
         status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
     let busy = current
@@ -998,17 +1013,28 @@ async fn enqueue_collection(
     }
     let paths = state.paths.clone();
     let request_modules = modules.clone();
-    tokio::task::spawn_blocking(move || write_collection_request(&paths, &request_modules))
-        .await
-        .map_err(|error| ApiError::internal(error.into()))?
-        .map_err(ApiError::internal)?;
+    let request_date = date.clone();
+    let request_shops = shops.clone();
+    tokio::task::spawn_blocking(move || {
+        write_collection_request(&paths, &request_modules, &request_date, &request_shops)
+    })
+    .await
+    .map_err(|error| ApiError::internal(error.into()))?
+    .map_err(ApiError::internal)?;
     let status =
         status_payload(&state.paths, &state.novnc_url, false).map_err(ApiError::internal)?;
+    let message = if let Some(data_day) = &date {
+        format!("{data_day} 历史补采请求已提交给独立采集服务")
+    } else {
+        "采集请求已提交给独立采集服务".to_string()
+    };
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({
-            "message": "采集请求已提交给独立采集服务",
+            "message": message,
             "modules": modules,
+            "date": date,
+            "shops": shops,
             "status": status,
         })),
     ))
@@ -1032,7 +1058,50 @@ fn validate_collection_modules(modules: Vec<String>) -> Result<Vec<String>> {
     Ok(result)
 }
 
-fn write_collection_request(paths: &RuntimePaths, modules: &[String]) -> Result<()> {
+fn validate_collection_date(date: Option<String>) -> Result<Option<String>> {
+    validate_collection_date_at(date, Local::now().date_naive())
+}
+
+fn validate_collection_date_at(date: Option<String>, today: NaiveDate) -> Result<Option<String>> {
+    let Some(value) = date else {
+        return Ok(None);
+    };
+    let value = value.trim();
+    let parsed = NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .with_context(|| format!("补采日期格式无效: {value}，应为 YYYY-MM-DD"))?;
+    if parsed >= today {
+        anyhow::bail!("补采日期必须早于今天");
+    }
+    if parsed.year() != today.year() || parsed.month() != today.month() {
+        anyhow::bail!("补采日期目前仅支持本月");
+    }
+    Ok(Some(parsed.format("%Y-%m-%d").to_string()))
+}
+
+fn validate_collection_shops(shops: Vec<String>) -> Result<Vec<String>> {
+    if shops.len() > 20 {
+        anyhow::bail!("单次最多指定 20 家店铺");
+    }
+    let mut result = Vec::new();
+    for shop in shops {
+        let shop = shop.trim();
+        if shop.is_empty() || shop.len() > 120 || shop.chars().any(char::is_control) {
+            anyhow::bail!("店铺名称无效");
+        }
+        let shop = shop.to_string();
+        if !result.contains(&shop) {
+            result.push(shop);
+        }
+    }
+    Ok(result)
+}
+
+fn write_collection_request(
+    paths: &RuntimePaths,
+    modules: &[String],
+    date: &Option<String>,
+    shops: &[String],
+) -> Result<()> {
     fs::create_dir_all(paths.collection_dir())
         .with_context(|| format!("create {}", paths.collection_dir().display()))?;
     let guard_path = paths.collection_dir().join("request.enqueue.lock");
@@ -1055,9 +1124,11 @@ fn write_collection_request(paths: &RuntimePaths, modules: &[String]) -> Result<
             anyhow::bail!("已有采集任务或待处理请求");
         }
         let request = json!({
-            "created_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            "created_at": Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
             "source": "dashboard",
             "modules": modules,
+            "date": date,
+            "shops": shops,
         });
         fs::write(
             &temporary,
@@ -1073,6 +1144,8 @@ fn write_collection_request(paths: &RuntimePaths, modules: &[String]) -> Result<
             json!("采集请求已进入独立采集服务队列"),
         );
         patch.insert("requested_modules".to_string(), json!(modules));
+        patch.insert("requested_date".to_string(), json!(date));
+        patch.insert("requested_shops".to_string(), json!(shops));
         patch.insert("last_error".to_string(), json!(""));
         write_task_status(paths, patch)?;
         Ok(())
@@ -1428,6 +1501,17 @@ mod tests {
             ["operations", "channel"]
         );
         assert!(validate_collection_modules(vec!["unknown".into()]).is_err());
+        let today = NaiveDate::from_ymd_opt(2026, 7, 27).unwrap();
+        assert_eq!(
+            validate_collection_date_at(Some("2026-07-25".into()), today).unwrap(),
+            Some("2026-07-25".into())
+        );
+        assert!(validate_collection_date_at(Some("2026-06-30".into()), today).is_err());
+        assert!(validate_collection_date_at(Some("9999-12-31".into()), today).is_err());
+        assert_eq!(
+            validate_collection_shops(vec![" 店铺 A ".into(), "店铺 A".into()]).unwrap(),
+            ["店铺 A"]
+        );
     }
 
     #[tokio::test]
@@ -1492,6 +1576,8 @@ mod tests {
             State(state),
             Json(CollectionRunPayload {
                 modules: vec!["channel".to_string()],
+                date: None,
+                shops: Vec::new(),
             }),
         )
         .await
@@ -1504,6 +1590,53 @@ mod tests {
             .unwrap();
         assert_eq!(request["modules"], json!(["channel"]));
         assert!(!paths.collection_dir().join("request.json.tmp").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn historical_collection_request_includes_date_and_shops() {
+        let root = std::env::temp_dir().join(format!(
+            "luopan-api-collection-backfill-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let paths = RuntimePaths {
+            app_dir: root.clone(),
+            output_dir: root.join("output"),
+            state_dir: root.join("state"),
+            config_dir: root.join("config"),
+            logs_dir: root.join("logs"),
+            session_dir: root.join("session"),
+        };
+        fs::create_dir_all(paths.collection_dir()).unwrap();
+        fs::write(paths.collection_heartbeat_path(), "{}").unwrap();
+        let state = AppState {
+            paths: Arc::new(paths.clone()),
+            novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
+            auth_pool: Arc::new(test_pool().await),
+            storage_pool: None,
+        };
+
+        let (status, payload) = run_collection(
+            State(state),
+            Json(CollectionRunPayload {
+                modules: vec!["operations".to_string()],
+                date: Some("2026-07-25".to_string()),
+                shops: vec!["华硕凡飞笔记本电脑专卖店".to_string()],
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(payload.0["date"], json!("2026-07-25"));
+        let request = read_json_file(&paths.collection_request_path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(request["date"], json!("2026-07-25"));
+        assert_eq!(request["shops"], json!(["华硕凡飞笔记本电脑专卖店"]));
         let _ = fs::remove_dir_all(root);
     }
 

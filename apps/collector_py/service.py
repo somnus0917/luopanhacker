@@ -33,7 +33,7 @@ def heartbeat():
     atomic_json(HEARTBEAT_PATH, {"pid": os.getpid(), "updated_at": datetime.now().isoformat(timespec="seconds")})
 
 
-def worker_command(modules):
+def worker_command(modules, data_day=None, shops=None):
     configured = os.getenv("COLLECTION_WORKER_COMMAND", "luopan-worker-rs compass-collect")
     parts = shlex.split(configured)
     if not parts or not shutil.which(parts[0]):
@@ -41,6 +41,10 @@ def worker_command(modules):
     parts.extend(["--random-delay-seconds", "0", "--login-timeout-minutes", "30"])
     for module in modules:
         parts.extend(["--module", module])
+    if data_day:
+        parts.extend(["--date", data_day])
+    for shop in shops or []:
+        parts.extend(["--shop", shop])
     return parts
 
 
@@ -48,17 +52,21 @@ def run_request(request):
     modules = [name for name in request.get("modules", []) if name in {"operations", "channel"}]
     if not modules:
         modules = ["operations", "channel"]
+    data_day = request.get("date") if isinstance(request.get("date"), str) else None
+    shops = [name.strip() for name in request.get("shops", []) if isinstance(name, str) and name.strip()]
     while lock_active():
         heartbeat()
         time.sleep(2)
     PROGRESS_LOG.parent.mkdir(parents=True, exist_ok=True)
     with PROGRESS_LOG.open("a", encoding="utf-8") as log:
-        log.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] manual collection: {','.join(modules)}\n")
+        request_label = f", date={data_day}" if data_day else ""
+        shop_label = f", shops={','.join(shops)}" if shops else ""
+        log.write(f"\n[{datetime.now().isoformat(timespec='seconds')}] manual collection: {','.join(modules)}{request_label}{shop_label}\n")
         log.flush()
         environment = os.environ.copy()
         environment.setdefault("PYTHONUNBUFFERED", "1")
         process = subprocess.Popen(
-            worker_command(modules),
+            worker_command(modules, data_day, shops),
             cwd=str(APP_DIR),
             env=environment,
             stdin=subprocess.DEVNULL,

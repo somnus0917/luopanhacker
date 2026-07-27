@@ -79,10 +79,24 @@ async def main():
         delay = schedule.random_delay_seconds if schedule.random_delay_seconds is not None else random.randint(0, 3600)
         args = parse_args(remaining)
         requested = args.module or ["operations", "channel"]
-        write_status(state="waiting_random", message=f"随机等待 {delay} 秒后开始采集", requested_modules=requested)
+        requested_date = args.date.isoformat() if args.date else None
+        requested_shops = args.shop or []
+        write_status(
+            state="waiting_random",
+            message=f"随机等待 {delay} 秒后开始采集",
+            requested_modules=requested,
+            requested_date=requested_date,
+            requested_shops=requested_shops,
+        )
         print(f"随机等待 {delay} 秒后开始采集", flush=True)
         await asyncio.sleep(delay)
-        write_status(state="running", message="正在运行罗盘采集服务", requested_modules=requested)
+        write_status(
+            state="running",
+            message="正在运行罗盘采集服务",
+            requested_modules=requested,
+            requested_date=requested_date,
+            requested_shops=requested_shops,
+        )
         try:
             result = await asyncio.wait_for(run(args), timeout=LOCK_EXPIRE_SECONDS)
         except asyncio.TimeoutError as exc:

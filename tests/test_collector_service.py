@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import socket
@@ -9,10 +10,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from apps.collector_py import channel, compass, scheduler, service
+from apps.collector_py import channel, compass, scheduler, service, status
 
 
 class CollectorServiceTest(unittest.TestCase):
@@ -31,6 +33,10 @@ class CollectorServiceTest(unittest.TestCase):
                 check=False,
             )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_local_cargo_status_update_allows_initial_build(self) -> None:
+        self.assertEqual(status.default_status_update_timeout(["cargo", "run"]), 120.0)
+        self.assertEqual(status.default_status_update_timeout(["luopan-worker-rs", "status-update"]), 5.0)
 
     def test_scheduler_lock_is_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -85,6 +91,64 @@ class CollectorServiceTest(unittest.TestCase):
             for name in compass.CHROMIUM_SINGLETON_NAMES:
                 self.assertFalse((session / name).is_symlink())
 
+    def test_custom_date_request_range_does_not_require_near_day_type(self) -> None:
+        self.assertEqual(
+            compass.date_range_from_fields(
+                {
+                    "date_type": ["custom"],
+                    "begin_date": ["2026-07-25 00:00:00"],
+                    "end_date": ["2026/07/25 23:59:59"],
+                }
+            ),
+            ("2026/07/25", "2026/07/25"),
+        )
+
+    def test_near_day_date_range_still_requires_type_20(self) -> None:
+        fields = {
+            "date_type": ["custom"],
+            "begin_date": ["2026-07-25"],
+            "end_date": ["2026-07-25"],
+        }
+        self.assertIsNone(compass.date_range_from_fields(fields, required_date_type="20"))
+
+    def test_custom_date_range_requires_type_999_when_filtering(self) -> None:
+        fields = {
+            "date_type": ["1"],
+            "begin_date": ["2026-07-27"],
+            "end_date": ["2026-07-27"],
+        }
+        self.assertIsNone(compass.date_range_from_fields(fields, required_date_type="999"))
+
+    def test_custom_date_can_be_read_from_nested_post_data(self) -> None:
+        self.assertEqual(
+            compass.date_range_from_request(
+                "https://compass.jinritemai.com/core_index_v3",
+                '{"filters":{"date_type":"custom","begin_date":"2026-07-25","end_date":"2026-07-25"}}',
+            ),
+            ("2026/07/25", "2026/07/25"),
+        )
+
+    def test_missing_url_date_fields_fall_back_without_index_error(self) -> None:
+        self.assertIsNone(compass.date_range_from_fields({}))
+
+    def test_parse_args_accepts_historical_date(self) -> None:
+        args = compass.parse_args(["--module", "operations", "--date", "2026-07-25"])
+        self.assertEqual(args.date.isoformat(), "2026-07-25")
+        self.assertEqual(compass.expected_data_range(args.date), ("2026/07/25", "2026/07/25"))
+
+    def test_parse_data_day_rejects_date_outside_current_month(self) -> None:
+        with self.assertRaisesRegex(Exception, "仅支持本月"):
+            compass.parse_data_day("2026-06-30", today=date(2026, 7, 27))
+
+    def test_parse_args_rejects_non_historical_date(self) -> None:
+        with self.assertRaises(SystemExit):
+            compass.parse_args(["--module", "operations", "--date", "9999-12-31"])
+
+    def test_custom_date_prototype_rejects_channel_before_browser_launch(self) -> None:
+        args = compass.parse_args(["--date", "2026-07-25"])
+        with self.assertRaisesRegex(ValueError, "暂仅支持 --module operations"):
+            asyncio.run(compass.run(args))
+
     def test_channel_request_metadata_removes_credentials(self) -> None:
         value = channel.sanitized_post_data(
             '{"query":"laptop","token":"secret","nested":{"verify_code":"hidden","page":2}}'
@@ -96,13 +160,22 @@ class CollectorServiceTest(unittest.TestCase):
             patch.dict(os.environ, {"COLLECTION_WORKER_COMMAND": "luopan-worker-rs compass-collect"}),
             patch.object(service.shutil, "which", return_value="/usr/local/bin/luopan-worker-rs"),
         ):
-            command = service.worker_command(["operations", "channel"])
+            command = service.worker_command(
+                ["operations", "channel"],
+                "2026-07-25",
+                ["华硕凡飞笔记本电脑专卖店"],
+            )
 
         self.assertEqual(command[:2], ["luopan-worker-rs", "compass-collect"])
         self.assertEqual(command.count("--module"), 2)
         self.assertIn("operations", command)
         self.assertIn("channel", command)
         self.assertIn("--random-delay-seconds", command)
+        self.assertEqual(command[command.index("--date") + 1], "2026-07-25")
+        self.assertEqual(
+            command[command.index("--shop") + 1],
+            "华硕凡飞笔记本电脑专卖店",
+        )
 
     def test_recover_request_requeues_interrupted_work(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

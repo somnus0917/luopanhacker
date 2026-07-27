@@ -73,6 +73,12 @@ enum Commands {
         /// Collection module to run. Repeat for multiple modules; default is all.
         #[arg(long = "module", value_parser = ["operations", "channel"])]
         modules: Vec<String>,
+        /// Historical business date to backfill (YYYY-MM-DD).
+        #[arg(long)]
+        date: Option<String>,
+        /// Shop to collect. Repeat for multiple shops; default is all configured shops.
+        #[arg(long = "shop")]
+        shops: Vec<String>,
     },
     /// Print the Rust采集状态 payload as JSON.
     StatusJson {
@@ -176,6 +182,8 @@ async fn main() -> Result<()> {
             random_delay_seconds,
             login_timeout_minutes,
             modules,
+            date,
+            shops,
         } => {
             let mut args = vec![
                 "apps/collector_py/scheduler.py".to_string(),
@@ -186,6 +194,12 @@ async fn main() -> Result<()> {
             ];
             for module in modules {
                 args.extend(["--module".to_string(), module]);
+            }
+            if let Some(date) = date {
+                args.extend(["--date".to_string(), date]);
+            }
+            for shop in shops {
+                args.extend(["--shop".to_string(), shop]);
             }
             run_python(&paths, args)?;
             sync_storage_after_scrape(&paths).await

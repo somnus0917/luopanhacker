@@ -20,7 +20,18 @@ def default_status_update_command():
 STATUS_UPDATE_COMMAND = shlex.split(
     os.getenv("STATUS_UPDATE_COMMAND", default_status_update_command())
 )
-STATUS_UPDATE_TIMEOUT = float(os.getenv("STATUS_UPDATE_TIMEOUT", "5"))
+
+
+def default_status_update_timeout(command):
+    return 120.0 if command and Path(command[0]).name == "cargo" else 5.0
+
+
+STATUS_UPDATE_TIMEOUT = float(
+    os.getenv(
+        "STATUS_UPDATE_TIMEOUT",
+        str(default_status_update_timeout(STATUS_UPDATE_COMMAND)),
+    )
+)
 
 
 def read_status():
