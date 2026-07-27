@@ -70,6 +70,7 @@ jobs:
           for runtime_dir in config logs output session state; do
             grep -q -- "--exclude='${runtime_dir}/'" ops/deploy.sh
           done
+          grep -q -- '--alias douyin-compass-collector' ops/deploy.sh
 
   deploy:
     needs: ci

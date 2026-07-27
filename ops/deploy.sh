@@ -131,6 +131,11 @@ if docker network inspect "${PROXY_NETWORK}" >/dev/null 2>&1; then
     docker network connect --alias douyin-compass --alias compass-dashboard \
       "${PROXY_NETWORK}" douyin-compass
   fi
+  if ! docker inspect douyin-compass-collector \
+    --format '{{json .NetworkSettings.Networks}}' | grep -q "\"${PROXY_NETWORK}\""; then
+    docker network connect --alias douyin-compass-collector \
+      "${PROXY_NETWORK}" douyin-compass-collector
+  fi
 fi
 
 docker compose --env-file "${ENV_FILE}" --project-name luopan ps
