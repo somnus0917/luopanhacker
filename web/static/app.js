@@ -85,6 +85,27 @@ function aggregate(records) {
     totals.product_click_pay_ucnt_ratio = totals.product_click_ucnt ? totals.pay_ucnt / totals.product_click_ucnt : 0;
     return totals;
 }
+function previousPeriodDates(selectedDates, allDates) {
+    const sorted = [...selectedDates].sort();
+    if (!sorted.length)
+        return new Set();
+    const span = sorted.length;
+    const earliestIndex = allDates.indexOf(sorted[0]);
+    const prevSlice = allDates.slice(Math.max(0, earliestIndex - span), earliestIndex);
+    return new Set(prevSlice);
+}
+function deltaNote(current, previous, formatter = whole) {
+    if (!previous)
+        return "环比：无上期数据";
+    const change = (current - previous) / previous;
+    const arrow = change > 0 ? "▲" : change < 0 ? "▼" : "→";
+    return `${arrow} ${Math.abs(change * 100).toFixed(1)}% 环比 ${formatter(previous)}`;
+}
+function deltaTrend(current, previous) {
+    if (!previous)
+        return "";
+    return current > previous ? "up" : current < previous ? "down" : "";
+}
 function latestRecords(records) {
     const dates = [...new Set(records.map((item) => item.date))].sort();
     const latest = dates.at(-1);
@@ -495,7 +516,7 @@ function channelInsightsMarkup(records) {
     return `<section class="section-context"><span>抖音渠道下钻</span><small>${whole(records.length)} 条店铺日数据 · 搜索口径：${escapeHtml(periods.join("、") || "暂无")}</small></section>${cardHtml}${charts}${details}`;
 }
 function metricCards(metrics, columns = "six") {
-    return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+    return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta ${trend === "up" ? "positive" : trend === "down" ? "negative" : ""}">${note}</div></article>`).join("")}</div>`;
 }
 function attributedAdMetrics(records) {
     const platforms = new Set(records.filter((record) => number(record.metrics?.ad_cost_amt) > 0).map(recordPlatform));
@@ -537,12 +558,22 @@ function overviewSectionMarkup(records, channelRecords) {
     const totals = aggregate(records);
     const organic = channelGroup(channelRecords, "organic_search");
     const ads = attributedAdMetrics(records);
+    const allDates = operationFilterItems("date");
+    const prevDates = previousPeriodDates(state.operationDates, allDates);
+    const prevRecords = state.records.filter((item) => prevDates.has(item.date) &&
+        state.operationPlatforms.has(recordPlatform(item)) &&
+        state.operationShops.has(item.shop_name) &&
+        state.operationSources.has(recordSourceLabel(item)));
+    const prevTotals = aggregate(prevRecords);
+    const prevChannelRecords = channelRecords.length ? (state.channel?.records || []).filter((record) => prevDates.has(record.date) && state.operationShops.has(record.shop_name)) : [];
+    const prevOrganic = channelGroup(prevChannelRecords, "organic_search");
+    const prevAds = attributedAdMetrics(prevRecords);
     const metrics = [
-        ["成交金额", money(totals.income_amt), "销售 · 成交口径"],
-        ["去退后成交", money(Math.max(totals.income_amt - totals.refund_amt, 0)), "销售 · 成交金额减退款"],
-        ["成交订单", whole(totals.pay_cnt), `销售 · ${whole(totals.pay_item_cnt)} 件商品`],
-        ["商品曝光人数", whole(totals.product_show_ucnt), "流量 · 罗盘经营口径"],
-        ["自然搜索曝光", wholeOrDash(organic.value), "流量 · 抖音渠道下钻"],
+        ["成交金额", money(totals.income_amt), deltaNote(totals.income_amt, prevTotals.income_amt, money), deltaTrend(totals.income_amt, prevTotals.income_amt)],
+        ["去退后成交", money(Math.max(totals.income_amt - totals.refund_amt, 0)), deltaNote(Math.max(totals.income_amt - totals.refund_amt, 0), Math.max(prevTotals.income_amt - prevTotals.refund_amt, 0), money), deltaTrend(Math.max(totals.income_amt - totals.refund_amt, 0), Math.max(prevTotals.income_amt - prevTotals.refund_amt, 0))],
+        ["成交订单", whole(totals.pay_cnt), deltaNote(totals.pay_cnt, prevTotals.pay_cnt, whole), deltaTrend(totals.pay_cnt, prevTotals.pay_cnt)],
+        ["商品曝光人数", whole(totals.product_show_ucnt), deltaNote(totals.product_show_ucnt, prevTotals.product_show_ucnt, whole), deltaTrend(totals.product_show_ucnt, prevTotals.product_show_ucnt)],
+        ["自然搜索曝光", wholeOrDash(organic.value), deltaNote(number(organic.value), number(prevOrganic.value), whole), deltaTrend(number(organic.value), number(prevOrganic.value))],
         ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"],
     ];
     const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}</div></div>` : `${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}`;
