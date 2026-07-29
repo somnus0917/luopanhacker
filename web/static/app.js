@@ -39,13 +39,20 @@
     const target = $("#account-content");
     if (!target || !state.currentUser) return;
     const message = state.accountMessage ? `<p class="order-import-message">${escapeHtml(state.accountMessage)}</p>` : "";
+    const roleLabel = state.currentUser.role === "admin" ? "管理员" : "只读用户";
+    const sessionPanel = `<section class="panel account-session-panel"><div><small>当前登录账户</small><strong>${escapeHtml(state.currentUser.username)}</strong><span>${roleLabel}</span></div><button id="account-logout-button" class="button" type="button">退出当前账户</button></section>`;
     const passwordPanel = `<section class="panel account-panel"><div class="panel-head"><div><h3>修改密码</h3><span>更新后其他设备上的登录会话将失效</span></div></div><form id="password-change-form" class="account-form"><label>当前密码<input name="current_password" type="password" autocomplete="current-password" required /></label><label>新密码<input name="new_password" type="password" autocomplete="new-password" minlength="12" required /></label><button class="button button-primary" type="submit">更新密码</button></form></section>`;
     const userRows = state.users.map((user) => `<div class="user-row"><div><strong>${escapeHtml(user.username)}</strong><span>${user.role === "admin" ? "管理员" : "只读用户"} · 创建于 ${escapeHtml(importTime(user.created_at))}</span></div>${user.username === state.currentUser?.username ? `<small>当前账户</small>` : `<button class="text-button import-delete" type="button" data-delete-user="${escapeHtml(user.username)}">删除</button>`}</div>`).join("");
     const adminPanel = isAdmin() ? `<section class="panel account-panel"><div class="panel-head"><div><h3>用户管理</h3><span>管理员可新增账户；viewer 只能读取看板</span></div></div><form id="user-create-form" class="account-form account-form-user"><label>用户名<input name="username" maxlength="64" required /></label><label>初始密码<input name="password" type="password" autocomplete="new-password" minlength="12" required /></label><label>角色<select name="role"><option value="viewer">viewer · 只读</option><option value="admin">admin · 管理员</option></select></label><button class="button" type="submit">新增用户</button></form><div class="user-list">${userRows || `<p class="import-help">正在读取用户列表…</p>`}</div></section>` : `<section class="panel account-panel"><div class="panel-head"><div><h3>账户权限</h3><span>viewer · 只读</span></div></div><p class="import-help">你可以查看经营、库存和结算数据；上传、撤销、补采及用户管理由管理员执行。</p></section>`;
-    target.innerHTML = `${message}<div class="account-grid">${passwordPanel}${adminPanel}</div>`;
+    target.innerHTML = `${message}${sessionPanel}<div class="account-grid">${passwordPanel}${adminPanel}</div>`;
+    $("#account-logout-button")?.addEventListener("click", logout);
     $("#password-change-form")?.addEventListener("submit", changePassword);
     $("#user-create-form")?.addEventListener("submit", createUser);
     $$("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(button.dataset.deleteUser)));
+  }
+  async function logout() {
+    await fetch("/api/logout", { method: "POST" });
+    showLogin();
   }
   async function loadUsers() {
     if (!isAdmin()) return;
@@ -95,7 +102,6 @@
     state.currentUser = { username: user.username, role: user.role };
     $("#login-layer").classList.add("hidden");
     $("#app-shell").classList.remove("hidden");
-    $("#account-name").textContent = `${user.username} · ${user.role === "admin" ? "管理员" : "只读"}`;
     renderAccount();
     if (isAdmin()) loadUsers();
   }
@@ -625,9 +631,6 @@
     ]);
     return `<section class="panel"><div class="panel-head"><div><h3>店铺矩阵</h3><span>平台 → 店铺的经营范围</span></div></div>${simpleTable(["平台", "店铺数", "已接入店铺"], rows, "当前范围没有店铺")}</section>`;
   }
-  function operationSourceNote() {
-    return `<section class="panel operations-note"><h3>数据口径</h3><p>销售使用罗盘日维度数据和已导入订单汇总；流量融合罗盘经营指标，以及抖音“看流量、看商品、看搜索”的渠道快照；投放只展示已采集的投放消耗和广告曝光。</p><p>外部订单只保存日期、店铺和汇总指标，不保存订单号、买家、地址或原始文件。不同平台尚未接入的指标统一显示“—”。</p><p>当前数据维度为日期与店铺；源数据尚未提供稳定品牌字段，因此不做推测性品牌归因。</p></section>`;
-  }
   function overviewSectionMarkup(records, channelRecords) {
     const totals = aggregate(records);
     const organic = channelGroup(channelRecords, "organic_search");
@@ -649,7 +652,7 @@
       ["自然搜索曝光", wholeOrDash(organic.value), deltaNote(number(organic.value), number(prevOrganic.value), whole), deltaTrend(number(organic.value), number(prevOrganic.value))],
       ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"]
     ];
-    const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}</div></div>` : `${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}`;
+    const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}</div></div>` : platformMatrixMarkup(records, channelRecords);
     return `${metricCards(metrics)}${charts}`;
   }
   function salesSectionMarkup(records) {
@@ -699,8 +702,7 @@
       ["投放 ROI", operatingRatio(adSpend ? ads.pay / adSpend : null), adSpend ? `${[...ads.platforms].join("、")}支付金额 ÷ 投放金额` : "暂无可计算的投放金额"],
       ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"]
     ];
-    const note = `<section class="panel operations-note"><h3>投放边界</h3><p>“广告曝光”来自抖音渠道流量来源；“投放金额”来自罗盘的“投放消耗（店铺被投）”。两者能够进入同一板块，但不是同一接口的完整广告报表。</p><p>当前没有稳定的广告点击、点击率字段，因此明确显示为“—”；经营页的商品点击不会替代广告点击。</p></section>`;
-    const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}${note}</div></div>` : note;
+    const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
     return `${metricCards(metrics)}${charts}`;
   }
   function renderOperations() {
@@ -911,13 +913,6 @@
     const tabs = [["overview", "总览"], ["replenish", "补货清单"], ["overstock", "积压 / 未动销"], ["detail", "SKU 明细"]];
     return `<div class="inventory-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="inventory-tab ${view === key ? "active" : ""}" type="button" data-inventory-view="${key}" role="tab" aria-selected="${view === key}">${label}</button>`).join("")}</div>`;
   }
-  function inventoryNotes(payload) {
-    const source = payload.source || {};
-    const settings = payload.settings || {};
-    const history2 = payload.history || {};
-    const historyMessage = history2.ready ? `已具备连续 30 天日结快照：实际 30 天周转约 ${inventoryDays(history2.actual_turnover_days)}。` : `日结快照已累计 ${whole(history2.available_days)}/${whole(history2.required_days || 30)} 天；连续满 30 天后将自动计算实际 30 天周转。`;
-    return `<section class="panel inventory-note"><h3>计算口径与边界</h3><p>预计可售天数 = 当前可发库存 ÷（近 7 天销售出库 ÷ 7）。补货建议以 ${whole(settings.target_cover_days)} 天目标库存和 ${whole(settings.safety_stock_days)} 天安全库存估算，只作经营建议，不创建采购或修改库存。</p><p>${historyMessage}</p><p>库存来自 ${escapeHtml((source.apis || []).join("、"))} 的本地快照。仅使用一次收费的查询接口；未调用任何按次计费、创建、回写或库存变更接口。</p><p>“未动销”当前只代表近 7 天无销售出库；累计每日库存快照后，可升级为 30 天实际周转与长期滞销判断。</p></section>`;
-  }
   function renderInventory(payload, view = state.inventoryView) {
     state.inventory = payload;
     state.inventoryView = view;
@@ -942,8 +937,8 @@
     const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
     const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
     const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
-    const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}${inventoryNotes(payload)}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
-    const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}${inventoryNotes(payload)}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}${inventoryNotes(payload)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">SKU 明细 <small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}${inventoryNotes(payload)}` : overview;
+    const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
+    const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">SKU 明细 <small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}` : overview;
     $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
     $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
       state.inventoryWarehouse = event.currentTarget.value;
@@ -1353,7 +1348,7 @@
   function activatePage(name) {
     state.page = name;
     $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
-    $$(".nav-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
+    $$(".nav-tab, .topbar-action").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
     history.replaceState(null, "", `#${name}`);
     if (name === "collection" && state.currentUser) refreshCollectionStatus();
     else stopCollectionStatusRefresh();
@@ -1362,11 +1357,7 @@
     buildPlaceholders();
     const desired = location.hash.slice(1);
     activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-    $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
-    $("#logout-button").addEventListener("click", async () => {
-      await fetch("/api/logout", { method: "POST" });
-      showLogin();
-    });
+    $$(".nav-tab, .topbar-action").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
     $("#inventory-content").addEventListener("click", (event) => {
       const th = event.target.closest("[data-sort-key]");
       if (!th) return;

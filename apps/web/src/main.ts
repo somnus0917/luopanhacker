@@ -20,7 +20,7 @@ function buildPlaceholders() {
 function activatePage(name) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
-  $$(".nav-tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
+  $$(".nav-tab, .topbar-action").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
   history.replaceState(null, "", `#${name}`);
   if (name === "collection" && state.currentUser) refreshCollectionStatus();
   else stopCollectionStatusRefresh();
@@ -30,8 +30,7 @@ async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
   activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-  $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
-  $("#logout-button").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); showLogin(); });
+  $$(".nav-tab, .topbar-action").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
   $("#inventory-content").addEventListener("click", (event) => {
     const th = event.target.closest("[data-sort-key]");
     if (!th) return;

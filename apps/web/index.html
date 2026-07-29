@@ -24,15 +24,16 @@
     <div id="app-shell" class="app-shell hidden">
       <header class="topbar">
         <a class="brand" href="#operations" aria-label="数据中心首页"><span class="brand-mark">◈</span><span>数据中心</span></a>
-        <div class="account"><span id="account-name"></span><button id="logout-button" class="text-button" type="button">退出</button></div>
+        <div class="topbar-actions" aria-label="工具与账户">
+          <button class="topbar-action" data-page="collection" type="button">⟳ <span>采集中心</span></button>
+          <button class="topbar-action" data-page="account" type="button">👤 <span>账户设置</span></button>
+        </div>
       </header>
 
       <nav class="nav-tabs" aria-label="数据看板导航">
         <button class="nav-tab" data-page="inventory" type="button">📦 <span>库存看板</span></button>
         <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
         <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
-        <button class="nav-tab" data-page="collection" type="button">⟳ <span>采集中心</span></button>
-        <button class="nav-tab" data-page="account" type="button">👤 <span>账户设置</span></button>
       </nav>
 
       <main>

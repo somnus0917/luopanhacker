@@ -479,10 +479,6 @@ function platformMatrixMarkup(records, channelRecords) {
   return `<section class="panel"><div class="panel-head"><div><h3>店铺矩阵</h3><span>平台 → 店铺的经营范围</span></div></div>${simpleTable(["平台", "店铺数", "已接入店铺"], rows, "当前范围没有店铺")}</section>`;
 }
 
-function operationSourceNote() {
-  return `<section class="panel operations-note"><h3>数据口径</h3><p>销售使用罗盘日维度数据和已导入订单汇总；流量融合罗盘经营指标，以及抖音“看流量、看商品、看搜索”的渠道快照；投放只展示已采集的投放消耗和广告曝光。</p><p>外部订单只保存日期、店铺和汇总指标，不保存订单号、买家、地址或原始文件。不同平台尚未接入的指标统一显示“—”。</p><p>当前数据维度为日期与店铺；源数据尚未提供稳定品牌字段，因此不做推测性品牌归因。</p></section>`;
-}
-
 function overviewSectionMarkup(records, channelRecords) {
   const totals = aggregate(records);
   const organic = channelGroup(channelRecords, "organic_search");
@@ -507,7 +503,7 @@ function overviewSectionMarkup(records, channelRecords) {
     ["自然搜索曝光", wholeOrDash(organic.value), deltaNote(number(organic.value), number(prevOrganic.value), whole), deltaTrend(number(organic.value), number(prevOrganic.value))],
     ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"],
   ];
-  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}</div></div>` : `${platformMatrixMarkup(records, channelRecords)}${operationSourceNote()}`;
+  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}</div></div>` : platformMatrixMarkup(records, channelRecords);
   return `${metricCards(metrics)}${charts}`;
 }
 
@@ -560,8 +556,7 @@ function adsSectionMarkup(records, channelRecords) {
     ["投放 ROI", operatingRatio(adSpend ? ads.pay / adSpend : null), adSpend ? `${[...ads.platforms].join("、")}支付金额 ÷ 投放金额` : "暂无可计算的投放金额"],
     ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"],
   ];
-  const note = `<section class="panel operations-note"><h3>投放边界</h3><p>“广告曝光”来自抖音渠道流量来源；“投放金额”来自罗盘的“投放消耗（店铺被投）”。两者能够进入同一板块，但不是同一接口的完整广告报表。</p><p>当前没有稳定的广告点击、点击率字段，因此明确显示为“—”；经营页的商品点击不会替代广告点击。</p></section>`;
-  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}${note}</div></div>` : note;
+  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
   return `${metricCards(metrics)}${charts}`;
 }
 
