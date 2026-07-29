@@ -1,4 +1,5 @@
 import { $, $$ } from "../dom";
+import { showToast } from "../feedback";
 import { escapeHtml, number, whole } from "../format";
 import {
   backfillDateAllowed, COLLECTION_SHOPS, currentLocalMonthStart, isAdmin,
@@ -129,6 +130,7 @@ async function startCollection() {
   const modules = [...state.collectionModules];
   if (!modules.length) {
     state.collectionMessage = "请至少选择一个采集模块。";
+    showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
     return;
   }
@@ -137,6 +139,7 @@ async function startCollection() {
   const response = await fetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
   const payload = await response.json().catch(() => ({}));
   state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
+  showToast(state.collectionMessage, response.ok ? "success" : "error");
   if (payload.status) renderCollectionCenter(payload.status);
   window.setTimeout(refreshCollectionStatus, 700);
 }
@@ -147,6 +150,7 @@ async function startHistoricalCollection() {
   const shops = COLLECTION_SHOPS.filter((shop) => state.collectionBackfillShops.has(shop));
   if (!backfillDateAllowed(date) || !shops.length) {
     state.collectionMessage = "请选择本月 1 日至昨天之间的日期，并至少选择一家店铺。";
+    showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
     return;
   }
@@ -159,6 +163,7 @@ async function startHistoricalCollection() {
   });
   const payload = await response.json().catch(() => ({}));
   state.collectionMessage = payload.message || payload.error || (response.ok ? `已提交 ${date} 补采` : "补采提交失败");
+  showToast(state.collectionMessage, response.ok ? "success" : "error");
   if (payload.status) renderCollectionCenter(payload.status);
   window.setTimeout(refreshCollectionStatus, 700);
 }

@@ -35,6 +35,18 @@
   const backfillDateAllowed = (value) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
   const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
   const isAdmin = () => state.currentUser?.role === "admin";
+  let toastTimer;
+  function showToast(message, tone = "info") {
+    const region = $("#toast-region");
+    if (!region || !message) return;
+    window.clearTimeout(toastTimer);
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${tone}`;
+    toast.setAttribute("role", tone === "error" ? "alert" : "status");
+    toast.textContent = message;
+    region.replaceChildren(toast);
+    toastTimer = window.setTimeout(() => region.replaceChildren(), tone === "error" ? 5200 : 3600);
+  }
   function renderAccount() {
     const target = $("#account-content");
     if (!target || !state.currentUser) return;
@@ -71,6 +83,7 @@
     const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
     const payload = await response.json().catch(() => ({}));
     state.accountMessage = response.ok ? payload.message || "密码已更新。" : payload.error || "密码更新失败。";
+    showToast(state.accountMessage, response.ok ? "success" : "error");
     if (response.ok) form.reset();
     renderAccount();
   }
@@ -80,6 +93,7 @@
     const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
     const payload = await response.json().catch(() => ({}));
     state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : payload.error || "新增用户失败。";
+    showToast(state.accountMessage, response.ok ? "success" : "error");
     if (response.ok) form.reset();
     await loadUsers();
   }
@@ -88,6 +102,7 @@
     const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
     const payload = await response.json().catch(() => ({}));
     state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : payload.error || "删除用户失败。";
+    showToast(state.accountMessage, response.ok ? "success" : "error");
     await loadUsers();
   }
   function showLogin() {
@@ -106,6 +121,19 @@
     if (isAdmin()) loadUsers();
   }
   const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b", "#e84d8a", "#2cced2", "#8b9dc3"];
+  const METRIC_SEMANTICS = {
+    income_amt: { label: "增长指标", color: "#c5f36b" },
+    pay_amt: { label: "增长指标", color: "#c5f36b" },
+    pay_cnt: { label: "经营量", color: "#b8d8ff" },
+    product_show_ucnt: { label: "流量指标", color: "#b8d8ff" },
+    organic_search: { label: "自然流量", color: "#b8d8ff" },
+    recommendation: { label: "推荐流量", color: "#d4c3ff" },
+    ad_cost_amt: { label: "成本指标", color: "#f1bf77" },
+    ad_roi: { label: "效率指标", color: "#c5f36b" }
+  };
+  function metricSemantic(metricKey) {
+    return METRIC_SEMANTICS[metricKey] || { label: "经营指标", color: "#b8d8ff" };
+  }
   function seriesColor(key) {
     let hash = 0;
     for (let i = 0; i < key.length; i++) hash = hash * 31 + key.charCodeAt(i) >>> 0;
@@ -136,6 +164,7 @@
     return { date: latest, records: records.filter((item) => item.date === latest) };
   }
   function lineChart(records, metricKey, title) {
+    const semantic = metricSemantic(metricKey);
     const dates = [...new Set(records.map((item) => item.date))].sort();
     const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
     const values = shops.map((shop) => dates.map((date) => {
@@ -170,7 +199,7 @@
     const xAxis = chartDateTicks(dates).map(({ date, index }) => `<span style="left:${(point(0, index)[0] / width * 100).toFixed(3)}%">${date.slice(5)}</span>`).join("");
     const series = shops.map((shop, index) => `<path class="chart-line" stroke="${seriesColor(shop)}" d="${path(values[index])}"/>`).join("");
     const legend = shops.map((shop) => `<span><i style="background:${seriesColor(shop)}"></i>${escapeHtml(shop)}</span>`).join("");
-    return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+    return `<section class="panel chart-panel" style="--chart-accent:${semantic.color}"><div class="panel-head"><div><h3>${title}</h3></div><span class="chart-semantic">${semantic.label}</span></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
   }
   function bindLineChartHover(records) {
     $$(".chart[data-metric]").forEach((chart) => {
@@ -211,11 +240,12 @@
     });
   }
   function barPanel(records, metricKey, title) {
+    const semantic = metricSemantic(metricKey);
     const { date, records: latest } = latestRecords(records);
     const items = latest.map((item) => ({ name: item.shop_name, value: number(item.metrics?.[metricKey]) })).sort((a, b) => b.value - a.value);
     const max = Math.max(...items.map((item) => item.value), 1);
     const bars = items.map((item) => `<div class="bar-row"><span class="bar-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3, item.value / max * 100)}%"></div></div><span class="bar-value">${metricText(metricKey, item.value)}</span></div>`).join("");
-    return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>${date || "—"} · 最新日</span></div></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
+    return `<section class="panel metric-panel" style="--chart-accent:${semantic.color}"><div class="panel-head"><div><h3>${title}</h3><span>${date || "—"} · 最新日</span></div><span class="chart-semantic">${semantic.label}</span></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
   }
   function recordSourceLabel(item) {
     return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
@@ -285,6 +315,25 @@
     const selected = [...operationFilterSet(kind)];
     return selected.length === 1 ? selected[0] : "";
   }
+  function operationScopeTags() {
+    const describe = (kind, allLabel, oneLabel) => {
+      const items = operationFilterItems(kind);
+      const selected = operationFilterSet(kind);
+      if (selected.size === items.length) return allLabel;
+      if (selected.size === 1) return `${oneLabel}：${[...selected][0]}`;
+      return `${oneLabel}：${selected.size} 项`;
+    };
+    return [operationDateLabel(), describe("platform", "全部平台", "平台"), describe("shop", "全部店铺", "店铺")];
+  }
+  function resetOperationFilters() {
+    ["date", "platform", "shop", "source"].forEach((kind) => {
+      const selected = operationFilterSet(kind);
+      selected.clear();
+      operationFilterItems(kind).forEach((item) => selected.add(item));
+    });
+    state.operationCalendarRangeStart = "";
+    state.operationCalendarOpen = false;
+  }
   function applySingleOperationFilter(kind, value) {
     const selected = operationFilterSet(kind);
     selected.clear();
@@ -297,14 +346,10 @@
     operationFilterItems("shop").forEach((item) => state.operationShops.add(item));
   }
   function operationsFiltersMarkup() {
-    const dates = operationFilterItems("date");
-    const platforms = operationFilterItems("platform");
-    const shops = operationFilterItems("shop");
     const sources = operationFilterItems("source");
     const openAttr = (kind) => state.operationFilterOpen.has(kind) ? " open" : "";
     const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
-    const buildDropdown = (title, items, selected, kind) => `<details class="filter-disclosure filter-dropdown" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="dropdown-panel"><div class="dropdown-actions"><button type="button" class="dropdown-action" data-operation-select-all="${kind}">全选</button><button type="button" class="dropdown-action" data-operation-clear="${kind}">仅保留一个</button></div><div class="dropdown-list">${items.map((item) => `<label class="dropdown-option"><input type="checkbox" data-operation-filter="${kind}" data-value="${escapeHtml(item)}" ${selected.has(item) ? "checked" : ""}><span>${escapeHtml(item)}</span></label>`).join("")}</div></div></details>`;
-    return `<div class="filter-accordion">${buildGroup("业务日期", dates, state.operationDates, "date")}${buildGroup("平台", platforms, state.operationPlatforms, "platform")}${buildDropdown("店铺", shops, state.operationShops, "shop")}${buildGroup("数据来源", sources, state.operationSources, "source")}</div>`;
+    return `<div class="filter-accordion filter-accordion-compact">${buildGroup("数据来源", sources, state.operationSources, "source")}</div>`;
   }
   function bindOperationsFilterEvents() {
     $$("[data-operation-filter]").forEach((control) => control.addEventListener(control.type === "checkbox" ? "change" : "click", () => {
@@ -389,6 +434,7 @@
       state.orderPreview = payload;
       state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
     }
+    showToast(state.orderImportMessage, response.ok ? "success" : "error");
     renderOrderImportPanel();
   }
   async function commitOrderImport() {
@@ -397,11 +443,13 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       state.orderImportMessage = payload.error || "写入失败，请重新预览。";
+      showToast(state.orderImportMessage, "error");
       renderOrderImportPanel();
       return;
     }
     state.orderPreview = null;
     state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
+    showToast(state.orderImportMessage, "success");
     await Promise.all([loadCompass(), loadOrderImports()]);
   }
   async function deleteOrderImport(batchId) {
@@ -409,6 +457,7 @@
     const response = await fetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
     const payload = await response.json().catch(() => ({}));
     state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : payload.error || "撤销失败，请稍后重试。";
+    showToast(state.orderImportMessage, response.ok ? "success" : "error");
     await Promise.all([loadCompass(), loadOrderImports()]);
   }
   function operatingRatio(value) {
@@ -490,7 +539,8 @@
     state.tablePlatform = operationSingleFilterValue("platform");
     state.tableShop = operationSingleFilterValue("shop");
     const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-    return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong><span>销售、流量和投放共用同一组筛选条件</span></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+    const tags = operationScopeTags().map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+    return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-operation-filters>重置</button></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
   }
   function bindDetailTableFilters() {
     $$("[data-table-filter]").forEach((select) => select.addEventListener("change", () => {
@@ -500,6 +550,10 @@
       applySingleOperationFilter(kind, select.value);
       renderOperations();
     }));
+    $("[data-reset-operation-filters]")?.addEventListener("click", () => {
+      resetOperationFilters();
+      renderOperations();
+    });
     const picker = $(".date-range-picker");
     picker?.addEventListener("toggle", () => {
       state.operationCalendarOpen = picker.open;
@@ -561,7 +615,7 @@
   }
   function simpleTable(headers, rows, empty = "暂无数据") {
     const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
-    return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+    return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
   function channelTrendRecords(records) {
     return records.map((record) => ({
@@ -611,7 +665,11 @@
     return `<section class="section-context"><span>抖音渠道下钻</span><small>${whole(records.length)} 条店铺日数据 · 搜索口径：${escapeHtml(periods.join("、") || "暂无")}</small></section>${cardHtml}${charts}${details}`;
   }
   function metricCards(metrics, columns = "six") {
-    return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta ${trend === "up" ? "positive" : trend === "down" ? "negative" : ""}">${note}</div></article>`).join("")}</div>`;
+    return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => {
+      const status = trend === "up" ? "positive" : trend === "down" ? "negative" : "";
+      const statusText = trend === "up" ? "环比上升" : trend === "down" ? "环比下降" : "";
+      return `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">${statusText}</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status}">${note}</div></article>`;
+    }).join("")}</div>`;
   }
   function attributedAdMetrics(records) {
     const platforms = new Set(records.filter((record) => number(record.metrics?.ad_cost_amt) > 0).map(recordPlatform));
@@ -747,14 +805,12 @@
     const target = $("#operations-content");
     const detailFiltersTarget = $("#detail-filters");
     const allDates = [.../* @__PURE__ */ new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
-    const allShops = /* @__PURE__ */ new Set([...records.map((item) => item.shop_name), ...channelRecords.map((item) => item.shop_name)]);
-    const allPlatforms = /* @__PURE__ */ new Set([...records.map(recordPlatform), ...channelRecords.length ? ["抖音"] : []]);
     if (detailFiltersTarget) {
       detailFiltersTarget.innerHTML = detailTableFilters();
       bindDetailTableFilters();
     }
     renderOrderImportPanel();
-    $("#operations-summary").textContent = `最新业务日期：${allDates.at(-1) || "—"} · ${allPlatforms.size} 个平台 · ${allShops.size} 家店铺 · ${allDates.length} 个业务日`;
+    $("#operations-freshness").textContent = allDates.length ? `数据覆盖至 ${allDates.at(-1)}` : "暂无数据";
     let content = "";
     if (!records.length && !channelRecords.length) {
       content = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请调整日期、平台、店铺或数据来源。</span></div>`;
@@ -767,7 +823,7 @@
     } else {
       content = overviewSectionMarkup(records, channelRecords);
     }
-    target.innerHTML = `${operationTabsMarkup()}${content}<details class="advanced-filter"><summary>高级筛选</summary><p>可同时选择多个日期、平台、店铺和数据来源。</p>${operationsFiltersMarkup()}</details>`;
+    target.innerHTML = `${operationTabsMarkup()}${content}<details class="advanced-filter"><summary>高级筛选</summary><p>日期、平台和店铺在上方筛选；这里可进一步按数据来源缩小范围。</p>${operationsFiltersMarkup()}</details>`;
     $$("[data-operation-section]").forEach((button) => button.addEventListener("click", () => {
       state.operationSection = button.dataset.operationSection;
       renderOperations();
@@ -792,7 +848,7 @@
       const cells = content ? [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(source.live), moneyOrDash(source.product_card), moneyOrDash(source.artc_video), moneyOrDash(source.video), moneyOrDash(source.other_content)] : [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(metrics.income_amt), moneyOrDash(metrics.pay_amt), moneyOrDash(metrics.settlement_amt_pay_time), wholeOrDash(metrics.pay_cnt), wholeOrDash(metrics.pay_ucnt), moneyOrDash(metrics.per_usr_pay_amt), wholeOrDash(metrics.product_show_ucnt), wholeOrDash(metrics.product_click_ucnt), ratioOrDash(metrics.product_click_pay_ucnt_ratio), ratioOrDash(metrics.refund_amt_rate)];
       return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
     }).join("");
-    return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
+    return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
   }
   async function loadCompass() {
     const response = await fetch("/api/compass");
@@ -911,7 +967,8 @@
     const brands = inventoryBrandOptions(payload);
     const warehouseOptions = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
     const brandOptions = `<option value="">全部品牌</option>${brands.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryBrand === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-    return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong><span>筛选总览、补货、积压与 单品维度</span></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
+    const tags = [state.inventoryWarehouse ? `仓库：${state.inventoryWarehouse}` : "全部仓库", state.inventoryBrand ? `品牌：${state.inventoryBrand}` : "全部品牌"].map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+    return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-inventory-filters>重置</button></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
   }
   function inventoryBarPanel(items, title, key, formatter = whole) {
     const top = [...items].sort((a, b) => number(b[key]) - number(a[key])).slice(0, 10);
@@ -938,7 +995,7 @@
     }).join("");
     const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
     const headerCells = columnConfigs.map((col) => `<th ${col.key ? `data-sort-key="${col.key}"` : ""} class="${state.inventorySortKey === col.key ? "sorted-" + state.inventorySortDir : ""}">${col.label}</th>`).join("");
-    return `${notice}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
+    return `${notice}<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
   }
   function healthDistribution(items) {
     const max = Math.max(...items.map((item) => number(item.sku_records)), 1);
@@ -962,21 +1019,17 @@
     const warehouses = inventoryGroup(rows, "warehouse_name");
     const health = inventoryHealth(rows);
     const salesTrend = inventorySalesTrend(payload);
-    const scopeLabel = [
-      state.inventoryWarehouse ? `仓库：${state.inventoryWarehouse}` : "全部仓库",
-      state.inventoryBrand ? `品牌：${state.inventoryBrand}` : "全部品牌"
-    ].join(" · ");
-    $("#inventory-summary").textContent = `快照时间：${payload.captured_at || "—"} · 当前范围：${scopeLabel} · 页面只读取服务器本地库存快照`;
+    $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
     const metrics = [
       ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
       ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
       ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
       ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
-      ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货"],
-      ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录"],
-      ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库"]
+      ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货", "attention"],
+      ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录", "attention"],
+      ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"]
     ];
-    const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+    const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
     const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
     const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
     const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
@@ -988,6 +1041,11 @@
     });
     $('[data-inventory-filter="brand"]')?.addEventListener("change", (event) => {
       state.inventoryBrand = event.currentTarget.value;
+      renderInventory(payload);
+    });
+    $("[data-reset-inventory-filters]")?.addEventListener("click", () => {
+      state.inventoryWarehouse = "";
+      state.inventoryBrand = "";
       renderInventory(payload);
     });
     $$("[data-inventory-view]").forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView)));
@@ -1006,7 +1064,7 @@
   }
   function settlementGroupTable(title, groups) {
     const rows = [...groups || []].sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount)).map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`).join("");
-    return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
+    return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
   }
   function settlementDates(payload = state.settlement) {
     return [...new Set(payload?.available_dates || state.settlementAvailableDates || [])].filter(Boolean).sort((a, b) => b.localeCompare(a));
@@ -1065,7 +1123,8 @@
     const shops = payload.shops || [];
     const selected = payload.selected_shop || state.settlementShop || "";
     const options = `<option value="">全部店铺</option>${shops.map((name) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-    return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong><span>指标、分组汇总和明细共用同一组筛选条件</span></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
+    const tags = [settlementDateLabel(), selected ? `店铺：${selected}` : "全部店铺"].map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+    return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-settlement-filters>重置</button></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
   }
   function positionSettlementCalendar() {
     const filters = $("#settlement-filters");
@@ -1087,6 +1146,14 @@
     $('[data-settlement-filter="shop"]', target)?.addEventListener("change", (event) => {
       state.settlementShop = event.currentTarget.value;
       state.settlementCalendarCursor = "";
+      state.settlementCalendarRangeStart = "";
+      state.settlementCalendarOpen = false;
+      loadSettlement();
+    });
+    $("[data-reset-settlement-filters]", target)?.addEventListener("click", () => {
+      state.settlementShop = "";
+      state.settlementStartDate = "";
+      state.settlementEndDate = "";
       state.settlementCalendarRangeStart = "";
       state.settlementCalendarOpen = false;
       loadSettlement();
@@ -1156,7 +1223,7 @@
       ];
       return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
     }).join("");
-    return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
+    return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
   }
   function renderSettlement(payload) {
     state.settlement = payload;
@@ -1170,6 +1237,7 @@
     renderSettlementFilters(payload);
     const summary = payload.summary || {};
     const fileNames = (payload.files || []).map((file) => file.name).filter(Boolean);
+    $("#settlement-freshness").textContent = state.settlementAvailableDates.length ? `结算至 ${state.settlementAvailableDates[0]}` : "暂无数据";
     const governmentSubsidy = number(summary.government_merchant) + number(summary.government_platform);
     const metrics = [
       ["结算净额", settlementMoney(summary.settlement_amount), `明细行：${whole(summary.row_count)}`],
@@ -1194,6 +1262,7 @@
     const shopName = String(data.get("shop_name") || "").trim();
     if (!(uploadFile instanceof File) || !shopName) {
       state.settlementUploadMessage = "请选择结算 CSV 并填写店铺名称。";
+      showToast(state.settlementUploadMessage, "error");
       if (state.settlement) renderSettlement(state.settlement);
       return;
     }
@@ -1209,12 +1278,14 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
       state.settlementUploadMessage = response.status === 413 ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。" : payload.error || "结算 CSV 上传失败，请检查文件格式。";
+      showToast(state.settlementUploadMessage, "error");
       if (state.settlement) renderSettlement(state.settlement);
       return;
     }
     const uploaded = payload.upload?.file || {};
     state.settlementShop = uploaded.shop_name || state.settlementShop;
     state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
+    showToast(state.settlementUploadMessage, "success");
     await loadSettlement();
   }
   async function loadSettlement() {
@@ -1347,6 +1418,7 @@
     const modules = [...state.collectionModules];
     if (!modules.length) {
       state.collectionMessage = "请至少选择一个采集模块。";
+      showToast(state.collectionMessage, "error");
       renderCollectionCenter(state.status || {});
       return;
     }
@@ -1355,6 +1427,7 @@
     const response = await fetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
     const payload = await response.json().catch(() => ({}));
     state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
+    showToast(state.collectionMessage, response.ok ? "success" : "error");
     if (payload.status) renderCollectionCenter(payload.status);
     window.setTimeout(refreshCollectionStatus, 700);
   }
@@ -1364,6 +1437,7 @@
     const shops = COLLECTION_SHOPS.filter((shop) => state.collectionBackfillShops.has(shop));
     if (!backfillDateAllowed(date) || !shops.length) {
       state.collectionMessage = "请选择本月 1 日至昨天之间的日期，并至少选择一家店铺。";
+      showToast(state.collectionMessage, "error");
       renderCollectionCenter(state.status || {});
       return;
     }
@@ -1376,6 +1450,7 @@
     });
     const payload = await response.json().catch(() => ({}));
     state.collectionMessage = payload.message || payload.error || (response.ok ? `已提交 ${date} 补采` : "补采提交失败");
+    showToast(state.collectionMessage, response.ok ? "success" : "error");
     if (payload.status) renderCollectionCenter(payload.status);
     window.setTimeout(refreshCollectionStatus, 700);
   }
@@ -1390,16 +1465,38 @@
   function activatePage(name) {
     state.page = name;
     $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
-    $$(".nav-tab, .topbar-action").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
+    $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => {
+      const active = tab.dataset.page === name;
+      tab.classList.toggle("active", active);
+      if (tab.dataset.page) tab.setAttribute("aria-current", active ? "page" : "false");
+    });
+    $("#filter-quick-action")?.classList.toggle("hidden", !["inventory", "operations", "settlement"].includes(name));
     history.replaceState(null, "", `#${name}`);
     if (name === "collection" && state.currentUser) refreshCollectionStatus();
     else stopCollectionStatusRefresh();
+  }
+  function setTableDensity(density) {
+    const compact = density === "compact";
+    document.body.dataset.tableDensity = compact ? "compact" : "comfortable";
+    const toggle = $("#table-density-toggle");
+    toggle?.setAttribute("aria-pressed", String(compact));
+    const label = $("span", toggle);
+    if (label) label.textContent = compact ? "表格：紧凑" : "表格：舒适";
+    localStorage.setItem("luopan-table-density", compact ? "compact" : "comfortable");
   }
   async function initialise() {
     buildPlaceholders();
     const desired = location.hash.slice(1);
     activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-    $$(".nav-tab, .topbar-action").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+    $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+    setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
+    $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));
+    $("#filter-quick-action")?.addEventListener("click", () => {
+      const panel = $(".dashboard-page.active .table-filter-panel");
+      if (!panel) return;
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      window.setTimeout(() => $("select, summary, button", panel)?.focus(), 280);
+    });
     $("#inventory-content").addEventListener("click", (event) => {
       const th = event.target.closest("[data-sort-key]");
       if (!th) return;

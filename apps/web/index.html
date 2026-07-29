@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#090b16" />
+    <meta name="theme-color" content="#11120f" />
     <title>数据中心</title>
     <link rel="stylesheet" href="/assets/style.css" />
   </head>
@@ -25,32 +25,33 @@
       <header class="topbar">
         <a class="brand" href="#operations" aria-label="数据中心首页"><span class="brand-mark">◈</span><span>数据中心</span></a>
         <div class="topbar-actions" aria-label="工具与账户">
-          <button class="topbar-action" data-page="collection" type="button">⟳ <span>采集中心</span></button>
-          <button class="topbar-action" data-page="account" type="button">👤 <span>账户设置</span></button>
+          <button id="table-density-toggle" class="topbar-action" type="button" aria-pressed="false" aria-label="切换表格密度"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg><span>表格：舒适</span></button>
+          <button class="topbar-action" data-page="collection" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0 2 5.3"/><path d="M20 4v7h-7"/></svg><span>采集中心</span></button>
+          <button class="topbar-action" data-page="account" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.25"/><path d="M5 20c.7-3.35 3.1-5 7-5s6.3 1.65 7 5"/></svg><span>账户设置</span></button>
         </div>
       </header>
 
       <nav class="nav-tabs" aria-label="数据看板导航">
-        <button class="nav-tab" data-page="inventory" type="button">📦 <span>库存看板</span></button>
-        <button class="nav-tab" data-page="operations" type="button">💰 <span>经营看板</span></button>
-        <button class="nav-tab" data-page="settlement" type="button">🧾 <span>结算看板</span></button>
+        <button class="nav-tab" data-page="inventory" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="M4 7v10l8 4 8-4V7"/><path d="M12 11v10"/></svg><span>库存看板</span></button>
+        <button class="nav-tab" data-page="operations" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/></svg><span>经营看板</span></button>
+        <button class="nav-tab" data-page="settlement" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg><span>结算看板</span></button>
       </nav>
 
       <main>
         <section class="dashboard-page" id="page-inventory" data-page="inventory">
-          <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><h2>库存看板</h2><p id="inventory-summary">正在读取本地库存快照。</p></div>
+          <div class="page-heading"><p class="eyebrow">INVENTORY HEALTH</p><div class="page-heading-title"><h2>库存看板</h2><span id="inventory-freshness" class="data-freshness">正在读取</span></div></div>
           <div id="inventory-content"><div class="empty-panel"><strong>正在读取库存快照</strong><span>页面只从服务器本地快照读取，不会在浏览器中调用旺店通。</span></div></div>
         </section>
 
         <section class="dashboard-page" id="page-operations" data-page="operations">
-          <div class="page-heading"><p class="eyebrow">OMNICHANNEL OPERATIONS</p><h2>经营看板</h2><p id="operations-summary">正在融合销售、流量与投放数据。</p></div>
+          <div class="page-heading"><p class="eyebrow">OMNICHANNEL OPERATIONS</p><div class="page-heading-title"><h2>经营看板</h2><span id="operations-freshness" class="data-freshness">正在读取</span></div></div>
           <div id="detail-filters" class="table-filter-container"></div>
           <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将读取罗盘日维度数据与已导入的订单明细汇总。</span></div></div>
           <div id="order-import-panel"></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">
-          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><h2>结算看板</h2><p>按月核对品牌结算、返利、国补及平台补贴。</p></div>
+          <div class="page-heading"><p class="eyebrow">DATA BOARD</p><div class="page-heading-title"><h2>结算看板</h2><span id="settlement-freshness" class="data-freshness">正在读取</span></div></div>
           <div id="settlement-filters" class="table-filter-container"></div>
           <div id="settlement-summary-cards" class="metric-grid six" data-placeholder="结算净额|收入合计|支出合计|订单数|平台补贴|政府补贴"></div>
           <div id="settlement-content"><div class="empty-panel"><strong>正在读取结算数据</strong><span>将读取服务器 output/settlement 目录下的抖音结算 CSV。</span></div></div>
@@ -67,6 +68,8 @@
         </section>
       </main>
     </div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <button id="filter-quick-action" class="filter-quick-action hidden" type="button" aria-label="打开当前页面的筛选条件"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4"/></svg><span>筛选</span></button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,4 +1,5 @@
 import { $, $$ } from "../dom";
+import { showToast } from "../feedback";
 import {
   escapeHtml, number, settlementMoney, settlementMoneyOrDash, whole,
 } from "../format";
@@ -10,7 +11,7 @@ function settlementGroupTable(title, groups) {
     .sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount))
     .map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`)
     .join("");
-  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
+  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
 }
 
 function settlementDates(payload = state.settlement) {
@@ -81,7 +82,9 @@ function settlementFiltersMarkup(payload) {
   const shops = payload.shops || [];
   const selected = payload.selected_shop || state.settlementShop || "";
   const options = `<option value="">全部店铺</option>${shops.map((name) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
+  const tags = [settlementDateLabel(), selected ? `店铺：${selected}` : "全部店铺"]
+    .map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+  return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-settlement-filters>重置</button></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
 }
 
 function positionSettlementCalendar() {
@@ -105,6 +108,14 @@ function renderSettlementFilters(payload) {
   $('[data-settlement-filter="shop"]', target)?.addEventListener("change", (event) => {
     state.settlementShop = event.currentTarget.value;
     state.settlementCalendarCursor = "";
+    state.settlementCalendarRangeStart = "";
+    state.settlementCalendarOpen = false;
+    loadSettlement();
+  });
+  $("[data-reset-settlement-filters]", target)?.addEventListener("click", () => {
+    state.settlementShop = "";
+    state.settlementStartDate = "";
+    state.settlementEndDate = "";
     state.settlementCalendarRangeStart = "";
     state.settlementCalendarOpen = false;
     loadSettlement();
@@ -176,7 +187,7 @@ function settlementDetailTable(rows) {
     ];
     return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
-  return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
+  return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
 }
 
 export function renderSettlement(payload) {
@@ -191,6 +202,7 @@ export function renderSettlement(payload) {
   renderSettlementFilters(payload);
   const summary = payload.summary || {};
   const fileNames = (payload.files || []).map((file) => file.name).filter(Boolean);
+  $("#settlement-freshness").textContent = state.settlementAvailableDates.length ? `结算至 ${state.settlementAvailableDates[0]}` : "暂无数据";
   const governmentSubsidy = number(summary.government_merchant) + number(summary.government_platform);
   const metrics = [
     ["结算净额", settlementMoney(summary.settlement_amount), `明细行：${whole(summary.row_count)}`],
@@ -220,6 +232,7 @@ async function uploadSettlement(event) {
   const shopName = String(data.get("shop_name") || "").trim();
   if (!(uploadFile instanceof File) || !shopName) {
     state.settlementUploadMessage = "请选择结算 CSV 并填写店铺名称。";
+    showToast(state.settlementUploadMessage, "error");
     if (state.settlement) renderSettlement(state.settlement);
     return;
   }
@@ -237,12 +250,14 @@ async function uploadSettlement(event) {
     state.settlementUploadMessage = response.status === 413
       ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。"
       : payload.error || "结算 CSV 上传失败，请检查文件格式。";
+    showToast(state.settlementUploadMessage, "error");
     if (state.settlement) renderSettlement(state.settlement);
     return;
   }
   const uploaded = payload.upload?.file || {};
   state.settlementShop = uploaded.shop_name || state.settlementShop;
   state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
+  showToast(state.settlementUploadMessage, "success");
   await loadSettlement();
 }
 

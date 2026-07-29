@@ -117,7 +117,9 @@ function inventoryWarehouseFilter(payload) {
   const brands = inventoryBrandOptions(payload);
   const warehouseOptions = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
   const brandOptions = `<option value="">全部品牌</option>${brands.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryBrand === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-  return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
+  const tags = [state.inventoryWarehouse ? `仓库：${state.inventoryWarehouse}` : "全部仓库", state.inventoryBrand ? `品牌：${state.inventoryBrand}` : "全部品牌"]
+    .map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+  return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-inventory-filters>重置</button></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
 }
 
 function inventoryBarPanel(items, title, key, formatter = whole) {
@@ -149,7 +151,7 @@ function inventoryTable(rows, mode = "detail") {
   }).join("");
   const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
   const headerCells = columnConfigs.map((col) => `<th ${col.key ? `data-sort-key="${col.key}"` : ""} class="${state.inventorySortKey === col.key ? "sorted-" + state.inventorySortDir : ""}">${col.label}</th>`).join("");
-  return `${notice}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
+  return `${notice}<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
 }
 
 function healthDistribution(items) {
@@ -177,21 +179,17 @@ export function renderInventory(payload, view = state.inventoryView) {
   const warehouses = inventoryGroup(rows, "warehouse_name");
   const health = inventoryHealth(rows);
   const salesTrend = inventorySalesTrend(payload);
-  const scopeLabel = [
-    state.inventoryWarehouse ? `仓库：${state.inventoryWarehouse}` : "全部仓库",
-    state.inventoryBrand ? `品牌：${state.inventoryBrand}` : "全部品牌",
-  ].join(" · ");
-  $("#inventory-summary").textContent = `快照时间：${payload.captured_at || "—"} · 当前范围：${scopeLabel} · 页面只读取服务器本地库存快照`;
+  $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
   const metrics = [
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
     ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
     ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
-    ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货"],
-    ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录"],
-    ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库"],
+    ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货", "attention"],
+    ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录", "attention"],
+    ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"],
   ];
-  const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+  const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
   const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
   const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
@@ -209,6 +207,11 @@ export function renderInventory(payload, view = state.inventoryView) {
   });
   $('[data-inventory-filter="brand"]')?.addEventListener("change", (event) => {
     state.inventoryBrand = event.currentTarget.value;
+    renderInventory(payload);
+  });
+  $("[data-reset-inventory-filters]")?.addEventListener("click", () => {
+    state.inventoryWarehouse = "";
+    state.inventoryBrand = "";
     renderInventory(payload);
   });
   $$('[data-inventory-view]').forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView)));

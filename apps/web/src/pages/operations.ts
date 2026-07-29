@@ -1,4 +1,5 @@
 import { $, $$ } from "../dom";
+import { showToast } from "../feedback";
 import {
   escapeHtml, hasValue, importTime, metricText, money, moneyOrDash, number,
   ratio, ratioOrDash, whole, wholeOrDash,
@@ -87,6 +88,27 @@ function operationSingleFilterValue(kind) {
   return selected.length === 1 ? selected[0] : "";
 }
 
+function operationScopeTags() {
+  const describe = (kind, allLabel, oneLabel) => {
+    const items = operationFilterItems(kind);
+    const selected = operationFilterSet(kind);
+    if (selected.size === items.length) return allLabel;
+    if (selected.size === 1) return `${oneLabel}：${[...selected][0]}`;
+    return `${oneLabel}：${selected.size} 项`;
+  };
+  return [operationDateLabel(), describe("platform", "全部平台", "平台"), describe("shop", "全部店铺", "店铺")];
+}
+
+function resetOperationFilters() {
+  ["date", "platform", "shop", "source"].forEach((kind) => {
+    const selected = operationFilterSet(kind);
+    selected.clear();
+    operationFilterItems(kind).forEach((item) => selected.add(item));
+  });
+  state.operationCalendarRangeStart = "";
+  state.operationCalendarOpen = false;
+}
+
 function applySingleOperationFilter(kind, value) {
   const selected = operationFilterSet(kind);
   selected.clear();
@@ -101,14 +123,10 @@ function resetOperationShopsForPlatforms() {
 }
 
 function operationsFiltersMarkup() {
-  const dates = operationFilterItems("date");
-  const platforms = operationFilterItems("platform");
-  const shops = operationFilterItems("shop");
   const sources = operationFilterItems("source");
   const openAttr = (kind) => state.operationFilterOpen.has(kind) ? " open" : "";
   const buildGroup = (title, items, selected, kind) => `<details class="filter-disclosure" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="chip-list">${items.map((item) => `<button class="chip ${selected.has(item) ? "selected" : ""}" type="button" data-operation-filter="${kind}" data-value="${escapeHtml(item)}">${escapeHtml(item)}</button>`).join("")}</div></details>`;
-  const buildDropdown = (title, items, selected, kind) => `<details class="filter-disclosure filter-dropdown" data-filter-kind="${kind}"${openAttr(kind)}><summary><span>${title}</span><small>已选择 ${selected.size} 个</small></summary><div class="dropdown-panel"><div class="dropdown-actions"><button type="button" class="dropdown-action" data-operation-select-all="${kind}">全选</button><button type="button" class="dropdown-action" data-operation-clear="${kind}">仅保留一个</button></div><div class="dropdown-list">${items.map((item) => `<label class="dropdown-option"><input type="checkbox" data-operation-filter="${kind}" data-value="${escapeHtml(item)}" ${selected.has(item) ? "checked" : ""}><span>${escapeHtml(item)}</span></label>`).join("")}</div></div></details>`;
-  return `<div class="filter-accordion">${buildGroup("业务日期", dates, state.operationDates, "date")}${buildGroup("平台", platforms, state.operationPlatforms, "platform")}${buildDropdown("店铺", shops, state.operationShops, "shop")}${buildGroup("数据来源", sources, state.operationSources, "source")}</div>`;
+  return `<div class="filter-accordion filter-accordion-compact">${buildGroup("数据来源", sources, state.operationSources, "source")}</div>`;
 }
 
 function bindOperationsFilterEvents() {
@@ -189,6 +207,7 @@ async function previewOrderImport(event) {
     state.orderPreview = payload;
     state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
   }
+  showToast(state.orderImportMessage, response.ok ? "success" : "error");
   renderOrderImportPanel();
 }
 
@@ -198,11 +217,13 @@ async function commitOrderImport() {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     state.orderImportMessage = payload.error || "写入失败，请重新预览。";
+    showToast(state.orderImportMessage, "error");
     renderOrderImportPanel();
     return;
   }
   state.orderPreview = null;
   state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
+  showToast(state.orderImportMessage, "success");
   await Promise.all([loadCompass(), loadOrderImports()]);
 }
 
@@ -211,6 +232,7 @@ async function deleteOrderImport(batchId) {
   const response = await fetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
   const payload = await response.json().catch(() => ({}));
   state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : (payload.error || "撤销失败，请稍后重试。");
+  showToast(state.orderImportMessage, response.ok ? "success" : "error");
   await Promise.all([loadCompass(), loadOrderImports()]);
 }
 
@@ -302,7 +324,8 @@ function detailTableFilters() {
   state.tablePlatform = operationSingleFilterValue("platform");
   state.tableShop = operationSingleFilterValue("shop");
   const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+  const tags = operationScopeTags().map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
+  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-operation-filters>重置</button></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
 }
 
 function bindDetailTableFilters() {
@@ -313,6 +336,10 @@ function bindDetailTableFilters() {
     applySingleOperationFilter(kind, select.value);
     renderOperations();
   }));
+  $("[data-reset-operation-filters]")?.addEventListener("click", () => {
+    resetOperationFilters();
+    renderOperations();
+  });
   const picker = $(".date-range-picker");
   picker?.addEventListener("toggle", () => {
     state.operationCalendarOpen = picker.open;
@@ -377,7 +404,7 @@ function channelGroup(records, key) {
 
 function simpleTable(headers, rows, empty = "暂无数据") {
   const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
-  return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function channelTrendRecords(records) {
@@ -440,7 +467,11 @@ function channelInsightsMarkup(records) {
 }
 
 function metricCards(metrics, columns = "six") {
-  return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta ${trend === "up" ? "positive" : trend === "down" ? "negative" : ""}">${note}</div></article>`).join("")}</div>`;
+  return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => {
+    const status = trend === "up" ? "positive" : trend === "down" ? "negative" : "";
+    const statusText = trend === "up" ? "环比上升" : trend === "down" ? "环比下降" : "";
+    return `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">${statusText}</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status}">${note}</div></article>`;
+  }).join("")}</div>`;
 }
 
 function attributedAdMetrics(records) {
@@ -588,14 +619,12 @@ export function renderOperations() {
   const target = $("#operations-content");
   const detailFiltersTarget = $("#detail-filters");
   const allDates = [...new Set([...records.map((item) => item.date), ...channelRecords.map((item) => item.date)])].sort();
-  const allShops = new Set([...records.map((item) => item.shop_name), ...channelRecords.map((item) => item.shop_name)]);
-  const allPlatforms = new Set([...records.map(recordPlatform), ...(channelRecords.length ? ["抖音"] : [])]);
   if (detailFiltersTarget) {
     detailFiltersTarget.innerHTML = detailTableFilters();
     bindDetailTableFilters();
   }
   renderOrderImportPanel();
-  $("#operations-summary").textContent = `最新业务日期：${allDates.at(-1) || "—"} · ${allPlatforms.size} 个平台 · ${allShops.size} 家店铺 · ${allDates.length} 个业务日`;
+  $("#operations-freshness").textContent = allDates.length ? `数据覆盖至 ${allDates.at(-1)}` : "暂无数据";
   let content = "";
   if (!records.length && !channelRecords.length) {
     content = `<div class="empty-panel"><strong>当前筛选条件没有经营数据</strong><span>请调整日期、平台、店铺或数据来源。</span></div>`;
@@ -608,7 +637,7 @@ export function renderOperations() {
   } else {
     content = overviewSectionMarkup(records, channelRecords);
   }
-  target.innerHTML = `${operationTabsMarkup()}${content}<details class="advanced-filter"><summary>高级筛选</summary><p>可同时选择多个日期、平台、店铺和数据来源。</p>${operationsFiltersMarkup()}</details>`;
+  target.innerHTML = `${operationTabsMarkup()}${content}<details class="advanced-filter"><summary>高级筛选</summary><p>日期、平台和店铺在上方筛选；这里可进一步按数据来源缩小范围。</p>${operationsFiltersMarkup()}</details>`;
   $$('[data-operation-section]').forEach((button) => button.addEventListener("click", () => {
     state.operationSection = button.dataset.operationSection;
     renderOperations();
@@ -637,7 +666,7 @@ function renderTable(records, content = false) {
       : [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(metrics.income_amt), moneyOrDash(metrics.pay_amt), moneyOrDash(metrics.settlement_amt_pay_time), wholeOrDash(metrics.pay_cnt), wholeOrDash(metrics.pay_ucnt), moneyOrDash(metrics.per_usr_pay_amt), wholeOrDash(metrics.product_show_ucnt), wholeOrDash(metrics.product_click_ucnt), ratioOrDash(metrics.product_click_pay_ucnt_ratio), ratioOrDash(metrics.refund_amt_rate)];
     return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
-  return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
 }
 
 export async function loadCompass() {

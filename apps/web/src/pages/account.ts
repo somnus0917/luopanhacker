@@ -1,4 +1,5 @@
 import { $, $$ } from "../dom";
+import { showToast } from "../feedback";
 import { escapeHtml, importTime } from "../format";
 import { isAdmin, state } from "../state";
 
@@ -41,6 +42,7 @@ async function changePassword(event) {
   const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? (payload.message || "密码已更新。") : (payload.error || "密码更新失败。");
+  showToast(state.accountMessage, response.ok ? "success" : "error");
   if (response.ok) form.reset();
   renderAccount();
 }
@@ -51,6 +53,7 @@ async function createUser(event) {
   const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : (payload.error || "新增用户失败。");
+  showToast(state.accountMessage, response.ok ? "success" : "error");
   if (response.ok) form.reset();
   await loadUsers();
 }
@@ -60,6 +63,7 @@ async function deleteUser(username) {
   const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : (payload.error || "删除用户失败。");
+  showToast(state.accountMessage, response.ok ? "success" : "error");
   await loadUsers();
 }
 

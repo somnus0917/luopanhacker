@@ -20,17 +20,40 @@ function buildPlaceholders() {
 function activatePage(name) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
-  $$(".nav-tab, .topbar-action").forEach((tab) => tab.classList.toggle("active", tab.dataset.page === name));
+  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => {
+    const active = tab.dataset.page === name;
+    tab.classList.toggle("active", active);
+    if (tab.dataset.page) tab.setAttribute("aria-current", active ? "page" : "false");
+  });
+  $("#filter-quick-action")?.classList.toggle("hidden", !["inventory", "operations", "settlement"].includes(name));
   history.replaceState(null, "", `#${name}`);
   if (name === "collection" && state.currentUser) refreshCollectionStatus();
   else stopCollectionStatusRefresh();
+}
+
+function setTableDensity(density) {
+  const compact = density === "compact";
+  document.body.dataset.tableDensity = compact ? "compact" : "comfortable";
+  const toggle = $("#table-density-toggle");
+  toggle?.setAttribute("aria-pressed", String(compact));
+  const label = $("span", toggle);
+  if (label) label.textContent = compact ? "表格：紧凑" : "表格：舒适";
+  localStorage.setItem("luopan-table-density", compact ? "compact" : "comfortable");
 }
 
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
   activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-  $$(".nav-tab, .topbar-action").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+  setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
+  $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));
+  $("#filter-quick-action")?.addEventListener("click", () => {
+    const panel = $(".dashboard-page.active .table-filter-panel");
+    if (!panel) return;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => $("select, summary, button", panel)?.focus(), 280);
+  });
   $("#inventory-content").addEventListener("click", (event) => {
     const th = event.target.closest("[data-sort-key]");
     if (!th) return;

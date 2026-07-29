@@ -3,6 +3,20 @@ import { escapeHtml, metricText, money, number, whole } from "./format";
 import type { OperationRecord } from "./state";
 
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b", "#e84d8a", "#2cced2", "#8b9dc3"];
+const METRIC_SEMANTICS: Record<string, { label: string; color: string }> = {
+  income_amt: { label: "增长指标", color: "#c5f36b" },
+  pay_amt: { label: "增长指标", color: "#c5f36b" },
+  pay_cnt: { label: "经营量", color: "#b8d8ff" },
+  product_show_ucnt: { label: "流量指标", color: "#b8d8ff" },
+  organic_search: { label: "自然流量", color: "#b8d8ff" },
+  recommendation: { label: "推荐流量", color: "#d4c3ff" },
+  ad_cost_amt: { label: "成本指标", color: "#f1bf77" },
+  ad_roi: { label: "效率指标", color: "#c5f36b" },
+};
+
+function metricSemantic(metricKey) {
+  return METRIC_SEMANTICS[metricKey] || { label: "经营指标", color: "#b8d8ff" };
+}
 
 export function seriesColor(key: string): string {
   let hash = 0;
@@ -39,6 +53,7 @@ function latestRecords(records: OperationRecord[]) {
 }
 
 export function lineChart(records: OperationRecord[], metricKey, title) {
+  const semantic = metricSemantic(metricKey);
   const dates = [...new Set(records.map((item) => item.date))].sort();
   const shops = [...new Set<string>(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const values = shops.map((shop) => dates.map((date) => {
@@ -64,7 +79,7 @@ export function lineChart(records: OperationRecord[], metricKey, title) {
   const xAxis = chartDateTicks(dates).map(({ date, index }) => `<span style="left:${(point(0, index)[0] / width * 100).toFixed(3)}%">${date.slice(5)}</span>`).join("");
   const series = shops.map((shop, index) => `<path class="chart-line" stroke="${seriesColor(shop)}" d="${path(values[index])}"/>`).join("");
   const legend = shops.map((shop) => `<span><i style="background:${seriesColor(shop)}"></i>${escapeHtml(shop)}</span>`).join("");
-  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+  return `<section class="panel chart-panel" style="--chart-accent:${semantic.color}"><div class="panel-head"><div><h3>${title}</h3></div><span class="chart-semantic">${semantic.label}</span></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
 }
 
 export function bindLineChartHover(records: OperationRecord[]) {
@@ -108,9 +123,10 @@ export function bindLineChartHover(records: OperationRecord[]) {
 }
 
 export function barPanel(records, metricKey, title) {
+  const semantic = metricSemantic(metricKey);
   const { date, records: latest } = latestRecords(records);
   const items = latest.map((item) => ({ name: item.shop_name, value: number(item.metrics?.[metricKey]) })).sort((a, b) => b.value - a.value);
   const max = Math.max(...items.map((item) => item.value), 1);
   const bars = items.map((item) => `<div class="bar-row"><span class="bar-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3, item.value / max * 100)}%"></div></div><span class="bar-value">${metricText(metricKey, item.value)}</span></div>`).join("");
-  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>${date || "—"} · 最新日</span></div></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
+  return `<section class="panel metric-panel" style="--chart-accent:${semantic.color}"><div class="panel-head"><div><h3>${title}</h3><span>${date || "—"} · 最新日</span></div><span class="chart-semantic">${semantic.label}</span></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
 }
