@@ -610,7 +610,7 @@ function adsSectionMarkup(records, channelRecords) {
     ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"],
   ];
   const charts = trendRecords.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(trendRecords, "ad_cost_amt", "投放消耗趋势")}${lineChart(trendRecords, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${lineChart(trendRecords, "ad_roi", "投放 ROI 趋势")}${barPanel(trendRecords, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
-  return `${metricCards(metrics)}${charts}<p class="metric-delta">ROI = 店铺支付金额 ÷ 店铺被投消耗；支付金额为店铺整体支付口径，非广告归因成交金额。</p>`;
+  return `${metricCards(metrics)}${charts}`;
 }
 
 export function renderOperations() {
