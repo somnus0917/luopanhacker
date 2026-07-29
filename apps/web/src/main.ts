@@ -34,6 +34,8 @@ type AppState = {
   inventoryView: string;
   inventoryWarehouse: string;
   inventoryBrand: string;
+  inventorySortKey: string;
+  inventorySortDir: "asc" | "desc";
   settlement: AnyRecord | null;
   settlementShop: string;
   settlementUploadMessage: string;
@@ -57,7 +59,7 @@ const previousLocalDate = () => {
 };
 const latestBackfillDate = () => previousLocalDate() >= currentLocalMonthStart() ? previousLocalDate() : "";
 const backfillDateAllowed = (value: string) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
-const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
+const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b"];
 let statusRefreshTimer: number | null = null;
 
@@ -150,6 +152,14 @@ function deltaNote(current: number, previous: number, formatter = whole): string
 function deltaTrend(current: number, previous: number): string {
   if (!previous) return "";
   return current > previous ? "up" : current < previous ? "down" : "";
+}
+
+function sortRows(rows: AnyRecord[], key: string, dir: string): AnyRecord[] {
+  if (!key) return rows;
+  return [...rows].sort((a, b) => {
+    const av = number(a[key]), bv = number(b[key]);
+    return dir === "asc" ? av - bv : bv - av;
+  });
 }
 
 function latestRecords(records: OperationRecord[]) {
@@ -924,15 +934,20 @@ function healthPill(item) {
 }
 
 function inventoryTable(rows, mode = "detail") {
-  const columns = mode === "replenish"
-    ? ["状态", "仓库", "货品", "商家编码", "可发库存", "近 7 天出库", "预计可售", "建议补货", "近 30 天入库"]
-    : ["状态", "仓库", "品牌", "货品", "商家编码", "可发库存", "近 7 天出库", "预计可售", "近 30 天入库", "最后出入库"];
-  const body = rows.slice(0, 200).map((item) => {
+  const total = rows.length;
+  const columnConfigs = mode === "replenish"
+    ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }]
+    : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
+  const sorted = sortRows(rows, state.inventorySortKey, state.inventorySortDir);
+  const visible = sorted.slice(0, 200);
+  const body = visible.map((item) => {
     const shared = [healthPill(item), item.warehouse_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.replenish_qty), whole(item.inbound_30d)];
     const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.inbound_30d), item.last_inout_time || "—"];
     return `<tr class="${number(item.available_num) < 0 ? "inventory-alert" : ""}">${cells.map((cell, index) => `<td>${index === 0 ? cell : escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
-  return `<div class="table-wrap"><table><thead><tr>${columns.map((label) => `<th>${label}</th>`).join("")}</tr></thead><tbody>${body || `<tr><td colspan="${columns.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
+  const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
+  const headerCells = columnConfigs.map((col) => `<th ${col.key ? `data-sort-key="${col.key}"` : ""} class="${state.inventorySortKey === col.key ? "sorted-" + state.inventorySortDir : ""}">${col.label}</th>`).join("");
+  return `${notice}<div class="table-wrap"><table><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
 }
 
 function healthDistribution(items) {
@@ -1385,6 +1400,14 @@ async function initialise() {
   activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
   $$(".nav-tab").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
   $("#logout-button").addEventListener("click", async () => { await fetch("/api/logout", { method: "POST" }); showLogin(); });
+  $("#inventory-content").addEventListener("click", (event) => {
+    const th = event.target.closest("[data-sort-key]");
+    if (!th) return;
+    const key = th.dataset.sortKey;
+    state.inventorySortDir = state.inventorySortKey === key && state.inventorySortDir === "desc" ? "asc" : "desc";
+    state.inventorySortKey = key;
+    renderInventory(state.inventory);
+  });
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
