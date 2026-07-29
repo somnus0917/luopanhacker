@@ -8,7 +8,7 @@ export const whole = (value) => Math.round(number(value)).toLocaleString("zh-CN"
 
 export const ratio = (value) => `${(number(value) * 100).toFixed(2)}%`;
 
-export const metricText = (key, value) => key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
+export const metricText = (key, value) => key === "ad_roi" ? hasValue(value) ? `${number(value).toFixed(2)}×` : "—" : key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
 
 export const hasValue = (value) => value !== null && value !== undefined && value !== "";
 

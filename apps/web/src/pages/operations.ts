@@ -302,7 +302,7 @@ function detailTableFilters() {
   state.tablePlatform = operationSingleFilterValue("platform");
   state.tableShop = operationSingleFilterValue("shop");
   const options = (items, selected, allLabel) => `<option value="">${allLabel}</option>${items.map((item) => `<option value="${escapeHtml(item)}" ${selected === item ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong><span>销售、流量和投放共用同一组筛选条件</span></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="经营范围筛选"><div><strong>经营范围</strong></div>${operationCalendarMarkup()}<label>平台<select data-table-filter="platform">${options(platforms, state.tablePlatform, "全部平台")}</select></label><label>店铺<select data-table-filter="shop">${options(shops, state.tableShop, "全部店铺")}</select></label></section>`;
 }
 
 function bindDetailTableFilters() {
@@ -453,6 +453,27 @@ function attributedAdMetrics(records) {
   };
 }
 
+function adsTrendRecords(records) {
+  const groups = new Map<string, AnyRecord>();
+  records.forEach((record) => {
+    const platform = recordPlatform(record);
+    const key = [record.date, platform, record.shop_name].join("\u0000");
+    const group = groups.get(key) || { date: record.date, platform, shop_name: record.shop_name, spend: 0, pay: 0 };
+    group.spend += number(record.metrics?.ad_cost_amt);
+    group.pay += number(record.metrics?.pay_amt);
+    groups.set(key, group);
+  });
+  return [...groups.values()].map((item) => ({
+    date: item.date,
+    shop_name: item.shop_name,
+    metrics: {
+      ad_cost_amt: item.spend,
+      pay_amt: item.pay,
+      ad_roi: item.spend ? item.pay / item.spend : null,
+    },
+  }));
+}
+
 function operationTabsMarkup() {
   const tabs = [["overview", "经营总览", "跨模块概览"], ["sales", "销售", "成交与退款"], ["traffic", "流量", "曝光、商品与搜索"], ["ads", "投放", "消耗与投产"]];
   return `<div class="operations-tabs" role="tablist" aria-label="经营分类">${tabs.map(([key, label, note]) => `<button class="operations-tab ${state.operationSection === key ? "active" : ""}" type="button" data-operation-section="${key}" role="tab" aria-selected="${state.operationSection === key}"><span>${label}</span><small>${note}</small></button>`).join("")}</div>`;
@@ -548,6 +569,7 @@ function adsSectionMarkup(records, channelRecords) {
   const paid = channelGroup(channelRecords, "paid");
   const ads = attributedAdMetrics(records);
   const adSpend = ads.spend;
+  const trendRecords = adsTrendRecords(records);
   const metrics = [
     ["投放金额", adSpend ? money(adSpend) : "—", adSpend ? "投放消耗（店铺被投）" : "当前范围未采到投放消耗"],
     ["广告曝光", wholeOrDash(paid.value), "抖音全域、标准及品牌投放来源"],
@@ -556,8 +578,8 @@ function adsSectionMarkup(records, channelRecords) {
     ["投放 ROI", operatingRatio(adSpend ? ads.pay / adSpend : null), adSpend ? `${[...ads.platforms].join("、")}支付金额 ÷ 投放金额` : "暂无可计算的投放金额"],
     ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"],
   ];
-  const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
-  return `${metricCards(metrics)}${charts}`;
+  const charts = trendRecords.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(trendRecords, "ad_cost_amt", "投放消耗趋势")}${lineChart(trendRecords, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${lineChart(trendRecords, "ad_roi", "投放 ROI 趋势")}${barPanel(trendRecords, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
+  return `${metricCards(metrics)}${charts}<p class="metric-delta">ROI = 店铺支付金额 ÷ 店铺被投消耗；支付金额为店铺整体支付口径，非广告归因成交金额。</p>`;
 }
 
 export function renderOperations() {
@@ -592,7 +614,7 @@ export function renderOperations() {
     renderOperations();
   }));
   bindOperationsFilterEvents();
-  const hoverRecords = state.operationSection === "traffic" ? channelTrendRecords(channelRecords) : records;
+  const hoverRecords = state.operationSection === "traffic" ? channelTrendRecords(channelRecords) : state.operationSection === "ads" ? adsTrendRecords(records) : records;
   if (hoverRecords.length) bindLineChartHover(hoverRecords);
 }
 

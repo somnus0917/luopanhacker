@@ -7,7 +7,7 @@
   const money = (cents) => `¥${(number(cents) / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const whole = (value) => Math.round(number(value)).toLocaleString("zh-CN");
   const ratio = (value) => `${(number(value) * 100).toFixed(2)}%`;
-  const metricText = (key, value) => key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
+  const metricText = (key, value) => key === "ad_roi" ? hasValue(value) ? `${number(value).toFixed(2)}×` : "—" : key.endsWith("_amt") || ["income_amt", "pay_amt", "per_usr_pay_amt", "settlement_amt_pay_time", "expense_amt"].includes(key) ? money(value) : key.endsWith("_ratio") || key.endsWith("_rate") ? ratio(value) : whole(value);
   const hasValue = (value) => value !== null && value !== void 0 && value !== "";
   const moneyOrDash = (value) => hasValue(value) ? money(value) : "—";
   const settlementMoney = (yuan) => `¥${number(yuan).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -119,6 +119,7 @@
     return `¥${Math.round(yuan).toLocaleString("zh-CN")}`;
   }
   function chartAxisValue(metricKey, value) {
+    if (metricKey === "ad_roi") return `${number(value).toFixed(2)}×`;
     return metricKey.endsWith("_amt") ? compactMoney(value) : Math.round(number(value)).toLocaleString("zh-CN");
   }
   function chartDateTicks(dates, maxLabels = 6) {
@@ -137,12 +138,26 @@
   function lineChart(records, metricKey, title) {
     const dates = [...new Set(records.map((item) => item.date))].sort();
     const shops = [...new Set(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-    const values = shops.map((shop) => dates.map((date) => number(records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey])));
-    const totals = dates.map((date) => values.reduce((sum, series2) => sum + number(series2[dates.indexOf(date)]), 0));
-    const max = Math.max(...totals, ...values.flat(), 1) * 1.08;
+    const values = shops.map((shop) => dates.map((date) => {
+      const value = records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey];
+      return metricKey === "ad_roi" && (value === null || value === void 0) ? null : number(value);
+    }));
+    const totals = dates.map((date, index) => values.reduce((sum, series2) => sum + number(series2[index]), 0));
+    const max = Math.max(...totals, ...values.flat().filter((value) => value !== null).map(number), 1) * 1.08;
     const width = 760, height = 252, pad = { l: 68, r: 16, t: 15, b: 38 };
     const point = (value, index) => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - value / max * (height - pad.t - pad.b)];
-    const path = (series2) => series2.map((value, index) => `${index ? "L" : "M"}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`).join(" ");
+    const path = (series2) => {
+      let previousMissing = true;
+      return series2.map((value, index) => {
+        if (value === null) {
+          previousMissing = true;
+          return "";
+        }
+        const command = previousMissing ? "M" : "L";
+        previousMissing = false;
+        return `${command}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`;
+      }).join(" ");
+    };
     const levels = [0.25, 0.5, 0.75, 1];
     const grid = levels.map((level) => {
       const y = height - pad.b - level * (height - pad.t - pad.b);
@@ -155,7 +170,7 @@
     const xAxis = chartDateTicks(dates).map(({ date, index }) => `<span style="left:${(point(0, index)[0] / width * 100).toFixed(3)}%">${date.slice(5)}</span>`).join("");
     const series = shops.map((shop, index) => `<path class="chart-line" stroke="${seriesColor(shop)}" d="${path(values[index])}"/>`).join("");
     const legend = shops.map((shop) => `<span><i style="background:${seriesColor(shop)}"></i>${escapeHtml(shop)}</span>`).join("");
-    return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+    return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
   }
   function bindLineChartHover(records) {
     $$(".chart[data-metric]").forEach((chart) => {
@@ -607,6 +622,26 @@
       platforms
     };
   }
+  function adsTrendRecords(records) {
+    const groups = /* @__PURE__ */ new Map();
+    records.forEach((record) => {
+      const platform = recordPlatform(record);
+      const key = [record.date, platform, record.shop_name].join("\0");
+      const group = groups.get(key) || { date: record.date, platform, shop_name: record.shop_name, spend: 0, pay: 0 };
+      group.spend += number(record.metrics?.ad_cost_amt);
+      group.pay += number(record.metrics?.pay_amt);
+      groups.set(key, group);
+    });
+    return [...groups.values()].map((item) => ({
+      date: item.date,
+      shop_name: item.shop_name,
+      metrics: {
+        ad_cost_amt: item.spend,
+        pay_amt: item.pay,
+        ad_roi: item.spend ? item.pay / item.spend : null
+      }
+    }));
+  }
   function operationTabsMarkup() {
     const tabs = [["overview", "经营总览", "跨模块概览"], ["sales", "销售", "成交与退款"], ["traffic", "流量", "曝光、商品与搜索"], ["ads", "投放", "消耗与投产"]];
     return `<div class="operations-tabs" role="tablist" aria-label="经营分类">${tabs.map(([key, label, note]) => `<button class="operations-tab ${state.operationSection === key ? "active" : ""}" type="button" data-operation-section="${key}" role="tab" aria-selected="${state.operationSection === key}"><span>${label}</span><small>${note}</small></button>`).join("")}</div>`;
@@ -694,6 +729,7 @@
     const paid = channelGroup(channelRecords, "paid");
     const ads = attributedAdMetrics(records);
     const adSpend = ads.spend;
+    const trendRecords = adsTrendRecords(records);
     const metrics = [
       ["投放金额", adSpend ? money(adSpend) : "—", adSpend ? "投放消耗（店铺被投）" : "当前范围未采到投放消耗"],
       ["广告曝光", wholeOrDash(paid.value), "抖音全域、标准及品牌投放来源"],
@@ -702,8 +738,8 @@
       ["投放 ROI", operatingRatio(adSpend ? ads.pay / adSpend : null), adSpend ? `${[...ads.platforms].join("、")}支付金额 ÷ 投放金额` : "暂无可计算的投放金额"],
       ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"]
     ];
-    const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "ad_cost_amt", "投放消耗趋势")}${lineChart(records, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${barPanel(records, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
-    return `${metricCards(metrics)}${charts}`;
+    const charts = trendRecords.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(trendRecords, "ad_cost_amt", "投放消耗趋势")}${lineChart(trendRecords, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${lineChart(trendRecords, "ad_roi", "投放 ROI 趋势")}${barPanel(trendRecords, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
+    return `${metricCards(metrics)}${charts}<p class="metric-delta">ROI = 店铺支付金额 ÷ 店铺被投消耗；支付金额为店铺整体支付口径，非广告归因成交金额。</p>`;
   }
   function renderOperations() {
     const records = operationFilteredRecords();
@@ -737,7 +773,7 @@
       renderOperations();
     }));
     bindOperationsFilterEvents();
-    const hoverRecords = state.operationSection === "traffic" ? channelTrendRecords(channelRecords) : records;
+    const hoverRecords = state.operationSection === "traffic" ? channelTrendRecords(channelRecords) : state.operationSection === "ads" ? adsTrendRecords(records) : records;
     if (hoverRecords.length) bindLineChartHover(hoverRecords);
   }
   async function loadChannel() {
@@ -855,6 +891,7 @@
       inbound_30d: rows.reduce((sum, row) => sum + number(row.inbound_30d), 0),
       negative_available: rows.filter((row) => number(row.available_num) < 0).length,
       turnover_days: sales7d ? available / (sales7d / 7) : null,
+      inventory_turnover_days: sales7d ? rows.reduce((sum, row) => sum + number(row.stock_num), 0) / (sales7d / 7) : null,
       average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
       replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
       no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
@@ -887,12 +924,16 @@
   }
   function inventoryTable(rows, mode = "detail") {
     const total = rows.length;
-    const columnConfigs = mode === "replenish" ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }] : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
-    const sorted = sortRows(rows, state.inventorySortKey, state.inventorySortDir);
+    const rowsWithTurnover = rows.map((item) => ({
+      ...item,
+      inventory_turnover_days: number(item.sales_7d) ? number(item.stock_num) / (number(item.sales_7d) / 7) : null
+    }));
+    const columnConfigs = mode === "replenish" ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }] : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
+    const sorted = sortRows(rowsWithTurnover, state.inventorySortKey, state.inventorySortDir);
     const visible = sorted.slice(0, 200);
     const body = visible.map((item) => {
       const shared = [healthPill(item), item.warehouse_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.replenish_qty), whole(item.inbound_30d)];
-      const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.inbound_30d), item.last_inout_time || "—"];
+      const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
       return `<tr class="${number(item.available_num) < 0 ? "inventory-alert" : ""}">${cells.map((cell, index) => `<td>${index === 0 ? cell : escapeHtml(cell)}</td>`).join("")}</tr>`;
     }).join("");
     const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
@@ -930,15 +971,16 @@
       ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
       ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
       ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
+      ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
       ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货"],
       ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录"],
       ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库"]
     ];
-    const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+    const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
     const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
     const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
     const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
-    const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">单品维度 <small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}` : overview;
+    const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">单品维度<small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}` : overview;
     $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
     $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
       state.inventoryWarehouse = event.currentTarget.value;

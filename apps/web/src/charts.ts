@@ -19,6 +19,7 @@ function compactMoney(cents) {
 }
 
 function chartAxisValue(metricKey, value) {
+  if (metricKey === "ad_roi") return `${number(value).toFixed(2)}×`;
   return metricKey.endsWith("_amt") ? compactMoney(value) : Math.round(number(value)).toLocaleString("zh-CN");
 }
 
@@ -40,19 +41,30 @@ function latestRecords(records: OperationRecord[]) {
 export function lineChart(records: OperationRecord[], metricKey, title) {
   const dates = [...new Set(records.map((item) => item.date))].sort();
   const shops = [...new Set<string>(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
-  const values = shops.map((shop) => dates.map((date) => number(records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey])));
-  const totals = dates.map((date) => values.reduce((sum, series) => sum + number(series[dates.indexOf(date)]), 0));
-  const max = Math.max(...totals, ...values.flat(), 1) * 1.08;
+  const values = shops.map((shop) => dates.map((date) => {
+    const value = records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey];
+    return metricKey === "ad_roi" && (value === null || value === undefined) ? null : number(value);
+  }));
+  const totals = dates.map((date, index) => values.reduce((sum, series) => sum + number(series[index]), 0));
+  const max = Math.max(...totals, ...values.flat().filter((value) => value !== null).map(number), 1) * 1.08;
   const width = 760, height = 252, pad = { l: 68, r: 16, t: 15, b: 38 };
   const point = (value, index) => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - (value / max) * (height - pad.t - pad.b)];
-  const path = (series) => series.map((value, index) => `${index ? "L" : "M"}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`).join(" ");
+  const path = (series) => {
+    let previousMissing = true;
+    return series.map((value, index) => {
+      if (value === null) { previousMissing = true; return ""; }
+      const command = previousMissing ? "M" : "L";
+      previousMissing = false;
+      return `${command}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`;
+    }).join(" ");
+  };
   const levels = [0.25, 0.5, 0.75, 1];
   const grid = levels.map((level) => { const y = height - pad.b - level * (height - pad.t - pad.b); return `<line class="chart-gridline" x1="${pad.l}" y1="${y}" x2="${width - pad.r}" y2="${y}"/>`; }).join("");
   const yAxis = levels.map((level) => { const y = height - pad.b - level * (height - pad.t - pad.b); return `<span style="top:${(y / height * 100).toFixed(3)}%">${chartAxisValue(metricKey, max * level)}</span>`; }).join("");
   const xAxis = chartDateTicks(dates).map(({ date, index }) => `<span style="left:${(point(0, index)[0] / width * 100).toFixed(3)}%">${date.slice(5)}</span>`).join("");
   const series = shops.map((shop, index) => `<path class="chart-line" stroke="${seriesColor(shop)}" d="${path(values[index])}"/>`).join("");
   const legend = shops.map((shop) => `<span><i style="background:${seriesColor(shop)}"></i>${escapeHtml(shop)}</span>`).join("");
-  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3><span>将鼠标停留在曲线上查看数值</span></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
+  return `<section class="panel chart-panel"><div class="panel-head"><div><h3>${title}</h3></div></div><div class="chart-frame"><svg class="chart" data-metric="${metricKey}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${title}">${grid}${series}<line class="chart-hover-line" visibility="hidden" y1="${pad.t}" y2="${height - pad.b}"/><rect class="chart-hit-area" x="${pad.l}" y="${pad.t}" width="${width - pad.l - pad.r}" height="${height - pad.t - pad.b}" /></svg><div class="chart-y-axis" aria-hidden="true">${yAxis}</div><div class="chart-x-axis" aria-hidden="true">${xAxis}</div></div><div class="chart-tooltip hidden" role="status"></div><div class="legend">${legend}</div></section>`;
 }
 
 export function bindLineChartHover(records: OperationRecord[]) {

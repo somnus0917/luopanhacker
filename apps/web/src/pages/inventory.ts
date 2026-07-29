@@ -95,6 +95,7 @@ function inventorySummary(rows) {
     inbound_30d: rows.reduce((sum, row) => sum + number(row.inbound_30d), 0),
     negative_available: rows.filter((row) => number(row.available_num) < 0).length,
     turnover_days: sales7d ? available / (sales7d / 7) : null,
+    inventory_turnover_days: sales7d ? rows.reduce((sum, row) => sum + number(row.stock_num), 0) / (sales7d / 7) : null,
     average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
     replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
     no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
@@ -116,7 +117,7 @@ function inventoryWarehouseFilter(payload) {
   const brands = inventoryBrandOptions(payload);
   const warehouseOptions = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
   const brandOptions = `<option value="">全部品牌</option>${brands.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryBrand === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-  return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong><span>筛选总览、补货、积压与 单品维度</span></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
+  return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
 }
 
 function inventoryBarPanel(items, title, key, formatter = whole) {
@@ -132,14 +133,18 @@ function healthPill(item) {
 
 function inventoryTable(rows, mode = "detail") {
   const total = rows.length;
+  const rowsWithTurnover = rows.map((item) => ({
+    ...item,
+    inventory_turnover_days: number(item.sales_7d) ? number(item.stock_num) / (number(item.sales_7d) / 7) : null,
+  }));
   const columnConfigs = mode === "replenish"
     ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }]
-    : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
-  const sorted = sortRows(rows, state.inventorySortKey, state.inventorySortDir);
+    : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
+  const sorted = sortRows(rowsWithTurnover, state.inventorySortKey, state.inventorySortDir);
   const visible = sorted.slice(0, 200);
   const body = visible.map((item) => {
     const shared = [healthPill(item), item.warehouse_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.replenish_qty), whole(item.inbound_30d)];
-    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.inbound_30d), item.last_inout_time || "—"];
+    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
     return `<tr class="${number(item.available_num) < 0 ? "inventory-alert" : ""}">${cells.map((cell, index) => `<td>${index === 0 ? cell : escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
   const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
@@ -181,11 +186,12 @@ export function renderInventory(payload, view = state.inventoryView) {
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
     ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
+    ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
     ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货"],
     ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录"],
     ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库"],
   ];
-  const cards = `<div class="metric-grid six">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
+  const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div>`;
   const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
   const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;

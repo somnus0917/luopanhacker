@@ -81,7 +81,7 @@ function settlementFiltersMarkup(payload) {
   const shops = payload.shops || [];
   const selected = payload.selected_shop || state.settlementShop || "";
   const options = `<option value="">全部店铺</option>${shops.map((name) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong><span>指标、分组汇总和明细共用同一组筛选条件</span></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
 }
 
 function positionSettlementCalendar() {
