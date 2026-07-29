@@ -20,7 +20,9 @@ use luopan_orders::{
     UploadedWorkbook, commit_preview, delete_batch, preview_upload, public_imports,
 };
 use luopan_runtime::{RuntimePaths, read_json_file};
-use luopan_settlement::{load_settlement_dashboard_for_shop, save_settlement_upload};
+use luopan_settlement::{
+    load_settlement_dashboard_filtered, load_settlement_dashboard_for_shop, save_settlement_upload,
+};
 use luopan_storage::{
     StoragePool, kv_value, load_operations_records_from_db, public_imports_from_db, summary,
 };
@@ -140,6 +142,8 @@ struct StatusQuery {
 #[derive(Debug, Deserialize)]
 struct SettlementQuery {
     shop: Option<String>,
+    start_date: Option<String>,
+    end_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -818,10 +822,45 @@ async fn settlement_dashboard(
     State(state): State<AppState>,
     Query(query): Query<SettlementQuery>,
 ) -> Result<Json<Value>, ApiError> {
+    let (start_date, end_date) = validate_settlement_date_range(query.start_date, query.end_date)
+        .map_err(ApiError::bad_request)?;
     Ok(Json(
-        load_settlement_dashboard_for_shop(&state.paths, query.shop.as_deref())
-            .map_err(ApiError::internal)?,
+        load_settlement_dashboard_filtered(
+            &state.paths,
+            query.shop.as_deref(),
+            start_date.as_deref(),
+            end_date.as_deref(),
+        )
+        .map_err(ApiError::internal)?,
     ))
+}
+
+fn validate_settlement_date_range(
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<(Option<String>, Option<String>)> {
+    let parse = |value: Option<String>, label: &str| -> Result<Option<String>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let value = value.trim();
+        if value.is_empty() {
+            return Ok(None);
+        }
+        NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .with_context(|| format!("{label}必须是 YYYY-MM-DD 格式"))?;
+        Ok(Some(value.to_string()))
+    };
+    let start_date = parse(start_date, "开始日期")?;
+    let end_date = parse(end_date, "结束日期")?;
+    if start_date
+        .as_ref()
+        .zip(end_date.as_ref())
+        .is_some_and(|(start, end)| start > end)
+    {
+        anyhow::bail!("开始日期不能晚于结束日期");
+    }
+    Ok((start_date, end_date))
 }
 
 async fn upload_settlement(
@@ -1512,6 +1551,24 @@ mod tests {
             validate_collection_shops(vec![" 店铺 A ".into(), "店铺 A".into()]).unwrap(),
             ["店铺 A"]
         );
+    }
+
+    #[test]
+    fn validates_settlement_date_filters() {
+        assert_eq!(
+            validate_settlement_date_range(Some("2026-07-01".into()), Some("2026-07-31".into()))
+                .unwrap(),
+            (Some("2026-07-01".into()), Some("2026-07-31".into()))
+        );
+        assert_eq!(
+            validate_settlement_date_range(Some(" ".into()), None).unwrap(),
+            (None, None)
+        );
+        assert!(
+            validate_settlement_date_range(Some("2026-08-01".into()), Some("2026-07-31".into()))
+                .is_err()
+        );
+        assert!(validate_settlement_date_range(Some("2026/07/01".into()), None).is_err());
     }
 
     #[tokio::test]

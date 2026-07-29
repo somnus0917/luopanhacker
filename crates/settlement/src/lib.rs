@@ -42,6 +42,15 @@ pub fn load_settlement_dashboard_for_shop(
     paths: &RuntimePaths,
     shop_filter: Option<&str>,
 ) -> Result<Value> {
+    load_settlement_dashboard_filtered(paths, shop_filter, None, None)
+}
+
+pub fn load_settlement_dashboard_filtered(
+    paths: &RuntimePaths,
+    shop_filter: Option<&str>,
+    start_date_filter: Option<&str>,
+    end_date_filter: Option<&str>,
+) -> Result<Value> {
     let dir = paths.output_dir.join("settlement");
     let mut files = csv_files(&dir)?;
     files.sort();
@@ -53,9 +62,16 @@ pub fn load_settlement_dashboard_for_shop(
     let mut by_subject: BTreeMap<String, Group> = BTreeMap::new();
     let mut by_business_type: BTreeMap<String, Group> = BTreeMap::new();
     let mut shop_names = BTreeSet::new();
+    let mut available_dates = BTreeSet::new();
     let mut rows = Vec::new();
     let mut parsed_files = Vec::new();
     let selected_shop = shop_filter
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let selected_start_date = start_date_filter
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty());
+    let selected_end_date = end_date_filter
         .map(|value| value.trim())
         .filter(|value| !value.is_empty());
 
@@ -79,6 +95,14 @@ pub fn load_settlement_dashboard_for_shop(
                 continue;
             }
             let item = SettlementRecord::from_row(&header_index, &record, &path, &shop_name)?;
+            if !item.settlement_date.is_empty() {
+                available_dates.insert(item.settlement_date.clone());
+            }
+            if selected_start_date.is_some_and(|start| item.settlement_date.as_str() < start)
+                || selected_end_date.is_some_and(|end| item.settlement_date.as_str() > end)
+            {
+                continue;
+            }
             file_rows += 1;
             add_record(&mut summary, &item);
             add_record(
@@ -112,6 +136,9 @@ pub fn load_settlement_dashboard_for_shop(
         "shop_groups": groups_json(by_shop),
         "shops": shop_names.into_iter().collect::<Vec<_>>(),
         "selected_shop": selected_shop.unwrap_or(""),
+        "available_dates": available_dates.into_iter().collect::<Vec<_>>(),
+        "selected_start_date": selected_start_date.unwrap_or(""),
+        "selected_end_date": selected_end_date.unwrap_or(""),
         "subjects": groups_json(by_subject),
         "business_types": groups_json(by_business_type),
         "rows": rows,
@@ -656,6 +683,48 @@ mod tests {
         let renamed_dashboard =
             load_settlement_dashboard_for_shop(&paths, Some("改名店铺")).unwrap();
         assert_eq!(renamed_dashboard["summary"]["row_count"], json!(1));
+
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn filters_dashboard_by_settlement_date_range() {
+        let base = std::env::temp_dir().join(format!(
+            "luopan-settlement-date-filter-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let paths = RuntimePaths {
+            app_dir: base.clone(),
+            output_dir: base.join("output"),
+            state_dir: base.join("state"),
+            config_dir: base.join("config"),
+            logs_dir: base.join("logs"),
+            session_dir: base.join("session"),
+        };
+        let text = "结算时间,订单号,结算金额,收入合计,支出合计\n说明,,,,\n2026-06-30 10:00:00,order-1,2.00,3.00,-1.00\n2026-07-02 10:00:00,order-2,4.00,5.00,-1.00\n";
+        save_settlement_upload(&paths, "range.csv", "测试店铺", text.as_bytes())
+            .expect("save upload");
+
+        let dashboard = load_settlement_dashboard_filtered(
+            &paths,
+            Some("测试店铺"),
+            Some("2026-07-01"),
+            Some("2026-07-31"),
+        )
+        .unwrap();
+        assert_eq!(dashboard["summary"]["row_count"], json!(1));
+        assert_eq!(dashboard["summary"]["settlement_amount"], json!(4.0));
+        assert_eq!(
+            dashboard["available_dates"],
+            json!(["2026-06-30", "2026-07-02"])
+        );
+        assert_eq!(dashboard["selected_start_date"], json!("2026-07-01"));
+        assert_eq!(dashboard["selected_end_date"], json!("2026-07-31"));
+        assert_eq!(dashboard["months"][0]["name"], json!("2026-07"));
+        assert_eq!(dashboard["rows"][0]["settlement_date"], json!("2026-07-02"));
 
         let _ = fs::remove_dir_all(base);
     }

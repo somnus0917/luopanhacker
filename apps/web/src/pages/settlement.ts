@@ -13,11 +13,142 @@ function settlementGroupTable(title, groups) {
   return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
 }
 
-function settlementShopFilter(payload) {
+function settlementDates(payload = state.settlement) {
+  return [...new Set<string>(payload?.available_dates || state.settlementAvailableDates || [])]
+    .filter(Boolean)
+    .sort((a, b) => b.localeCompare(a));
+}
+
+function settlementCalendarDate(year, month, day) {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function settlementCalendarMonthStart(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1));
+}
+
+function shiftSettlementCalendarMonth(value: string, amount: number) {
+  const cursor = settlementCalendarMonthStart(value);
+  cursor.setUTCMonth(cursor.getUTCMonth() + amount);
+  return settlementCalendarDate(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1);
+}
+
+function settlementDateLabel() {
+  const dates = settlementDates();
+  if (!state.settlementStartDate && !state.settlementEndDate) return "全部日期";
+  if (state.settlementStartDate === state.settlementEndDate) return state.settlementStartDate;
+  return `${state.settlementStartDate || dates.at(-1) || "最早"} 至 ${state.settlementEndDate || dates[0] || "最新"}`;
+}
+
+function settlementCalendarMonthMarkup(monthValue: string, availableDates: Set<string>, rangeStart: string, rangeEnd: string) {
+  const cursor = settlementCalendarMonthStart(monthValue);
+  const year = cursor.getUTCFullYear();
+  const month = cursor.getUTCMonth() + 1;
+  const firstWeekday = cursor.getUTCDay() || 7;
+  const gridStart = new Date(Date.UTC(year, month - 1, 2 - firstWeekday));
+  const today = settlementCalendarDate(new Date().getFullYear(), new Date().getMonth() + 1, new Date().getDate());
+  const days = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setUTCDate(gridStart.getUTCDate() + index);
+    const value = settlementCalendarDate(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+    const inMonth = date.getUTCMonth() + 1 === month;
+    const available = availableDates.has(value);
+    const inRange = Boolean(rangeStart && rangeEnd && value >= rangeStart && value <= rangeEnd);
+    const isStart = value === rangeStart;
+    const isEnd = value === rangeEnd;
+    const classes = ["calendar-day", inMonth ? "" : "outside", available ? "available" : "unavailable", inRange ? "in-range" : "", isStart ? "range-start" : "", isEnd ? "range-end" : "", value === today ? "today" : ""].filter(Boolean).join(" ");
+    return `<button class="${classes}" type="button" data-settlement-calendar-date="${value}" aria-label="${value}" ${inMonth && available ? "" : "disabled"}><span>${date.getUTCDate()}</span></button>`;
+  }).join("");
+  return `<section class="calendar-month" aria-label="${year}年${month}月"><h4>${year}年 ${month}月</h4><div class="calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="calendar-days">${days}</div></section>`;
+}
+
+function settlementCalendarMarkup(payload) {
+  const dates = settlementDates(payload);
+  if (!dates.length) return `<div class="date-filter-field"><span>结算日期</span><button class="date-picker-trigger" type="button" disabled>暂无日期</button></div>`;
+  const availableDates = new Set(dates);
+  const cursor = state.settlementCalendarCursor || `${dates[0].slice(0, 7)}-01`;
+  const rangeStart = state.settlementCalendarRangeStart || state.settlementStartDate;
+  const rangeEnd = state.settlementCalendarRangeStart ? state.settlementCalendarRangeStart : state.settlementEndDate;
+  const selectedCount = state.settlementStartDate || state.settlementEndDate
+    ? dates.filter((date) => (!state.settlementStartDate || date >= state.settlementStartDate) && (!state.settlementEndDate || date <= state.settlementEndDate)).length
+    : dates.length;
+  const hint = state.settlementCalendarRangeStart ? `已选择 ${state.settlementCalendarRangeStart}，可再选结束日期或直接确定单日` : "点击一天选择单日，或依次点击开始和结束日期";
+  return `<div class="date-filter-field"><span>结算日期</span><details class="date-range-picker" ${state.settlementCalendarOpen ? "open" : ""}><summary class="date-picker-trigger"><span>${escapeHtml(settlementDateLabel())}</span><i aria-hidden="true"></i></summary><div class="calendar-popover"><div class="calendar-toolbar"><button type="button" data-settlement-calendar-shift="-12" aria-label="上一年">«</button><button type="button" data-settlement-calendar-shift="-1" aria-label="上个月">‹</button><span>${escapeHtml(hint)}</span><button type="button" data-settlement-calendar-shift="1" aria-label="下个月">›</button><button type="button" data-settlement-calendar-shift="12" aria-label="下一年">»</button></div><div class="calendar-months">${settlementCalendarMonthMarkup(cursor, availableDates, rangeStart, rangeEnd)}${settlementCalendarMonthMarkup(shiftSettlementCalendarMonth(cursor, 1), availableDates, rangeStart, rangeEnd)}</div><div class="calendar-footer"><span>${selectedCount} 个结算日</span><div><button type="button" data-settlement-calendar-all>全部日期</button><button class="calendar-confirm" type="button" data-settlement-calendar-confirm>确定</button></div></div></div></details></div>`;
+}
+
+function settlementFiltersMarkup(payload) {
   const shops = payload.shops || [];
   const selected = payload.selected_shop || state.settlementShop || "";
   const options = `<option value="">全部店铺</option>${shops.map((name) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
-  return `<section class="table-filter-panel" aria-label="结算筛选"><div><strong>结算筛选</strong><span>按结算 CSV 对应店铺重算汇总与明细</span></div><label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
+  return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong><span>指标、分组汇总和明细共用同一组筛选条件</span></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
+}
+
+function positionSettlementCalendar() {
+  const filters = $("#settlement-filters");
+  const popover = filters ? $(".calendar-popover", filters) : null;
+  if (!popover || window.matchMedia("(max-width: 760px)").matches) return;
+  popover.style.transform = "";
+  const bounds = popover.getBoundingClientRect();
+  const viewportMargin = 12;
+  if (bounds.right > window.innerWidth - viewportMargin) {
+    popover.style.transform = `translateX(-${Math.ceil(bounds.right - window.innerWidth + viewportMargin)}px)`;
+  } else if (bounds.left < viewportMargin) {
+    popover.style.transform = `translateX(${Math.ceil(viewportMargin - bounds.left)}px)`;
+  }
+}
+
+function renderSettlementFilters(payload) {
+  const target = $("#settlement-filters");
+  if (!target) return;
+  target.innerHTML = settlementFiltersMarkup(payload);
+  $('[data-settlement-filter="shop"]', target)?.addEventListener("change", (event) => {
+    state.settlementShop = event.currentTarget.value;
+    state.settlementCalendarCursor = "";
+    state.settlementCalendarRangeStart = "";
+    state.settlementCalendarOpen = false;
+    loadSettlement();
+  });
+  const picker = $(".date-range-picker", target);
+  picker?.addEventListener("toggle", () => {
+    state.settlementCalendarOpen = picker.open;
+    if (!picker.open) state.settlementCalendarRangeStart = "";
+    else window.requestAnimationFrame(positionSettlementCalendar);
+  });
+  $$("[data-settlement-calendar-shift]", target).forEach((button) => button.addEventListener("click", () => {
+    const dates = settlementDates(payload);
+    state.settlementCalendarCursor = shiftSettlementCalendarMonth(state.settlementCalendarCursor || `${dates[0].slice(0, 7)}-01`, number(button.dataset.settlementCalendarShift));
+    state.settlementCalendarOpen = true;
+    renderSettlementFilters(payload);
+  }));
+  $$("[data-settlement-calendar-date]", target).forEach((button) => button.addEventListener("click", () => {
+    const value = button.dataset.settlementCalendarDate;
+    if (!state.settlementCalendarRangeStart) {
+      state.settlementStartDate = value;
+      state.settlementEndDate = value;
+      state.settlementCalendarRangeStart = value;
+      state.settlementCalendarOpen = true;
+    } else {
+      state.settlementStartDate = value < state.settlementCalendarRangeStart ? value : state.settlementCalendarRangeStart;
+      state.settlementEndDate = value < state.settlementCalendarRangeStart ? state.settlementCalendarRangeStart : value;
+      state.settlementCalendarRangeStart = "";
+      state.settlementCalendarOpen = false;
+    }
+    loadSettlement();
+  }));
+  $("[data-settlement-calendar-all]", target)?.addEventListener("click", () => {
+    state.settlementStartDate = "";
+    state.settlementEndDate = "";
+    state.settlementCalendarRangeStart = "";
+    state.settlementCalendarOpen = false;
+    loadSettlement();
+  });
+  $("[data-settlement-calendar-confirm]", target)?.addEventListener("click", () => {
+    state.settlementCalendarRangeStart = "";
+    state.settlementCalendarOpen = false;
+    renderSettlementFilters(payload);
+  });
+  if (state.settlementCalendarOpen) window.requestAnimationFrame(positionSettlementCalendar);
 }
 
 function settlementUploadPanel() {
@@ -51,6 +182,13 @@ function settlementDetailTable(rows) {
 export function renderSettlement(payload) {
   state.settlement = payload;
   state.settlementShop = payload.selected_shop || "";
+  state.settlementAvailableDates = settlementDates(payload);
+  state.settlementStartDate = payload.selected_start_date || "";
+  state.settlementEndDate = payload.selected_end_date || "";
+  if (!state.settlementCalendarCursor && state.settlementAvailableDates.length) {
+    state.settlementCalendarCursor = `${state.settlementAvailableDates[0].slice(0, 7)}-01`;
+  }
+  renderSettlementFilters(payload);
   const summary = payload.summary || {};
   const fileNames = (payload.files || []).map((file) => file.name).filter(Boolean);
   const governmentSubsidy = number(summary.government_merchant) + number(summary.government_platform);
@@ -63,14 +201,14 @@ export function renderSettlement(payload) {
     ["政府补贴", settlementMoney(governmentSubsidy), "商家垫资 + 平台垫资"],
   ];
   $("#settlement-summary-cards").innerHTML = metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("");
+  const hasActiveFilter = Boolean(state.settlementShop || state.settlementStartDate || state.settlementEndDate);
+  const emptyMessage = hasActiveFilter
+    ? "当前筛选范围暂无结算数据，请调整结算日期或店铺。"
+    : "请上传结算 CSV 或把文件放入服务器 output/settlement/ 目录后刷新页面。";
   $("#settlement-content").innerHTML = summary.row_count
-    ? `${settlementUploadPanel()}${settlementShopFilter(payload)}<section class="panel operations-note"><h3>数据来源</h3><p>读取服务器本地 <code>output/settlement/</code> 目录下的抖音结算 CSV；金额按 CSV 原始元单位展示，不做分转元转换。</p><p>已读取文件：${escapeHtml(fileNames.join("、") || "—")}</p></section><div class="chart-grid"><div class="chart-stack">${settlementGroupTable("按结算月份", payload.months)}${settlementGroupTable("按店铺", payload.shop_groups)}</div><div class="chart-stack">${settlementGroupTable("按商户主体", payload.subjects)}${settlementGroupTable("按业务类型", payload.business_types)}</div></div>${settlementDetailTable(payload.rows)}`
-    : `${settlementUploadPanel()}${settlementShopFilter(payload)}<div class="empty-panel"><strong>暂无结算数据</strong><span>请上传结算 CSV 或把文件放入服务器 output/settlement/ 目录后刷新页面。</span></div>`;
+    ? `${settlementUploadPanel()}<section class="panel operations-note"><h3>数据来源</h3><p>读取服务器本地 <code>output/settlement/</code> 目录下的抖音结算 CSV；金额按 CSV 原始元单位展示，不做分转元转换。</p><p>已读取文件：${escapeHtml(fileNames.join("、") || "—")}</p></section><div class="chart-grid"><div class="chart-stack">${settlementGroupTable("按结算月份", payload.months)}${settlementGroupTable("按店铺", payload.shop_groups)}</div><div class="chart-stack">${settlementGroupTable("按商户主体", payload.subjects)}${settlementGroupTable("按业务类型", payload.business_types)}</div></div>${settlementDetailTable(payload.rows)}`
+    : `${settlementUploadPanel()}<div class="empty-panel"><strong>暂无结算数据</strong><span>${emptyMessage}</span></div>`;
   $("#settlement-upload-form")?.addEventListener("submit", uploadSettlement);
-  $('[data-settlement-filter="shop"]')?.addEventListener("change", (event) => {
-    state.settlementShop = event.currentTarget.value;
-    loadSettlement();
-  });
 }
 
 async function uploadSettlement(event) {
@@ -105,14 +243,17 @@ async function uploadSettlement(event) {
   const uploaded = payload.upload?.file || {};
   state.settlementShop = uploaded.shop_name || state.settlementShop;
   state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
-  renderSettlement(payload.dashboard || state.settlement || {});
+  await loadSettlement();
 }
 
 export async function loadSettlement() {
   const target = $("#settlement-content");
   try {
-    const query = state.settlementShop ? `?shop=${encodeURIComponent(state.settlementShop)}` : "";
-    const response = await fetch(`/api/settlement${query}`);
+    const query = new URLSearchParams();
+    if (state.settlementShop) query.set("shop", state.settlementShop);
+    if (state.settlementStartDate) query.set("start_date", state.settlementStartDate);
+    if (state.settlementEndDate) query.set("end_date", state.settlementEndDate);
+    const response = await fetch(`/api/settlement${query.size ? `?${query}` : ""}`);
     if (response.status === 401) return showLogin();
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "结算数据不可用");
