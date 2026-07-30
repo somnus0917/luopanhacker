@@ -5,7 +5,6 @@ on:
     workflows: [CI]
     branches: [main]
     types: [completed]
-  workflow_dispatch:
 
 concurrency:
   group: luopan-production
@@ -22,13 +21,8 @@ jobs:
     steps:
       - id: verify
         env:
-          EVENT_NAME: ${{ github.event_name }}
           VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           latest_sha="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main | awk '{print $1}')"
           if [[ "$VALIDATED_SHA" == "$latest_sha" ]]; then
             echo "should_deploy=true" >> "$GITHUB_OUTPUT"
@@ -39,7 +33,7 @@ jobs:
 
   deploy:
     needs: verify-main-head
-    if: needs.verify-main-head.outputs.should_deploy == 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    if: needs.verify-main-head.outputs.should_deploy == 'true' && github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -57,6 +51,6 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.LUOPAN_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.LUOPAN_DEPLOY_USER }}
-          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${DEPLOY_SHA}"

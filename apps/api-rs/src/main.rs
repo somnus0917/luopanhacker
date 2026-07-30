@@ -240,7 +240,7 @@ async fn request_logging(request: Request, next: Next) -> Response {
         .headers()
         .get("x-request-id")
         .and_then(|value| value.to_str().ok())
-        .filter(|value| !value.is_empty())
+        .filter(|value| is_valid_request_id(value))
         .map(ToOwned::to_owned)
         .unwrap_or_else(generate_request_id);
     let route = request.uri().path().to_string();
@@ -264,6 +264,13 @@ async fn request_logging(request: Request, next: Next) -> Response {
         "request completed"
     );
     response
+}
+
+fn is_valid_request_id(value: &str) -> bool {
+    (1..=64).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 pub(crate) fn now_string() -> String {

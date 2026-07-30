@@ -167,6 +167,7 @@ async fn router_middleware_keeps_request_ids_consistent_for_all_api_outcomes() {
     .await;
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/ok")
@@ -182,6 +183,36 @@ async fn router_middleware_keeps_request_ids_consistent_for_all_api_outcomes() {
         .unwrap();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["meta"]["request_id"], "client-request-id");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/ok")
+                .header("x-request-id", "invalid request id")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let generated_id = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_ne!(generated_id, "invalid request id");
+    assert!(is_valid_request_id(&generated_id));
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["meta"]["request_id"], generated_id);
+}
+
+#[test]
+fn accepts_only_safe_client_request_ids() {
+    assert!(is_valid_request_id("request-123_A.B"));
+    assert!(!is_valid_request_id(""));
+    assert!(!is_valid_request_id("contains space"));
+    assert!(!is_valid_request_id(&"a".repeat(65)));
 }
 
 #[test]
