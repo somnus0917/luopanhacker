@@ -1,12 +1,12 @@
-use std::{env, fs, io::Write, net::SocketAddr, sync::Arc};
+use std::{env, fs, io::Write, net::SocketAddr, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    middleware::{Next, from_fn_with_state},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::{Next, from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{delete, get, get_service, post},
 };
@@ -24,7 +24,8 @@ use luopan_settlement::{
     load_settlement_dashboard_filtered, load_settlement_dashboard_for_shop, save_settlement_upload,
 };
 use luopan_storage::{
-    StoragePool, kv_value, load_operations_records_from_db, public_imports_from_db, summary,
+    StoragePool, kv_value_with_updated_at, load_operations_records_from_db, public_imports_from_db,
+    summary,
 };
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -46,11 +47,48 @@ struct AppState {
     novnc_url: Arc<String>,
     auth_pool: Arc<StoragePool>,
     storage_pool: Option<Arc<StoragePool>>,
+    security: Arc<SecurityConfig>,
 }
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
 const SESSION_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
+const SESSION_IDLE_TIMEOUT_SECONDS: i64 = 30 * 60;
+const LOGIN_FAILURE_LIMIT: i64 = 5;
+const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
+const LOGIN_LOCKOUT_SECONDS: i64 = 15 * 60;
 const ADMIN_UPLOAD_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Debug)]
+struct SecurityConfig {
+    production: bool,
+    session_cookie_secure: bool,
+    trusted_origins: Vec<String>,
+}
+
+impl SecurityConfig {
+    fn from_env() -> Self {
+        let production = !matches!(
+            env::var("LUOPAN_ENV").ok().as_deref(),
+            Some("development" | "dev" | "test")
+        );
+        let configured_secure = env_bool("SESSION_COOKIE_SECURE", production);
+        if production && !configured_secure {
+            tracing::warn!("SESSION_COOKIE_SECURE=false is ignored in production");
+        }
+        Self {
+            production,
+            session_cookie_secure: production || configured_secure,
+            trusted_origins: env::var("LUOPAN_TRUSTED_ORIGINS")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim)
+                .filter(|origin| !origin.is_empty())
+                .map(ToOwned::to_owned)
+                .chain((!production).then(|| "http://127.0.0.1:5173".to_string()))
+                .collect(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct LoginPayload {
@@ -102,35 +140,93 @@ fn default_role() -> String {
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
+    code: &'static str,
     message: String,
+    request_id: String,
 }
 
 impl ApiError {
     fn internal(error: anyhow::Error) -> Self {
+        let request_id = error_request_id();
+        tracing::error!(%request_id, error = %error, "internal API error");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: error.to_string(),
+            code: "INTERNAL_ERROR",
+            message: "服务器内部错误".to_string(),
+            request_id,
         }
     }
 
     fn bad_request(error: anyhow::Error) -> Self {
+        Self::client(
+            StatusCode::BAD_REQUEST,
+            "INVALID_REQUEST",
+            error.to_string(),
+        )
+    }
+
+    fn client(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            status: StatusCode::BAD_REQUEST,
-            message: error.to_string(),
+            status,
+            code,
+            message: message.into(),
+            request_id: error_request_id(),
         }
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
+        let request_id = self.request_id;
+        let mut response = (
+            self.status,
+            Json(json!({
+                "data": Value::Null,
+                "error": { "code": self.code, "message": self.message },
+                "meta": { "request_id": request_id },
+            })),
+        )
+            .into_response();
+        response.headers_mut().insert(
+            "x-request-id",
+            HeaderValue::from_str(&request_id).expect("generated request ID is a valid header"),
+        );
+        response
     }
+}
+
+fn error_request_id() -> String {
+    let mut bytes = [0_u8; 12];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[derive(Serialize)]
 struct HealthPayload {
     service: &'static str,
     ok: bool,
+}
+
+fn api(data: impl Serialize) -> Json<Value> {
+    api_with_meta(data, "api", false, now_string())
+}
+
+fn api_with_meta(
+    data: impl Serialize,
+    source: &str,
+    fallback: bool,
+    updated_at: String,
+) -> Json<Value> {
+    Json(json!({
+        "data": data,
+        "error": Value::Null,
+        "meta": {
+            "request_id": error_request_id(),
+            "source": source,
+            "fallback": fallback,
+            "updated_at": updated_at,
+        },
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,26 +290,27 @@ async fn main() -> Result<()> {
     import_legacy_users(&auth_pool, &paths).await?;
     ensure_initial_admin(&auth_pool, env::var("ADMIN_PASSWORD").ok().as_deref()).await?;
     let storage_pool = env_bool("LUOPAN_API_RS_STORAGE_READS", false).then_some(auth_pool.clone());
+    let security = Arc::new(SecurityConfig::from_env());
     let state = AppState {
         paths: paths.clone(),
         novnc_url,
         auth_pool,
         storage_pool,
+        security: security.clone(),
     };
     let protected = Router::new()
-        .route("/api/runtime/paths", get(runtime_paths))
         .route("/api/compass", get(compass_dashboard))
         .route("/api/inventory", get(inventory_dashboard))
         .route("/api/channel", get(channel_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
         .route("/api/settlement", get(settlement_dashboard))
         .route("/api/orders/imports", get(order_imports))
-        .route("/api/diagnostics", get(diagnostics))
         .route("/api/storage/summary", get(storage_summary))
         .route("/api/status", get(status))
         .route("/api/status/raw", get(status_raw))
         .route("/api/status/log-tail", get(status_log_tail))
         .route("/api/collection/status", get(status))
+        .route("/api/collection/shops", get(collection_shops))
         .route("/api/collection/status/raw", get(status_raw))
         .route("/api/collection/status/log-tail", get(status_log_tail))
         .route_layer(from_fn_with_state(state.clone(), require_auth));
@@ -236,6 +333,7 @@ async fn main() -> Result<()> {
         )
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/users/{username}", delete(remove_user))
+        .route("/api/diagnostics", get(diagnostics))
         .layer(DefaultBodyLimit::max(ADMIN_UPLOAD_LIMIT_BYTES))
         .route_layer(from_fn_with_state(state.clone(), require_admin));
     let static_dir = paths.app_dir.join("web").join("static");
@@ -257,6 +355,7 @@ async fn main() -> Result<()> {
     let static_files = index_file.merge(static_assets);
     let app = Router::new()
         .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
         .route("/api/me", get(me))
@@ -264,9 +363,21 @@ async fn main() -> Result<()> {
         .merge(account)
         .merge(admin_only)
         .merge(static_files)
-        .layer(CorsLayer::permissive())
+        .layer(from_fn(request_logging))
+        .layer(from_fn_with_state(state.clone(), csrf_protection))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
+    let app = if security.production {
+        app
+    } else {
+        tracing::info!("development CORS enabled only for Vite");
+        app.layer(
+            CorsLayer::new()
+                .allow_origin(HeaderValue::from_static("http://127.0.0.1:5173"))
+                .allow_methods([Method::GET, Method::POST, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE]),
+        )
+    };
 
     let host = env::var("LUOPAN_API_RS_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = env::var("LUOPAN_API_RS_PORT")
@@ -280,11 +391,67 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn healthz() -> Json<HealthPayload> {
-    Json(HealthPayload {
+async fn healthz() -> Json<Value> {
+    api(HealthPayload {
         service: "luopan-api-rs",
         ok: true,
     })
+}
+
+async fn readyz(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let sqlite_available = sqlx::query("SELECT 1")
+        .fetch_one(&*state.auth_pool)
+        .await
+        .is_ok();
+    let static_files_available = state.paths.app_dir.join("web/static/index.html").is_file();
+    let runtime_dir_available = state.paths.state_dir.is_dir();
+    if !(sqlite_available && static_files_available && runtime_dir_available) {
+        tracing::warn!(
+            sqlite_available,
+            static_files_available,
+            runtime_dir_available,
+            "readiness check failed"
+        );
+        return Err(ApiError::client(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "NOT_READY",
+            "服务尚未就绪",
+        ));
+    }
+    Ok(api(json!({
+        "service": "luopan-api-rs",
+        "ready": true,
+        "checks": { "sqlite": true, "static_files": true, "runtime_dir": true },
+    })))
+}
+
+async fn request_logging(request: Request, next: Next) -> Response {
+    let request_id = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(error_request_id);
+    let route = request.uri().path().to_string();
+    let method = request.method().clone();
+    let started = Instant::now();
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .entry("x-request-id")
+        .or_insert_with(|| {
+            HeaderValue::from_str(&request_id).expect("generated request ID is a valid header")
+        });
+    tracing::info!(
+        %request_id,
+        %route,
+        method = %method,
+        status = %response.status(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "request completed"
+    );
+    response
 }
 
 async fn login(
@@ -292,18 +459,37 @@ async fn login(
     Json(payload): Json<LoginPayload>,
 ) -> Result<Response, ApiError> {
     let username = payload.username.trim();
+    if login_is_rate_limited(&state.auth_pool, username)
+        .await
+        .map_err(ApiError::internal)?
+    {
+        return Err(ApiError::client(
+            StatusCode::TOO_MANY_REQUESTS,
+            "LOGIN_RATE_LIMITED",
+            "登录失败次数过多，请 15 分钟后再试",
+        ));
+    }
     let user = sqlx::query("SELECT password_hash, role FROM users WHERE username = ?")
         .bind(username)
         .fetch_optional(&*state.auth_pool)
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
     let Some(user) = user else {
+        record_failed_login(&state.auth_pool, username)
+            .await
+            .map_err(ApiError::internal)?;
         return Err(invalid_credentials());
     };
     let password_hash: String = user.get("password_hash");
     if !verify_password(&payload.password, &password_hash) {
+        record_failed_login(&state.auth_pool, username)
+            .await
+            .map_err(ApiError::internal)?;
         return Err(invalid_credentials());
     }
+    clear_login_attempts(&state.auth_pool, username)
+        .await
+        .map_err(ApiError::internal)?;
     if is_legacy_password_hash(&password_hash) {
         let upgraded = hash_password(&payload.password).map_err(ApiError::internal)?;
         sqlx::query(
@@ -321,14 +507,14 @@ async fn login(
         .await
         .map_err(ApiError::internal)?;
     let role: String = user.get("role");
-    let mut response = Json(LoginResponse {
+    let mut response = api(LoginResponse {
         username: username.to_string(),
         role,
     })
     .into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, session_cookie(&token));
+        .insert(header::SET_COOKIE, session_cookie(&token, &state.security));
     Ok(response)
 }
 
@@ -341,27 +527,24 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     {
         tracing::warn!(%error, "could not remove session during logout");
     }
-    let mut response = StatusCode::NO_CONTENT.into_response();
+    let mut response = (StatusCode::OK, api(json!({ "logged_out": true }))).into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, expired_session_cookie());
+        .insert(header::SET_COOKIE, expired_session_cookie(&state.security));
     response
 }
 
-async fn me(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<MeResponse>, ApiError> {
+async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
     match authenticated_user(&state.auth_pool, &headers)
         .await
         .map_err(ApiError::internal)?
     {
-        Some((username, role)) => Ok(Json(MeResponse {
+        Some((username, role)) => Ok(api(MeResponse {
             authenticated: true,
             username: Some(username),
             role: Some(role),
         })),
-        None => Ok(Json(MeResponse {
+        None => Ok(api(MeResponse {
             authenticated: false,
             username: None,
             role: None,
@@ -383,10 +566,11 @@ async fn change_password(
             .await
             .map_err(|error| ApiError::internal(error.into()))?;
     if !verify_password(&payload.current_password, &stored_hash) {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "当前密码错误".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "INVALID_PASSWORD",
+            "当前密码错误",
+        ));
     }
     let new_hash = hash_password(&payload.new_password).map_err(ApiError::internal)?;
     sqlx::query("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE username = ?")
@@ -405,7 +589,7 @@ async fn change_password(
             .await
             .map_err(|error| ApiError::internal(error.into()))?;
     }
-    Ok(Json(json!({ "message": "密码已更新" })))
+    Ok(api(json!({ "message": "密码已更新" })))
 }
 
 async fn list_users(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -426,7 +610,7 @@ async fn list_users(State(state): State<AppState>) -> Result<Json<Value>, ApiErr
             })
         })
         .collect::<Vec<_>>();
-    Ok(Json(json!({ "users": users })))
+    Ok(api(json!({ "users": users })))
 }
 
 async fn create_user(
@@ -439,10 +623,11 @@ async fn create_user(
     validate_password(&payload.password).map_err(ApiError::bad_request)?;
     let role = payload.role.trim();
     if !matches!(role, "admin" | "viewer") {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "角色必须为 admin 或 viewer".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "INVALID_ROLE",
+            "角色必须为 admin 或 viewer",
+        ));
     }
     let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)")
         .bind(&username)
@@ -450,10 +635,11 @@ async fn create_user(
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
     if exists {
-        return Err(ApiError {
-            status: StatusCode::CONFLICT,
-            message: "用户名已存在".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::CONFLICT,
+            "USER_EXISTS",
+            "用户名已存在",
+        ));
     }
     let created_at = now_string();
     sqlx::query(
@@ -468,7 +654,7 @@ async fn create_user(
     .map_err(|error| ApiError::internal(error.into()))?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "user": { "username": username, "role": role, "created_at": created_at } })),
+        api(json!({ "user": { "username": username, "role": role, "created_at": created_at } })),
     ))
 }
 
@@ -482,10 +668,11 @@ async fn remove_user(
         .map_err(ApiError::bad_request)?
         .to_string();
     if username == current_username {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "不能删除当前登录账户".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "CANNOT_DELETE_CURRENT_USER",
+            "不能删除当前登录账户",
+        ));
     }
     let role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE username = ?")
         .bind(&username)
@@ -493,10 +680,11 @@ async fn remove_user(
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
     let Some(role) = role else {
-        return Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            message: "用户不存在".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::NOT_FOUND,
+            "USER_NOT_FOUND",
+            "用户不存在",
+        ));
     };
     if role == "admin" {
         let admin_count: i64 =
@@ -505,10 +693,11 @@ async fn remove_user(
                 .await
                 .map_err(|error| ApiError::internal(error.into()))?;
         if admin_count <= 1 {
-            return Err(ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: "必须至少保留一个管理员账户".to_string(),
-            });
+            return Err(ApiError::client(
+                StatusCode::BAD_REQUEST,
+                "LAST_ADMIN",
+                "必须至少保留一个管理员账户",
+            ));
         }
     }
     sqlx::query("DELETE FROM users WHERE username = ?")
@@ -516,7 +705,7 @@ async fn remove_user(
         .execute(&*state.auth_pool)
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
-    Ok(Json(json!({ "deleted": username })))
+    Ok(api(json!({ "deleted": username })))
 }
 
 async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
@@ -533,6 +722,38 @@ async fn require_admin(State(state): State<AppState>, request: Request, next: Ne
     }
 }
 
+async fn csrf_protection(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    if matches!(
+        request.method(),
+        &Method::GET | &Method::HEAD | &Method::OPTIONS
+    ) {
+        return next.run(request).await;
+    }
+    let origin = request
+        .headers()
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok());
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let is_same_origin = origin.is_some_and(|origin| {
+        state
+            .security
+            .trusted_origins
+            .iter()
+            .any(|allowed| allowed == origin)
+            || host.is_some_and(|host| {
+                origin == format!("https://{host}") || origin == format!("http://{host}")
+            })
+    });
+    if !is_same_origin {
+        return ApiError::client(StatusCode::FORBIDDEN, "CSRF_REJECTED", "请求来源校验失败")
+            .into_response();
+    }
+    next.run(request).await
+}
+
 async fn authorized_user(
     pool: &StoragePool,
     headers: &HeaderMap,
@@ -544,24 +765,23 @@ async fn authorized_user(
             tracing::error!(%error, "session validation failed");
             ApiError::internal(error)
         })?
-        .ok_or_else(|| ApiError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "请先登录".to_string(),
-        })?;
+        .ok_or_else(|| ApiError::client(StatusCode::UNAUTHORIZED, "UNAUTHENTICATED", "请先登录"))?;
     if required_role.is_some_and(|role| user.1 != role) {
-        return Err(ApiError {
-            status: StatusCode::FORBIDDEN,
-            message: "当前账户没有执行此操作的权限".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::FORBIDDEN,
+            "FORBIDDEN",
+            "当前账户没有执行此操作的权限",
+        ));
     }
     Ok(user)
 }
 
 fn invalid_credentials() -> ApiError {
-    ApiError {
-        status: StatusCode::UNAUTHORIZED,
-        message: "用户名或密码错误".to_string(),
-    }
+    ApiError::client(
+        StatusCode::UNAUTHORIZED,
+        "INVALID_CREDENTIALS",
+        "用户名或密码错误",
+    )
 }
 
 async fn ensure_initial_admin(pool: &StoragePool, password: Option<&str>) -> Result<()> {
@@ -690,12 +910,13 @@ async fn create_session(pool: &StoragePool, username: &str) -> Result<String> {
         .collect::<String>();
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        "INSERT INTO sessions (token_hash, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (token_hash, username, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(token_hash(&token))
     .bind(username)
     .bind(now)
     .bind(now + SESSION_LIFETIME_SECONDS)
+    .bind(now)
     .execute(pool)
     .await?;
     Ok(token)
@@ -708,14 +929,24 @@ async fn authenticated_user(
     let Some(token) = session_token(headers) else {
         return Ok(None);
     };
+    let now = chrono::Utc::now().timestamp();
     let row = sqlx::query(
-        "SELECT users.username, users.role FROM sessions JOIN users ON users.username = sessions.username WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
+        "SELECT users.username, users.role FROM sessions JOIN users ON users.username = sessions.username WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND sessions.last_seen_at > ?",
     )
     .bind(token_hash(&token))
-    .bind(chrono::Utc::now().timestamp())
+    .bind(now)
+    .bind(now - SESSION_IDLE_TIMEOUT_SECONDS)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|row| (row.get("username"), row.get("role"))))
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    sqlx::query("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?")
+        .bind(now)
+        .bind(token_hash(&token))
+        .execute(pool)
+        .await?;
+    Ok(Some((row.get("username"), row.get("role"))))
 }
 
 fn session_token(headers: &HeaderMap) -> Option<String> {
@@ -734,8 +965,8 @@ fn token_hash(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
-fn session_cookie(token: &str) -> HeaderValue {
-    let secure = if env_bool("SESSION_COOKIE_SECURE", false) {
+fn session_cookie(token: &str, security: &SecurityConfig) -> HeaderValue {
+    let secure = if security.session_cookie_secure {
         "; Secure"
     } else {
         ""
@@ -746,22 +977,100 @@ fn session_cookie(token: &str) -> HeaderValue {
     .expect("session cookie is valid")
 }
 
-fn expired_session_cookie() -> HeaderValue {
-    HeaderValue::from_static("compass_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+async fn login_is_rate_limited(pool: &StoragePool, username: &str) -> Result<bool> {
+    let now = chrono::Utc::now().timestamp();
+    let row = sqlx::query("SELECT failed_count, window_started_at, locked_until FROM login_attempts WHERE username = ?")
+        .bind(username)
+        .fetch_optional(pool)
+        .await?;
+    let Some(row) = row else {
+        return Ok(false);
+    };
+    let locked_until: i64 = row.get("locked_until");
+    if locked_until > now {
+        return Ok(true);
+    }
+    let window_started_at: i64 = row.get("window_started_at");
+    if window_started_at + LOGIN_FAILURE_WINDOW_SECONDS <= now {
+        sqlx::query("DELETE FROM login_attempts WHERE username = ?")
+            .bind(username)
+            .execute(pool)
+            .await?;
+    }
+    Ok(false)
+}
+
+async fn record_failed_login(pool: &StoragePool, username: &str) -> Result<()> {
+    let now = chrono::Utc::now().timestamp();
+    let row = sqlx::query(
+        "SELECT failed_count, window_started_at FROM login_attempts WHERE username = ?",
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await?;
+    let (failed_count, window_started_at) = match row {
+        Some(row)
+            if row.get::<i64, _>("window_started_at") + LOGIN_FAILURE_WINDOW_SECONDS > now =>
+        {
+            (
+                row.get::<i64, _>("failed_count") + 1,
+                row.get::<i64, _>("window_started_at"),
+            )
+        }
+        _ => (1, now),
+    };
+    let locked_until = if failed_count >= LOGIN_FAILURE_LIMIT {
+        now + LOGIN_LOCKOUT_SECONDS
+    } else {
+        0
+    };
+    sqlx::query(
+        "INSERT INTO login_attempts (username, failed_count, window_started_at, locked_until) VALUES (?, ?, ?, ?) ON CONFLICT(username) DO UPDATE SET failed_count = excluded.failed_count, window_started_at = excluded.window_started_at, locked_until = excluded.locked_until",
+    )
+    .bind(username)
+    .bind(failed_count)
+    .bind(window_started_at)
+    .bind(locked_until)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn clear_login_attempts(pool: &StoragePool, username: &str) -> Result<()> {
+    sqlx::query("DELETE FROM login_attempts WHERE username = ?")
+        .bind(username)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+fn expired_session_cookie(security: &SecurityConfig) -> HeaderValue {
+    let secure = if security.session_cookie_secure {
+        "; Secure"
+    } else {
+        ""
+    };
+    HeaderValue::from_str(&format!(
+        "compass_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure}"
+    ))
+    .expect("session cookie is valid")
 }
 
 fn now_string() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
-async fn runtime_paths(State(state): State<AppState>) -> Json<RuntimePaths> {
-    Json((*state.paths).clone())
-}
-
 async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     if let Some(pool) = &state.storage_pool {
-        match kv_value(pool, "inventory_dashboard").await {
-            Ok(Some(value)) => return Ok(Json(value)),
+        match kv_value_with_updated_at(pool, "inventory_dashboard").await {
+            Ok(Some(payload)) => {
+                return Ok(api_with_meta(
+                    payload.value,
+                    "sqlite",
+                    false,
+                    payload.updated_at,
+                ));
+            }
             Ok(None) => tracing::warn!("SQLite inventory payload is missing; falling back to JSON"),
             Err(error) => {
                 tracing::warn!(%error, "SQLite inventory read failed; falling back to JSON")
@@ -770,56 +1079,106 @@ async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value
     }
 
     match load_inventory_dashboard(&state.paths).map_err(ApiError::internal)? {
-        Some(value) => Ok(Json(value)),
-        None => Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            message: format!(
-                "missing inventory snapshot: {}",
-                state.paths.inventory_snapshot_path().display()
-            ),
-        }),
+        Some(value) => Ok(api_with_meta(
+            value,
+            "json",
+            state.storage_pool.is_some(),
+            now_string(),
+        )),
+        None => Err(ApiError::client(
+            StatusCode::NOT_FOUND,
+            "INVENTORY_NOT_FOUND",
+            "暂无库存快照",
+        )),
     }
 }
 
-async fn load_channel_payload(state: &AppState) -> Result<Value, ApiError> {
+struct LoadedPayload {
+    value: Value,
+    source: &'static str,
+    fallback: bool,
+    updated_at: String,
+}
+
+async fn load_channel_payload(state: &AppState) -> Result<LoadedPayload, ApiError> {
     if let Some(pool) = &state.storage_pool {
-        match kv_value(pool, "channel_dashboard").await {
-            Ok(Some(value)) => return Ok(value),
+        match kv_value_with_updated_at(pool, "channel_dashboard").await {
+            Ok(Some(payload)) => {
+                return Ok(LoadedPayload {
+                    value: payload.value,
+                    source: "sqlite",
+                    fallback: false,
+                    updated_at: payload.updated_at,
+                });
+            }
             Ok(None) => tracing::warn!("SQLite channel payload is missing; falling back to JSON"),
             Err(error) => {
                 tracing::warn!(%error, "SQLite channel read failed; falling back to JSON")
             }
         }
     }
-    load_channel_dashboard(&state.paths).map_err(ApiError::internal)
+    Ok(LoadedPayload {
+        value: load_channel_dashboard(&state.paths).map_err(ApiError::internal)?,
+        source: "json",
+        fallback: state.storage_pool.is_some(),
+        updated_at: now_string(),
+    })
 }
 
 async fn channel_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    Ok(Json(load_channel_payload(&state).await?))
+    let payload = load_channel_payload(&state).await?;
+    Ok(api_with_meta(
+        payload.value,
+        payload.source,
+        payload.fallback,
+        payload.updated_at,
+    ))
 }
 
 async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let records = if let Some(pool) = &state.storage_pool {
+    let (records, records_source, records_fallback) = if let Some(pool) = &state.storage_pool {
         match load_operations_records_from_db(pool).await {
-            Ok(records) if !records.is_empty() => records,
+            Ok(records) if !records.is_empty() => (records, "sqlite", false),
             Ok(_) => {
                 tracing::warn!("SQLite operations payload is empty; falling back to JSON");
-                load_operations_records(&state.paths).map_err(ApiError::internal)?
+                (
+                    load_operations_records(&state.paths).map_err(ApiError::internal)?,
+                    "json",
+                    true,
+                )
             }
             Err(error) => {
                 tracing::warn!(%error, "SQLite operations read failed; falling back to JSON");
-                load_operations_records(&state.paths).map_err(ApiError::internal)?
+                (
+                    load_operations_records(&state.paths).map_err(ApiError::internal)?,
+                    "json",
+                    true,
+                )
             }
         }
     } else {
-        load_operations_records(&state.paths).map_err(ApiError::internal)?
+        (
+            load_operations_records(&state.paths).map_err(ApiError::internal)?,
+            "json",
+            false,
+        )
     };
     let channel = load_channel_payload(&state).await?;
-    Ok(Json(json!({
-        "records": records,
-        "channel": channel,
-        "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
-    })))
+    let source = if records_source == channel.source {
+        records_source
+    } else {
+        "mixed"
+    };
+    Ok(api_with_meta(
+        json!({
+            "records": records,
+            "channel": channel.value,
+            "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        }),
+        source,
+        records_fallback || channel.fallback,
+        channel.updated_at,
+    ))
 }
 
 async fn settlement_dashboard(
@@ -828,15 +1187,13 @@ async fn settlement_dashboard(
 ) -> Result<Json<Value>, ApiError> {
     let (start_date, end_date) = validate_settlement_date_range(query.start_date, query.end_date)
         .map_err(ApiError::bad_request)?;
-    Ok(Json(
-        load_settlement_dashboard_filtered(
-            &state.paths,
-            query.shop.as_deref(),
-            start_date.as_deref(),
-            end_date.as_deref(),
-        )
-        .map_err(ApiError::internal)?,
-    ))
+    Ok(api(load_settlement_dashboard_filtered(
+        &state.paths,
+        query.shop.as_deref(),
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )
+    .map_err(ApiError::internal)?))
 }
 
 fn validate_settlement_date_range(
@@ -883,7 +1240,7 @@ async fn upload_settlement(
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({
+        api(json!({
             "upload": upload,
             "dashboard": dashboard,
         })),
@@ -893,7 +1250,7 @@ async fn upload_settlement(
 async fn order_imports(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     if let Some(pool) = &state.storage_pool {
         match public_imports_from_db(pool).await {
-            Ok(Some(value)) => return Ok(Json(value)),
+            Ok(Some(value)) => return Ok(api_with_meta(value, "sqlite", false, now_string())),
             Ok(None) => {
                 tracing::warn!("SQLite order imports payload is missing; falling back to JSON")
             }
@@ -903,8 +1260,11 @@ async fn order_imports(State(state): State<AppState>) -> Result<Json<Value>, Api
         }
     }
 
-    Ok(Json(
+    Ok(api_with_meta(
         public_imports(&state.paths).map_err(ApiError::internal)?,
+        "json",
+        state.storage_pool.is_some(),
+        now_string(),
     ))
 }
 
@@ -913,9 +1273,13 @@ async fn preview_order_import(
     mut multipart: Multipart,
 ) -> Result<Json<Value>, ApiError> {
     let mut files = Vec::new();
-    while let Some(field) = multipart.next_field().await.map_err(|error| ApiError {
-        status: StatusCode::BAD_REQUEST,
-        message: format!("读取上传文件失败：{error}"),
+    while let Some(field) = multipart.next_field().await.map_err(|error| {
+        tracing::warn!(%error, "failed to read upload field");
+        ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "INVALID_UPLOAD",
+            "读取上传文件失败",
+        )
     })? {
         if field.name() != Some("files") {
             continue;
@@ -924,15 +1288,19 @@ async fn preview_order_import(
         let content = field
             .bytes()
             .await
-            .map_err(|error| ApiError {
-                status: StatusCode::BAD_REQUEST,
-                message: format!("读取上传文件失败：{error}"),
+            .map_err(|error| {
+                tracing::warn!(%error, "failed to read upload bytes");
+                ApiError::client(
+                    StatusCode::BAD_REQUEST,
+                    "INVALID_UPLOAD",
+                    "读取上传文件失败",
+                )
             })?
             .to_vec();
         files.push(UploadedWorkbook { filename, content });
     }
-    Ok(Json(
-        preview_upload(&state.paths, files).map_err(ApiError::bad_request)?,
+    Ok(api(
+        preview_upload(&state.paths, files).map_err(ApiError::bad_request)?
     ))
 }
 
@@ -946,15 +1314,16 @@ async fn commit_order_import(
     Json(payload): Json<CommitOrderImportPayload>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     if payload.preview_token.trim().is_empty() {
-        return Err(ApiError {
-            status: StatusCode::BAD_REQUEST,
-            message: "缺少导入预览凭据，请重新选择文件".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "MISSING_PREVIEW_TOKEN",
+            "缺少导入预览凭据，请重新选择文件",
+        ));
     }
     let value =
         commit_preview(&state.paths, &payload.preview_token).map_err(ApiError::bad_request)?;
     sync_storage_best_effort(&state).await;
-    Ok((StatusCode::CREATED, Json(value)))
+    Ok((StatusCode::CREATED, api(value)))
 }
 
 async fn remove_order_import(
@@ -963,25 +1332,26 @@ async fn remove_order_import(
 ) -> Result<Json<Value>, ApiError> {
     let deleted = delete_batch(&state.paths, &batch_id).map_err(ApiError::bad_request)?;
     sync_storage_best_effort(&state).await;
-    Ok(Json(json!({ "deleted": deleted })))
+    Ok(api(json!({ "deleted": deleted })))
 }
 
 async fn inventory_raw(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let path = state.paths.inventory_snapshot_path();
     match read_json_file(&path).map_err(ApiError::internal)? {
-        Some(value) => Ok(Json(value)),
-        None => Err(ApiError {
-            status: StatusCode::NOT_FOUND,
-            message: format!("missing inventory snapshot: {}", path.display()),
-        }),
+        Some(value) => Ok(api_with_meta(value, "json", false, now_string())),
+        None => Err(ApiError::client(
+            StatusCode::NOT_FOUND,
+            "INVENTORY_NOT_FOUND",
+            "暂无库存快照",
+        )),
     }
 }
 
 async fn status_raw(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let path = state.paths.task_status_path();
     match read_json_file(&path).map_err(ApiError::internal)? {
-        Some(value) => Ok(Json(value)),
-        None => Ok(Json(
+        Some(value) => Ok(api_with_meta(value, "json", false, now_string())),
+        None => Ok(api(
             json!({ "state": "unknown", "message": "no task status file" }),
         )),
     }
@@ -991,10 +1361,33 @@ async fn status(
     State(state): State<AppState>,
     Query(query): Query<StatusQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    Ok(Json(
-        status_payload(&state.paths, &state.novnc_url, query.terminal_output)
-            .map_err(ApiError::internal)?,
-    ))
+    Ok(api(status_payload(
+        &state.paths,
+        &state.novnc_url,
+        query.terminal_output,
+    )
+    .map_err(ApiError::internal)?))
+}
+
+async fn collection_shops(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    let config_path = state.paths.config_dir.join("shops.local.json");
+    let shops = match read_json_file(&config_path).map_err(ApiError::internal)? {
+        Some(config) => config
+            .get("shops")
+            .and_then(Value::as_array)
+            .map(|shops| {
+                shops
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|shop| !shop.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    Ok(api(json!({ "shops": shops })))
 }
 
 async fn scrape(State(state): State<AppState>) -> Result<(StatusCode, Json<Value>), ApiError> {
@@ -1039,20 +1432,22 @@ async fn enqueue_collection(
             .and_then(Value::as_bool)
             .unwrap_or(false);
     if busy {
-        return Err(ApiError {
-            status: StatusCode::CONFLICT,
-            message: "已有采集任务或待处理请求".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::CONFLICT,
+            "COLLECTION_BUSY",
+            "已有采集任务或待处理请求",
+        ));
     }
     if !current
         .get("collector_online")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return Err(ApiError {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "独立采集服务当前不在线".to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "COLLECTOR_UNAVAILABLE",
+            "独立采集服务当前不在线",
+        ));
     }
     let paths = state.paths.clone();
     let request_modules = modules.clone();
@@ -1073,7 +1468,7 @@ async fn enqueue_collection(
     };
     Ok((
         StatusCode::ACCEPTED,
-        Json(json!({
+        api(json!({
             "message": message,
             "modules": modules,
             "date": date,
@@ -1201,18 +1596,17 @@ fn write_collection_request(
 }
 
 async fn status_log_tail(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let path = state.paths.progress_log_path();
     let tail = progress_log_tail(&state.paths)
         .map_err(ApiError::internal)?
         .unwrap_or_default();
-    Ok(Json(json!({ "path": path, "terminal_output": tail })))
+    Ok(api(json!({ "terminal_output": tail })))
 }
 
 async fn clear_collection_terminal(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     clear_progress_log(&state.paths).map_err(ApiError::internal)?;
     let status =
         status_payload(&state.paths, &state.novnc_url, true).map_err(ApiError::internal)?;
-    Ok(Json(json!({
+    Ok(api(json!({
         "cleared": true,
         "message": "采集终端数据已清除",
         "status": status,
@@ -1221,17 +1615,17 @@ async fn clear_collection_terminal(State(state): State<AppState>) -> Result<Json
 
 async fn storage_summary(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let Some(pool) = &state.storage_pool else {
-        return Err(ApiError {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "SQLite-backed reads are disabled; set LUOPAN_API_RS_STORAGE_READS=true"
-                .to_string(),
-        });
+        return Err(ApiError::client(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "STORAGE_DISABLED",
+            "SQLite 读取未启用",
+        ));
     };
     let payload = summary(pool)
         .await
         .map_err(ApiError::internal)?
         .as_json(&state.paths);
-    Ok(Json(payload))
+    Ok(api(payload))
 }
 
 async fn diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
@@ -1242,7 +1636,10 @@ async fn diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiEr
     let storage = if let Some(pool) = &state.storage_pool {
         match summary(pool).await {
             Ok(summary) => json!({"ok": true, "summary": summary.as_json(&state.paths)}),
-            Err(error) => json!({"ok": false, "error": error.to_string()}),
+            Err(error) => {
+                tracing::error!(%error, "SQLite diagnostics check failed");
+                json!({"ok": false, "error": "SQLite 检查失败"})
+            }
         }
     } else {
         json!({"ok": false, "error": "SQLite-backed reads are disabled"})
@@ -1255,9 +1652,8 @@ async fn diagnostics(State(state): State<AppState>) -> Result<Json<Value>, ApiEr
         && inventory_snapshot
         && task_status
         && storage.get("ok").and_then(Value::as_bool).unwrap_or(false);
-    Ok(Json(json!({
+    Ok(api(json!({
         "ok": ok,
-        "paths": state.paths,
         "checks": {
             "inventory_snapshot": inventory_snapshot,
             "task_status": task_status,
@@ -1310,6 +1706,14 @@ mod tests {
         pool
     }
 
+    fn test_security() -> Arc<SecurityConfig> {
+        Arc::new(SecurityConfig {
+            production: false,
+            session_cookie_secure: false,
+            trusted_origins: vec!["http://127.0.0.1:5173".to_string()],
+        })
+    }
+
     #[test]
     fn verifies_legacy_salt_sha256_passwords() {
         let hash = format!(
@@ -1356,6 +1760,7 @@ mod tests {
             novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
             auth_pool: pool.clone(),
             storage_pool: None,
+            security: test_security(),
         };
         let response = login(
             State(state),
@@ -1430,6 +1835,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn idle_sessions_are_rejected() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .bind("idle-user")
+        .bind(hash_password("password").unwrap())
+        .bind("viewer")
+        .bind(now_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let token = create_session(&pool, "idle-user").await.unwrap();
+        sqlx::query("UPDATE sessions SET last_seen_at = 0 WHERE token_hash = ?")
+            .bind(token_hash(&token))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{SESSION_COOKIE_NAME}={token}")).unwrap(),
+        );
+        assert!(authenticated_user(&pool, &headers).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn repeated_login_failures_are_rate_limited() {
+        let pool = test_pool().await;
+        for _ in 0..LOGIN_FAILURE_LIMIT {
+            record_failed_login(&pool, "unknown-user").await.unwrap();
+        }
+        assert!(login_is_rate_limited(&pool, "unknown-user").await.unwrap());
+        clear_login_attempts(&pool, "unknown-user").await.unwrap();
+        assert!(!login_is_rate_limited(&pool, "unknown-user").await.unwrap());
+    }
+
+    #[test]
+    fn production_cookie_is_secure() {
+        let security = SecurityConfig {
+            production: true,
+            session_cookie_secure: true,
+            trusted_origins: Vec::new(),
+        };
+        assert!(
+            session_cookie("token", &security)
+                .to_str()
+                .unwrap()
+                .contains("; Secure")
+        );
+    }
+
+    #[tokio::test]
+    async fn internal_errors_hide_details_and_include_request_id() {
+        let response = ApiError::internal(anyhow::anyhow!("failed to open /private/secret.db"))
+            .into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(response.headers().contains_key("x-request-id"));
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["error"]["message"], "服务器内部错误");
+        assert!(!payload["error"].to_string().contains("secret"));
+        assert!(payload["meta"]["request_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
     async fn viewer_sessions_cannot_pass_admin_authorization() {
         let pool = test_pool().await;
         sqlx::query(
@@ -1488,6 +1961,7 @@ mod tests {
             novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
             auth_pool: pool.clone(),
             storage_pool: None,
+            security: test_security(),
         };
 
         let (status, _) = create_user(
@@ -1502,7 +1976,7 @@ mod tests {
         .unwrap();
         assert_eq!(status, StatusCode::CREATED);
         let users = list_users(State(state.clone())).await.unwrap().0;
-        assert_eq!(users["users"].as_array().unwrap().len(), 2);
+        assert_eq!(users["data"]["users"].as_array().unwrap().len(), 2);
 
         let _ = change_password(
             State(state.clone()),
@@ -1610,6 +2084,7 @@ mod tests {
             novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
             auth_pool: Arc::new(test_pool().await),
             storage_pool: None,
+            security: test_security(),
         };
 
         let error = scrape(State(state)).await.unwrap_err();
@@ -1642,6 +2117,7 @@ mod tests {
             novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
             auth_pool: Arc::new(test_pool().await),
             storage_pool: None,
+            security: test_security(),
         };
 
         let (status, payload) = run_collection(
@@ -1656,7 +2132,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(status, StatusCode::ACCEPTED);
-        assert_eq!(payload.0["modules"], json!(["channel"]));
+        assert_eq!(payload.0["data"]["modules"], json!(["channel"]));
         let request = read_json_file(&paths.collection_request_path())
             .unwrap()
             .unwrap();
@@ -1689,6 +2165,7 @@ mod tests {
             novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
             auth_pool: Arc::new(test_pool().await),
             storage_pool: None,
+            security: test_security(),
         };
 
         let (status, payload) = run_collection(
@@ -1696,19 +2173,19 @@ mod tests {
             Json(CollectionRunPayload {
                 modules: vec!["operations".to_string()],
                 date: Some("2026-07-25".to_string()),
-                shops: vec!["华硕凡飞笔记本电脑专卖店".to_string()],
+                shops: vec!["店铺 A".to_string()],
             }),
         )
         .await
         .unwrap();
 
         assert_eq!(status, StatusCode::ACCEPTED);
-        assert_eq!(payload.0["date"], json!("2026-07-25"));
+        assert_eq!(payload.0["data"]["date"], json!("2026-07-25"));
         let request = read_json_file(&paths.collection_request_path())
             .unwrap()
             .unwrap();
         assert_eq!(request["date"], json!("2026-07-25"));
-        assert_eq!(request["shops"], json!(["华硕凡飞笔记本电脑专卖店"]));
+        assert_eq!(request["shops"], json!(["店铺 A"]));
         let _ = fs::remove_dir_all(root);
     }
 

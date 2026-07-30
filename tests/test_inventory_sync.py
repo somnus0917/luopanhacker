@@ -54,7 +54,11 @@ class InventorySyncTest(unittest.TestCase):
         inventory_sync.LOCK_PATH = root / ".sync.lock"
         inventory_data.SNAPSHOT_PATH = inventory_sync.SNAPSHOT_PATH
         inventory_data.HISTORY_DIR = inventory_sync.HISTORY_DIR
-        self.original_fetchers = (inventory_sync.inventory_rows, inventory_sync.sales_rows, inventory_sync.inbound_rows)
+        self.original_fetchers = (
+            inventory_sync.inventory_rows,
+            inventory_sync.sales_rows,
+            inventory_sync.inbound_rows,
+        )
 
     def tearDown(self) -> None:
         inventory_sync.INVENTORY_DIR = self.original_paths["INVENTORY_DIR"]
@@ -64,15 +68,28 @@ class InventorySyncTest(unittest.TestCase):
         inventory_sync.LOCK_PATH = self.original_paths["LOCK_PATH"]
         inventory_data.SNAPSHOT_PATH = self.original_paths["data_snapshot"]
         inventory_data.HISTORY_DIR = self.original_paths["data_history"]
-        inventory_sync.inventory_rows, inventory_sync.sales_rows, inventory_sync.inbound_rows = self.original_fetchers
+        (
+            inventory_sync.inventory_rows,
+            inventory_sync.sales_rows,
+            inventory_sync.inbound_rows,
+        ) = self.original_fetchers
         self.temp.cleanup()
 
     def set_fetchers(self, inventory: list[dict[str, object]]) -> None:
         inventory_sync.inventory_rows = lambda now: inventory
-        inventory_sync.sales_rows = lambda now: [{"warehouse_no": "001", "spec_no": "A", "date": now.date().isoformat(), "quantity": 7}]
+        inventory_sync.sales_rows = lambda now: [
+            {
+                "warehouse_no": "001",
+                "spec_no": "A",
+                "date": now.date().isoformat(),
+                "quantity": 7,
+            }
+        ]
         inventory_sync.inbound_rows = lambda now: []
 
-    def test_incremental_sync_preserves_unchanged_rows_and_daily_history_is_immutable(self) -> None:
+    def test_incremental_sync_preserves_unchanged_rows_and_daily_history_is_immutable(
+        self,
+    ) -> None:
         day_one = datetime(2026, 7, 1, 3, 0, tzinfo=SHANGHAI)
         self.set_fetchers([stock("001", "A", 10), stock("001", "B", 20)])
         first = inventory_sync.run_sync(day_one)
@@ -83,20 +100,38 @@ class InventorySyncTest(unittest.TestCase):
         self.assertFalse(repeat["history_written"])
         current = json.loads(inventory_sync.SNAPSHOT_PATH.read_text(encoding="utf-8"))
         self.assertEqual({row["spec_no"] for row in current["inventory"]}, {"A", "B"})
-        self.assertEqual(next(row for row in current["inventory"] if row["spec_no"] == "A")["available_num"], 8)
-        history = json.loads((inventory_sync.HISTORY_DIR / "2026-07-01.json").read_text(encoding="utf-8"))
-        self.assertEqual(next(row for row in history["inventory"] if row["spec_no"] == "A")["available_num"], 10)
+        self.assertEqual(
+            next(row for row in current["inventory"] if row["spec_no"] == "A")[
+                "available_num"
+            ],
+            8,
+        )
+        history = json.loads(
+            (inventory_sync.HISTORY_DIR / "2026-07-01.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            next(row for row in history["inventory"] if row["spec_no"] == "A")[
+                "available_num"
+            ],
+            10,
+        )
 
     def test_inventory_rows_preserves_wdt_cost_price(self) -> None:
         now = datetime(2026, 7, 1, 3, 0, tzinfo=SHANGHAI)
-        with patch.object(inventory_sync, "fetch_all", return_value=[{
-            "warehouse_no": "001",
-            "warehouse_name": "主仓",
-            "spec_no": "A",
-            "stock_num": "10",
-            "avaliable_num": "8",
-            "cost_price": "12.34",
-        }]):
+        with patch.object(
+            inventory_sync,
+            "fetch_all",
+            return_value=[
+                {
+                    "warehouse_no": "001",
+                    "warehouse_name": "主仓",
+                    "spec_no": "A",
+                    "stock_num": "10",
+                    "avaliable_num": "8",
+                    "cost_price": "12.34",
+                }
+            ],
+        ):
             rows = inventory_sync.inventory_rows(now)
 
         self.assertEqual(rows[0]["cost_price"], 12.34)
@@ -107,7 +142,9 @@ class InventorySyncTest(unittest.TestCase):
         inventory_sync.run_sync(now)
         before = inventory_sync.SNAPSHOT_PATH.read_bytes()
 
-        inventory_sync.sales_rows = lambda now: (_ for _ in ()).throw(RuntimeError("模拟销售接口异常"))
+        inventory_sync.sales_rows = lambda now: (_ for _ in ()).throw(
+            RuntimeError("模拟销售接口异常")
+        )
         with self.assertRaisesRegex(RuntimeError, "模拟销售接口异常"):
             inventory_sync.run_sync(now.replace(day=3))
 
@@ -122,9 +159,19 @@ class InventorySyncTest(unittest.TestCase):
             snapshot = {
                 "captured_at": captured.isoformat(timespec="seconds"),
                 "inventory": [stock("001", "A", 30)],
-                "sales_7d": [{"warehouse_no": "001", "spec_no": "A", "date": captured.date().isoformat(), "quantity": 1}],
+                "sales_7d": [
+                    {
+                        "warehouse_no": "001",
+                        "spec_no": "A",
+                        "date": captured.date().isoformat(),
+                        "quantity": 1,
+                    }
+                ],
             }
-            inventory_sync.atomic_write_json(inventory_sync.HISTORY_DIR / f"{captured.date().isoformat()}.json", snapshot)
+            inventory_sync.atomic_write_json(
+                inventory_sync.HISTORY_DIR / f"{captured.date().isoformat()}.json",
+                snapshot,
+            )
 
         history = inventory_data.historical_turnover()
         self.assertTrue(history["ready"])

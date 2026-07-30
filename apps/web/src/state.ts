@@ -52,7 +52,12 @@ export type AppState = {
   channel: AnyRecord | null;
 };
 
-export const COLLECTION_SHOPS = ["华硕凡飞笔记本电脑专卖店", "惠普办公设备旗舰店", "HYPERX极度未知凡飞专卖店", "acer宏碁凡飞专卖店"];
+export let COLLECTION_SHOPS: string[] = [];
+
+export function setCollectionShops(shops: string[]) {
+  COLLECTION_SHOPS = [...new Set(shops.filter(Boolean))];
+  state.collectionBackfillShops = new Set(COLLECTION_SHOPS);
+}
 
 export const localDateValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 

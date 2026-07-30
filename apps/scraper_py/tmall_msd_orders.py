@@ -3,7 +3,6 @@ import asyncio
 import csv
 import json
 import os
-import random
 import re
 import sys
 from datetime import datetime, timedelta
@@ -218,7 +217,10 @@ async def try_enter_default_shop(page):
             body_text = await root.locator("body").inner_text(timeout=1500)
         except Exception:
             continue
-        if not re.search(r"选择.*(店铺|组织|商家)|请选择.*(店铺|组织|商家)|店铺|组织|商家账号", body_text):
+        if not re.search(
+            r"选择.*(店铺|组织|商家)|请选择.*(店铺|组织|商家)|店铺|组织|商家账号",
+            body_text,
+        ):
             continue
 
         log("检测到可能的选择店铺/组织/商家页面，尝试进入默认选项")
@@ -249,7 +251,9 @@ async def try_enter_default_shop(page):
                 except Exception:
                     pass
 
-            button_info = await root.locator("button, .next-btn, .ant-btn, .auxo-btn").evaluate_all(
+            button_info = await root.locator(
+                "button, .next-btn, .ant-btn, .auxo-btn"
+            ).evaluate_all(
                 """
                 (els) => els.map((el, index) => {
                     const rect = el.getBoundingClientRect();
@@ -279,15 +283,23 @@ async def try_enter_default_shop(page):
             candidates = [
                 item
                 for item in button_info
-                if re.search(r"进入|确定|确认|下一步|开始|商家|Enter|Confirm|OK", item["text"], re.I)
+                if re.search(
+                    r"进入|确定|确认|下一步|开始|商家|Enter|Confirm|OK",
+                    item["text"],
+                    re.I,
+                )
             ]
             if not candidates:
                 candidates = [item for item in button_info if item["blue"]]
             if not candidates:
                 continue
-            candidates.sort(key=lambda item: (not item["blue"], len(item["text"] or "")))
+            candidates.sort(
+                key=lambda item: (not item["blue"], len(item["text"] or ""))
+            )
             await paced_click(
-                root.locator("button, .next-btn, .ant-btn, .auxo-btn").nth(candidates[0]["index"]),
+                root.locator("button, .next-btn, .ant-btn, .auxo-btn").nth(
+                    candidates[0]["index"]
+                ),
                 f"进入默认店铺/组织/商家: {candidates[0]['text'] or '主按钮'}",
                 after_min=3.0,
                 after_max=5.0,
@@ -298,7 +310,9 @@ async def try_enter_default_shop(page):
     return False
 
 
-async def wait_for_manual_login(page, output_dir, timeout_minutes, username="", password=""):
+async def wait_for_manual_login(
+    page, output_dir, timeout_minutes, username="", password=""
+):
     text = ""
     try:
         text = await page.locator("body").inner_text(timeout=5000)
@@ -318,7 +332,9 @@ async def wait_for_manual_login(page, output_dir, timeout_minutes, username="", 
             try:
                 await find_business_frame(page)
                 log("自动登录后已进入订单页面")
-                write_status(output_dir, state="running", message="自动登录完成，继续采集")
+                write_status(
+                    output_dir, state="running", message="自动登录完成，继续采集"
+                )
                 await human_pause(2.0, 4.0)
                 return
             except Exception:
@@ -632,16 +648,18 @@ async def choose_largest_page_size(frame, requested_size):
         return current_size
 
     sizes = sorted({item["size"] for item in options})
-    eligible_sizes = [size for size in sizes if not requested_size or size <= requested_size]
+    eligible_sizes = [
+        size for size in sizes if not requested_size or size <= requested_size
+    ]
     target_size = max(eligible_sizes or sizes)
     if current_size and current_size >= target_size:
         log(f"当前每页条数 {current_size} 已不小于目标 {target_size}")
         await frame.page.keyboard.press("Escape")
         return current_size
 
-    option = frame.locator(".auxo-select-dropdown:visible .auxo-select-item-option").filter(
-        has_text=re.compile(rf"{target_size}\s*(条|项)?/?\s*(页|page)?", re.I)
-    )
+    option = frame.locator(
+        ".auxo-select-dropdown:visible .auxo-select-item-option"
+    ).filter(has_text=re.compile(rf"{target_size}\s*(条|项)?/?\s*(页|page)?", re.I))
     await paced_click(option, f"{target_size} 条/页", after_min=4.0, after_max=7.0)
     try:
         await wait_network_quiet(frame.page, timeout=45000)
@@ -665,7 +683,9 @@ async def choose_largest_page_size_button(frame, requested_size):
     sizes = sorted({item["size"] for item in buttons})
     if not sizes:
         return None
-    eligible_sizes = [size for size in sizes if not requested_size or size <= requested_size]
+    eligible_sizes = [
+        size for size in sizes if not requested_size or size <= requested_size
+    ]
     target_size = max(eligible_sizes or sizes)
     candidate = next(item for item in buttons if item["size"] == target_size)
     await paced_click(
@@ -746,7 +766,9 @@ async def click_next_page(frame):
     next_button = frame.locator(
         ".auxo-pagination-next:not(.auxo-pagination-disabled) button"
     )
-    await paced_click(next_button, "下一页", after_min=4.0, after_max=7.0, timeout=60000)
+    await paced_click(
+        next_button, "下一页", after_min=4.0, after_max=7.0, timeout=60000
+    )
     try:
         await wait_network_quiet(frame.page, timeout=45000)
     except Exception:
@@ -828,7 +850,11 @@ def normalize_list_order_link(row, page_no):
     base = row.get("baseInfo") or {}
     unbox = row.get("unBoxInfo") or {}
     order_id = str(base.get("id") or base.get("orderId") or row.get("id") or "")
-    order_code = row.get("orderCode") or base.get("orderCode") or (f"SCP{order_id}" if order_id else "")
+    order_code = (
+        row.get("orderCode")
+        or base.get("orderCode")
+        or (f"SCP{order_id}" if order_id else "")
+    )
     return {
         "orderId": order_id,
         "ownerId": base.get("ownerId") or row.get("ownerId") or "",
@@ -849,17 +875,23 @@ def normalize_list_order_link(row, page_no):
         "page_no": page_no,
         "list_trade_create_time": unbox.get("tradeCreateTimeString", ""),
         "list_trade_pay_time": unbox.get("tradePayTimeString", ""),
-        "list_amount": unbox.get("orderAmountString") or normalize_money(base.get("orderAmount")),
-        "list_discount": unbox.get("discountAmountString") or normalize_money(base.get("discountAmount")),
+        "list_amount": unbox.get("orderAmountString")
+        or normalize_money(base.get("orderAmount")),
+        "list_discount": unbox.get("discountAmountString")
+        or normalize_money(base.get("discountAmount")),
         "list_order_status": base.get("orderStatus"),
         "list_biz_order_status": base.get("bizOrderStatus"),
         "list_status_desc": unbox.get("statusDesc", ""),
-        "list_logistics_order_code": base.get("consignLgOrderCode") or base.get("sourceLgOrderCode") or "",
+        "list_logistics_order_code": base.get("consignLgOrderCode")
+        or base.get("sourceLgOrderCode")
+        or "",
         "list_buyer_nick": base.get("buyerNick", ""),
     }
 
 
-async def collect_order_links_from_api(context, start_time, end_time, page_size, max_pages):
+async def collect_order_links_from_api(
+    context, start_time, end_time, page_size, max_pages
+):
     page_index = 1
     total_count = None
     links = []
@@ -954,11 +986,17 @@ def normalize_order(order_link, detail_response, items_response):
     detail_payload = detail_response.get("json") or {}
     items_payload = items_response.get("json") or {}
     order = {
-        "order_code": first_value(detail_payload, "orderCode") or order_link.get("orderCode", ""),
-        "order_id": str(first_value(detail_payload, "orderId") or order_link.get("orderId", "")),
+        "order_code": first_value(detail_payload, "orderCode")
+        or order_link.get("orderCode", ""),
+        "order_id": str(
+            first_value(detail_payload, "orderId") or order_link.get("orderId", "")
+        ),
         "trade_id": str(first_value(detail_payload, "tradeId")),
         "owner_id": order_link.get("ownerId", ""),
-        "pay_time": clean(first_value(detail_payload, "payTime", "payTimeStr") or order_link.get("list_trade_pay_time")),
+        "pay_time": clean(
+            first_value(detail_payload, "payTime", "payTimeStr")
+            or order_link.get("list_trade_pay_time")
+        ),
         "create_time": clean(
             first_value(detail_payload, "createTime", "createTimeStr")
             or order_link.get("list_trade_create_time")
@@ -971,8 +1009,14 @@ def normalize_order(order_link, detail_response, items_response):
             first_value(detail_payload, "discount", "discountAmount")
             or order_link.get("list_discount")
         ),
-        "order_status": clean(first_value(detail_payload, "orderStatus", "status") or order_link.get("list_order_status")),
-        "biz_order_status": clean(first_value(detail_payload, "bizOrderStatus") or order_link.get("list_biz_order_status")),
+        "order_status": clean(
+            first_value(detail_payload, "orderStatus", "status")
+            or order_link.get("list_order_status")
+        ),
+        "biz_order_status": clean(
+            first_value(detail_payload, "bizOrderStatus")
+            or order_link.get("list_biz_order_status")
+        ),
         "status_desc": clean(order_link.get("list_status_desc")),
         "logistics_order_code": clean(
             first_value(
@@ -985,7 +1029,10 @@ def normalize_order(order_link, detail_response, items_response):
             or order_link.get("list_logistics_order_code")
         ),
         "consign_time": clean(first_value(detail_payload, "consignTime", "sendTime")),
-        "buyer_nick": clean(first_value(detail_payload, "buyerNick", "buyerNickName") or order_link.get("list_buyer_nick")),
+        "buyer_nick": clean(
+            first_value(detail_payload, "buyerNick", "buyerNickName")
+            or order_link.get("list_buyer_nick")
+        ),
         "detail_status": detail_response.get("status"),
         "items_status": items_response.get("status"),
         "items_count": 0,
@@ -1003,12 +1050,26 @@ def normalize_order(order_link, detail_response, items_response):
             "item_code": clean(raw.get("itemCode") or raw.get("scItemCode") or ""),
             "sc_item_code": clean(raw.get("scItemCode") or ""),
             "bar_code": clean(raw.get("barCode") or raw.get("barcode") or ""),
-            "item_name": clean(raw.get("scItemName") or raw.get("itemName") or raw.get("title") or ""),
-            "quantity": raw.get("quantity") or raw.get("itemQuantity") or raw.get("num") or raw.get("itemNum") or "",
-            "item_amount": normalize_money(raw.get("itemAmount") or raw.get("amount") or ""),
-            "sale_price": normalize_money(raw.get("salePrice") or raw.get("price") or ""),
-            "discount": normalize_money(raw.get("discount") or raw.get("discountAmount") or ""),
-            "warehouse_code": clean(raw.get("warehouseCode") or raw.get("storeCode") or ""),
+            "item_name": clean(
+                raw.get("scItemName") or raw.get("itemName") or raw.get("title") or ""
+            ),
+            "quantity": raw.get("quantity")
+            or raw.get("itemQuantity")
+            or raw.get("num")
+            or raw.get("itemNum")
+            or "",
+            "item_amount": normalize_money(
+                raw.get("itemAmount") or raw.get("amount") or ""
+            ),
+            "sale_price": normalize_money(
+                raw.get("salePrice") or raw.get("price") or ""
+            ),
+            "discount": normalize_money(
+                raw.get("discount") or raw.get("discountAmount") or ""
+            ),
+            "warehouse_code": clean(
+                raw.get("warehouseCode") or raw.get("storeCode") or ""
+            ),
             "brand_id": str(raw.get("brandId") or ""),
             "scm_cat_id": str(raw.get("scmCatId") or ""),
             "supplier_id": str(raw.get("supplierId") or ""),
@@ -1033,7 +1094,9 @@ async def fetch_order_details(context, order_links, concurrency):
             detail_response = await context_fetch_json(context, detail_url)
             await human_pause(0.3, 0.9)
             items_response = await context_fetch_json(context, items_url)
-            order, item_rows = normalize_order(order_link, detail_response, items_response)
+            order, item_rows = normalize_order(
+                order_link, detail_response, items_response
+            )
             log(
                 f"[{index + 1}/{len(order_links)}] {order.get('order_code') or order_link.get('orderCode')} "
                 f"详情状态 {detail_response.get('status')}，货品 {len(item_rows)}"
@@ -1049,7 +1112,9 @@ async def fetch_order_details(context, order_links, concurrency):
                 "items": item_rows,
             }
 
-    tasks = [fetch_one(index, order_link) for index, order_link in enumerate(order_links)]
+    tasks = [
+        fetch_one(index, order_link) for index, order_link in enumerate(order_links)
+    ]
     for result in await asyncio.gather(*tasks):
         raw_records.append(result)
         orders.append(result["order"])
@@ -1091,7 +1156,9 @@ def save_results(
         "items": items,
         "raw_file": str(raw_path),
     }
-    json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     raw_path.write_text(
         json.dumps(
             {
@@ -1126,7 +1193,9 @@ def save_results(
     with orders_csv.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.DictWriter(file, fieldnames=order_fields)
         writer.writeheader()
-        writer.writerows({field: row.get(field, "") for field in order_fields} for row in orders)
+        writer.writerows(
+            {field: row.get(field, "") for field in order_fields} for row in orders
+        )
 
     item_fields = [
         "order_code",
@@ -1151,7 +1220,9 @@ def save_results(
     with items_csv.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.DictWriter(file, fieldnames=item_fields)
         writer.writeheader()
-        writer.writerows({field: row.get(field, "") for field in item_fields} for row in items)
+        writer.writerows(
+            {field: row.get(field, "") for field in item_fields} for row in items
+        )
 
     log(f"已写入 JSON: {json_path}")
     log(f"已写入原始响应: {raw_path}")
@@ -1168,8 +1239,14 @@ def save_results(
 async def run(args):
     data_date = args.date or yesterday()
     start_time, end_time = parse_day_range(data_date)
-    output_dir = Path(args.output_dir) if args.output_dir else OUTPUT_ROOT / data_date / "tmall_msd"
-    write_status(output_dir, state="running", message="开始采集天猫 MSD 订单", date=data_date)
+    output_dir = (
+        Path(args.output_dir)
+        if args.output_dir
+        else OUTPUT_ROOT / data_date / "tmall_msd"
+    )
+    write_status(
+        output_dir, state="running", message="开始采集天猫 MSD 订单", date=data_date
+    )
     log(f"数据日期: {data_date}")
     log(f"下单时间范围: {start_time} ~ {end_time}")
     log(f"输出目录: {output_dir}")
@@ -1188,7 +1265,9 @@ async def run(args):
             launch_options["channel"] = args.channel
 
         context = await playwright.chromium.launch_persistent_context(
-            user_data_dir=str(Path(args.session_dir) if args.session_dir else SESSION_DIR),
+            user_data_dir=str(
+                Path(args.session_dir) if args.session_dir else SESSION_DIR
+            ),
             **launch_options,
         )
         context.set_default_timeout(60000)
@@ -1197,9 +1276,13 @@ async def run(args):
         captured_urls = []
         page.on(
             "response",
-            lambda response: captured_urls.append(response.url)
-            if re.search(r"order|fulfillment|portal|cbbs|query|list", response.url, re.I)
-            else None,
+            lambda response: (
+                captured_urls.append(response.url)
+                if re.search(
+                    r"order|fulfillment|portal|cbbs|query|list", response.url, re.I
+                )
+                else None
+            ),
         )
 
         log("打开天猫 MSD 订单管理页...")
@@ -1239,7 +1322,12 @@ async def run(args):
             concurrency=args.detail_concurrency,
         )
         orders.sort(key=lambda item: item.get("pay_time") or "", reverse=True)
-        items.sort(key=lambda item: (item.get("order_code") or "", item.get("order_item_id") or ""))
+        items.sort(
+            key=lambda item: (
+                item.get("order_code") or "",
+                item.get("order_item_id") or "",
+            )
+        )
         paths = save_results(
             output_dir,
             data_date,
@@ -1270,17 +1358,41 @@ async def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="按下单时间抓取天猫 MSD 履约订单")
-    parser.add_argument("--date", default=yesterday(), help="数据日期，格式 YYYY-MM-DD，默认昨日")
-    parser.add_argument("--output-dir", help="输出目录，默认 output/orders/<date>/tmall_msd/")
+    parser.add_argument(
+        "--date", default=yesterday(), help="数据日期，格式 YYYY-MM-DD，默认昨日"
+    )
+    parser.add_argument(
+        "--output-dir", help="输出目录，默认 output/orders/<date>/tmall_msd/"
+    )
     parser.add_argument("--session-dir", help=f"浏览器登录态目录，默认 {SESSION_DIR}")
-    parser.add_argument("--channel", default="chrome", help="浏览器 channel，默认 chrome；可设为空使用 Playwright Chromium")
-    parser.add_argument("--headless", action="store_true", help="无头模式；首次登录不要使用")
+    parser.add_argument(
+        "--channel",
+        default="chrome",
+        help="浏览器 channel，默认 chrome；可设为空使用 Playwright Chromium",
+    )
+    parser.add_argument(
+        "--headless", action="store_true", help="无头模式；首次登录不要使用"
+    )
     parser.add_argument("--slow-mo", type=int, default=350)
     parser.add_argument("--login-timeout-minutes", type=int, default=15)
-    parser.add_argument("--initial-page-size", type=int, default=10, help="结果数超过该值时优先调大每页条数")
-    parser.add_argument("--page-size", type=int, default=200, help="列表接口每页订单数，默认 200 以减少翻页")
-    parser.add_argument("--max-pages", type=int, default=0, help="最多翻页数，0 表示不限")
-    parser.add_argument("--detail-concurrency", type=int, default=2, help="详情接口并发数，建议保持较低")
+    parser.add_argument(
+        "--initial-page-size",
+        type=int,
+        default=10,
+        help="结果数超过该值时优先调大每页条数",
+    )
+    parser.add_argument(
+        "--page-size",
+        type=int,
+        default=200,
+        help="列表接口每页订单数，默认 200 以减少翻页",
+    )
+    parser.add_argument(
+        "--max-pages", type=int, default=0, help="最多翻页数，0 表示不限"
+    )
+    parser.add_argument(
+        "--detail-concurrency", type=int, default=2, help="详情接口并发数，建议保持较低"
+    )
     return parser.parse_args()
 
 

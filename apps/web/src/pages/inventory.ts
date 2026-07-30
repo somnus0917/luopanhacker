@@ -1,10 +1,11 @@
 import { $, $$ } from "../dom";
+import { apiFetch as fetch } from "../api";
 import { escapeHtml, number, settlementMoney, whole } from "../format";
 import { state } from "../state";
 import type { AnyRecord } from "../state";
 import { showLogin } from "./account";
 
-function sortRows(rows: AnyRecord[], key: string, dir: string): AnyRecord[] {
+export function sortRows(rows: AnyRecord[], key: string, dir: string): AnyRecord[] {
   if (!key) return rows;
   return [...rows].sort((a, b) => {
     const av = number(a[key]), bv = number(b[key]);
@@ -73,7 +74,7 @@ function inventoryGroup(rows, keyName) {
   })).sort((a, b) => number(b.available_num) - number(a.available_num));
 }
 
-function inventoryHealth(rows) {
+export function inventoryHealth(rows: AnyRecord[]) {
   return INVENTORY_HEALTH_ORDER.map((key) => {
     const members = rows.filter((row) => row.health_key === key);
     return {
@@ -85,7 +86,7 @@ function inventoryHealth(rows) {
   });
 }
 
-function inventorySummary(rows) {
+export function inventorySummary(rows: AnyRecord[]) {
   const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== undefined && number(row.sales_7d) > 0);
   const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
   const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);

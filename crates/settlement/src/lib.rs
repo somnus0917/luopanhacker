@@ -358,13 +358,7 @@ fn settlement_shop_name(path: &Path, shop_map: &BTreeMap<String, String>) -> Str
     if let Some(shop_name) = shop_map.get(file_name) {
         return shop_name.clone();
     }
-    if file_name.ends_with("3441.csv") {
-        "惠普办公设备旗舰店".to_string()
-    } else if file_name.ends_with("5137.csv") {
-        "HYPEX极度未知凡飞店".to_string()
-    } else {
-        "未标注店铺".to_string()
-    }
+    "未标注店铺".to_string()
 }
 
 fn uploaded_file_name(original_file_name: &str, shop_name: &str, bytes: &[u8]) -> String {
@@ -604,20 +598,20 @@ mod tests {
     }
 
     #[test]
-    fn maps_known_download_files_to_shops() {
+    fn marks_unmapped_download_files_as_unlabeled() {
         assert_eq!(
             settlement_shop_name(
                 Path::new("DL202607181143232999613441.csv"),
                 &BTreeMap::new()
             ),
-            "惠普办公设备旗舰店"
+            "未标注店铺"
         );
         assert_eq!(
             settlement_shop_name(
                 Path::new("DL202607181203353587675137.csv"),
                 &BTreeMap::new()
             ),
-            "HYPEX极度未知凡飞店"
+            "未标注店铺"
         );
     }
 

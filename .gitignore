@@ -78,6 +78,7 @@ logs/
 docker-compose.override.yml
 
 config/users.json
+config/shops.local.json
 config/session_secret.txt
 config/import_dedupe_secret.txt
 config/wdt.env

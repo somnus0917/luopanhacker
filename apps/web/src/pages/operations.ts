@@ -1,4 +1,5 @@
 import { $, $$ } from "../dom";
+import { apiFetch as fetch } from "../api";
 import { showToast } from "../feedback";
 import {
   escapeHtml, hasValue, importTime, metricText, money, moneyOrDash, number,

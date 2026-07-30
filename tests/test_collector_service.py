@@ -18,7 +18,9 @@ from apps.collector_py import channel, compass, scheduler, service, status
 
 
 class CollectorServiceTest(unittest.TestCase):
-    def test_service_entrypoint_resolves_project_package_from_any_directory(self) -> None:
+    def test_service_entrypoint_resolves_project_package_from_any_directory(
+        self,
+    ) -> None:
         service_path = Path(service.__file__).resolve()
         with tempfile.TemporaryDirectory() as directory:
             completed = subprocess.run(
@@ -36,7 +38,10 @@ class CollectorServiceTest(unittest.TestCase):
 
     def test_local_cargo_status_update_allows_initial_build(self) -> None:
         self.assertEqual(status.default_status_update_timeout(["cargo", "run"]), 120.0)
-        self.assertEqual(status.default_status_update_timeout(["luopan-worker-rs", "status-update"]), 5.0)
+        self.assertEqual(
+            status.default_status_update_timeout(["luopan-worker-rs", "status-update"]),
+            5.0,
+        )
 
     def test_scheduler_lock_is_exclusive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -78,7 +83,9 @@ class CollectorServiceTest(unittest.TestCase):
                 self.assertFalse(service.lock_active())
             self.assertFalse(lock.exists())
 
-    def test_stale_chromium_singletons_are_removed_without_touching_session_data(self) -> None:
+    def test_stale_chromium_singletons_are_removed_without_touching_session_data(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = Path(directory)
             (session / "Cookies").write_text("preserve me", encoding="utf-8")
@@ -87,7 +94,9 @@ class CollectorServiceTest(unittest.TestCase):
             (session / "SingletonCookie").symlink_to("123456789")
 
             self.assertTrue(compass.clear_stale_chromium_singletons(session))
-            self.assertEqual((session / "Cookies").read_text(encoding="utf-8"), "preserve me")
+            self.assertEqual(
+                (session / "Cookies").read_text(encoding="utf-8"), "preserve me"
+            )
             for name in compass.CHROMIUM_SINGLETON_NAMES:
                 self.assertFalse((session / name).is_symlink())
 
@@ -109,7 +118,9 @@ class CollectorServiceTest(unittest.TestCase):
             "begin_date": ["2026-07-25"],
             "end_date": ["2026-07-25"],
         }
-        self.assertIsNone(compass.date_range_from_fields(fields, required_date_type="20"))
+        self.assertIsNone(
+            compass.date_range_from_fields(fields, required_date_type="20")
+        )
 
     def test_custom_date_range_requires_type_999_when_filtering(self) -> None:
         fields = {
@@ -117,7 +128,9 @@ class CollectorServiceTest(unittest.TestCase):
             "begin_date": ["2026-07-27"],
             "end_date": ["2026-07-27"],
         }
-        self.assertIsNone(compass.date_range_from_fields(fields, required_date_type="999"))
+        self.assertIsNone(
+            compass.date_range_from_fields(fields, required_date_type="999")
+        )
 
     def test_custom_date_can_be_read_from_nested_post_data(self) -> None:
         self.assertEqual(
@@ -134,7 +147,9 @@ class CollectorServiceTest(unittest.TestCase):
     def test_parse_args_accepts_historical_date(self) -> None:
         args = compass.parse_args(["--module", "operations", "--date", "2026-07-25"])
         self.assertEqual(args.date.isoformat(), "2026-07-25")
-        self.assertEqual(compass.expected_data_range(args.date), ("2026/07/25", "2026/07/25"))
+        self.assertEqual(
+            compass.expected_data_range(args.date), ("2026/07/25", "2026/07/25")
+        )
 
     def test_parse_data_day_rejects_date_outside_current_month(self) -> None:
         with self.assertRaisesRegex(Exception, "仅支持本月"):
@@ -157,13 +172,18 @@ class CollectorServiceTest(unittest.TestCase):
 
     def test_worker_command_forwards_selected_modules(self) -> None:
         with (
-            patch.dict(os.environ, {"COLLECTION_WORKER_COMMAND": "luopan-worker-rs compass-collect"}),
-            patch.object(service.shutil, "which", return_value="/usr/local/bin/luopan-worker-rs"),
+            patch.dict(
+                os.environ,
+                {"COLLECTION_WORKER_COMMAND": "luopan-worker-rs compass-collect"},
+            ),
+            patch.object(
+                service.shutil, "which", return_value="/usr/local/bin/luopan-worker-rs"
+            ),
         ):
             command = service.worker_command(
                 ["operations", "channel"],
                 "2026-07-25",
-                ["华硕凡飞笔记本电脑专卖店"],
+                ["店铺 A"],
             )
 
         self.assertEqual(command[:2], ["luopan-worker-rs", "compass-collect"])
@@ -174,7 +194,7 @@ class CollectorServiceTest(unittest.TestCase):
         self.assertEqual(command[command.index("--date") + 1], "2026-07-25")
         self.assertEqual(
             command[command.index("--shop") + 1],
-            "华硕凡飞笔记本电脑专卖店",
+            "店铺 A",
         )
 
     def test_recover_request_requeues_interrupted_work(self) -> None:

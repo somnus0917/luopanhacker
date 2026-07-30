@@ -26,6 +26,7 @@
 ```bash
 cp .env.example .env
 ADMIN_PASSWORD="请替换为强密码"
+cp config/shops.example.json config/shops.local.json
 ```
 
 然后构建并启动：
@@ -43,6 +44,9 @@ make docker-up
 
 容器会拒绝空密码、`admin123` 和少于 12 位的密码。
 Compose 默认仅在宿主机 `127.0.0.1` 映射看板 `8501` 和 noVNC `6080`，不需要预先创建 Docker 网络。可通过 `.env` 中的 `LUOPAN_HOST_BIND`、`LUOPAN_DASHBOARD_PORT` 和 `LUOPAN_NOVNC_PORT` 调整；只有在配置了防火墙或额外认证时才应把 `LUOPAN_HOST_BIND` 改为 `0.0.0.0`。
+
+生产环境请在 HTTPS 反向代理后访问看板。`SESSION_COOKIE_SECURE=true` 是默认且强制的生产设置；只有本地开发脚本会显式关闭它。
+将 `config/shops.local.json` 中的示例店铺替换为真实店铺；该文件已被忽略，不会提交到公开仓库。
 
 ### 2. 首次登录
 
@@ -92,17 +96,17 @@ make daily
 
 脚本会打开有头浏览器。如果出现登录页，请手动扫码登录；登录态会保存在 `session/`，后续通常可以复用。
 
-默认抓取四家店铺：
+公开演示使用以下脱敏店铺名称；真实店铺配置应保存在未纳入版本控制的 `config/shops.local.json`：
 
-- 华硕凡飞笔记本电脑专卖店
-- 惠普办公设备旗舰店
-- HYPERX极度未知凡飞专卖店
-- acer宏碁凡飞专卖店
+- 店铺 A
+- 店铺 B
+- 店铺 C
+- 店铺 D
 
 也可以只抓某一家：
 
 ```bash
-./scripts/run_daily.sh --shop "华硕凡飞笔记本电脑专卖店"
+./scripts/run_daily.sh --shop "店铺 A"
 ```
 
 ## 输出
@@ -166,19 +170,38 @@ make web
 
 ## 结算数据
 
-抖音结算导出的 `DL*.csv` 可以直接在“结算看板”上传，上传时填写店铺名称；也可以放到 `output/settlement/` 后由 Rust API 自动读取。金额按 CSV 原始元单位展示，页面支持按店铺筛选。当前历史文件名映射：
+抖音结算导出的 `DL*.csv` 可以直接在“结算看板”上传，上传时填写店铺名称；也可以放到 `output/settlement/` 后由 Rust API 自动读取。金额按 CSV 原始元单位展示，页面支持按店铺筛选。公开版本不包含真实结算文件名映射：
 
-- `*3441.csv`：惠普办公设备旗舰店
-- `*5137.csv`：HYPEX极度未知凡飞店
+- `*xxxx.csv`：店铺 A
+- `*yyyy.csv`：店铺 B
 
 ```bash
 mkdir -p output/settlement
 cp DL*.csv output/settlement/
 docker exec -it douyin-compass luopan-worker-rs settlement-json
-docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "惠普办公设备旗舰店"
+docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "店铺 A"
 ```
 
 旧的独立 HTML/Streamlit 入口已归档到 `legacy/`，不再作为生产路径。
+
+## 架构与数据流
+
+```mermaid
+flowchart LR
+  Collector["Python Playwright 采集器"] --> Worker["Rust worker"]
+  Worker --> SQLite[("SQLite")]
+  Collector --> Raw["JSON 原始快照"]
+  Raw --> SQLite
+  SQLite --> API["Rust API"]
+  Raw -. "SQLite 不可用时（带告警）" .-> API
+  API --> Web["Web 看板"]
+```
+
+系统以 SQLite 作为在线读取源，JSON 保留为原始快照与受控回退来源。接口响应会标明 `source`、`fallback` 与 `updated_at`，便于识别数据新鲜度。
+
+## 许可证与使用限制
+
+本仓库仅用于项目展示，未经授权不得复制或用于商业用途。
 
 ## 低频策略
 

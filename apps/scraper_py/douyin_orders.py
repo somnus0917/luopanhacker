@@ -15,16 +15,17 @@ APP_DIR = Path(__file__).resolve().parents[2]
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from apps.scraper_py.scraper import BROWSERS_DIR, human_pause, wait_network_quiet
+from apps.scraper_py.scraper import (
+    BROWSERS_DIR,
+    TARGET_SHOPS,
+    human_pause,
+    wait_network_quiet,
+)
 
 
 ORDER_LIST_URL = "https://fxg.jinritemai.com/ffa/morder/order/list"
 OUTPUT_ROOT = APP_DIR / "output" / "orders"
 DEFAULT_STORAGE_STATE = OUTPUT_ROOT / "playwright_storage_state.json"
-TARGET_SHOPS = (
-    "华硕凡飞笔记本电脑专卖店",
-    "acer宏碁凡飞专卖店",
-)
 SHOP_NAME_KEYWORDS = ("店", "专卖店", "旗舰店")
 
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(BROWSERS_DIR))
@@ -286,14 +287,18 @@ async def open_shop_switch_modal(page):
 
     switch_entry = page.get_by_text("切换组织/店铺", exact=True)
     if not await switch_entry.count():
-        await click_point_with_pacing(page, x, y, "右上角店铺名", after_min=2.0, after_max=4.0)
+        await click_point_with_pacing(
+            page, x, y, "右上角店铺名", after_min=2.0, after_max=4.0
+        )
     await click_with_pacing(
         page.get_by_text("切换组织/店铺", exact=True),
         "切换组织/店铺",
         after_min=4.0,
         after_max=7.0,
     )
-    await page.get_by_text("请选择店铺", exact=True).wait_for(state="visible", timeout=60000)
+    await page.get_by_text("请选择店铺", exact=True).wait_for(
+        state="visible", timeout=60000
+    )
     log("店铺选择弹窗已打开")
 
 
@@ -355,11 +360,15 @@ async def set_page_size(page, page_size):
         log(f"每页条数已是 {page_size}，跳过切换")
         return
     await click_with_pacing(changer, "每页条数", after_min=2.0, after_max=4.0)
-    option = page.locator(".auxo-select-dropdown:visible .auxo-select-item-option").filter(
+    option = page.locator(
+        ".auxo-select-dropdown:visible .auxo-select-item-option"
+    ).filter(
         has_text=f"{page_size} 条/页",
     )
     if await option.count():
-        await click_with_pacing(option, f"{page_size} 条/页", after_min=10.0, after_max=15.0)
+        await click_with_pacing(
+            option, f"{page_size} 条/页", after_min=10.0, after_max=15.0
+        )
         await wait_network_quiet(page, timeout=45000)
         updated_size = clean(await changer.inner_text())
         log(f"已切换每页条数: {updated_size}")
@@ -395,7 +404,9 @@ async def extract_table_rows(page):
         })).filter((row) => row.text.includes('订单编号') || row.cells.length >= 6)
         """
     )
-    header_rows = [row for row in rows if clean(row.get("text", "")).startswith("订单编号")]
+    header_rows = [
+        row for row in rows if clean(row.get("text", "")).startswith("订单编号")
+    ]
     log(f"表格行数: {len(rows)}，订单头行数: {len(header_rows)}")
     if header_rows:
         log(f"首条订单头: {header_rows[0]['text']}")
@@ -498,7 +509,14 @@ def parse_product_lines(lines):
             sku_parts.append(line)
         else:
             tags.append(line)
-    return product_name, " ".join(sku_parts), merchant_sku_code, author, item_order_id, " ".join(tags)
+    return (
+        product_name,
+        " ".join(sku_parts),
+        merchant_sku_code,
+        author,
+        item_order_id,
+        " ".join(tags),
+    )
 
 
 def parse_orders(rows):
@@ -509,10 +527,17 @@ def parse_orders(rows):
             continue
         detail = rows[index + 1] if index + 1 < len(rows) else {"cells": [], "text": ""}
         cells = detail.get("cells") or []
-        match = re.search(r"订单编号\s*(\d+)\s*下单时间\s*([0-9-]+\s+[0-9:]+)\s*(.*)$", header)
-        product_name, sku_spec, merchant_sku_code, author, item_order_id, product_tags = parse_product_lines(
-            cells[1] if len(cells) > 1 else []
+        match = re.search(
+            r"订单编号\s*(\d+)\s*下单时间\s*([0-9-]+\s+[0-9:]+)\s*(.*)$", header
         )
+        (
+            product_name,
+            sku_spec,
+            merchant_sku_code,
+            author,
+            item_order_id,
+            product_tags,
+        ) = parse_product_lines(cells[1] if len(cells) > 1 else [])
         receiver = cells[6] if len(cells) > 6 else []
         orders.append(
             {
@@ -531,7 +556,9 @@ def parse_orders(rows):
                 "merchant_income": clean(" ".join(cells[5])) if len(cells) > 5 else "",
                 "receiver_name": clean(receiver[0]) if len(receiver) > 0 else "",
                 "receiver_phone": clean(receiver[1]) if len(receiver) > 1 else "",
-                "receiver_address": clean(" ".join(receiver[2:])) if len(receiver) > 2 else "",
+                "receiver_address": clean(" ".join(receiver[2:]))
+                if len(receiver) > 2
+                else "",
                 "operations": clean(" ".join(cells[7])) if len(cells) > 7 else "",
                 "raw_header": header,
                 "raw_product": clean(detail.get("text")),
@@ -549,7 +576,9 @@ def save_results(output_dir, data_date, shop_name, rows, body_text, orders):
     rows_path = output_dir / f"douyin_orders_{data_date}_table_rows.json"
     text_path = output_dir / f"douyin_orders_{data_date}_visible_text.txt"
 
-    rows_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    rows_path.write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     text_path.write_text(body_text, encoding="utf-8")
     json_path.write_text(
         json.dumps(
@@ -591,7 +620,9 @@ def save_results(output_dir, data_date, shop_name, rows, body_text, orders):
     with csv_path.open("w", newline="", encoding="utf-8-sig") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
-        writer.writerows({field: order.get(field, "") for field in fields} for order in orders)
+        writer.writerows(
+            {field: order.get(field, "") for field in fields} for order in orders
+        )
     log(f"已写入 JSON: {json_path}")
     log(f"已写入 CSV: {csv_path}")
     log(f"已写入原始表格行: {rows_path}")
@@ -601,7 +632,9 @@ def save_results(output_dir, data_date, shop_name, rows, body_text, orders):
 
 async def collect_shop(page, data_date, base_output_dir, shop_name, page_size):
     shop_output_dir = base_output_dir / path_slug(shop_name)
-    write_status(shop_output_dir, state="running", message=f"开始采集 {shop_name} 昨日订单")
+    write_status(
+        shop_output_dir, state="running", message=f"开始采集 {shop_name} 昨日订单"
+    )
     log(f"========== 开始采集店铺: {shop_name} ==========")
     await switch_shop(page, shop_name)
     await page.evaluate("window.scrollTo({ top: 0, behavior: 'smooth' })")
@@ -647,7 +680,9 @@ async def run(args):
     log(f"目标店铺: {shops}")
     write_status(output_dir, state="running", message="开始采集昨日订单", shops=shops)
 
-    storage_state = Path(args.storage_state) if args.storage_state else DEFAULT_STORAGE_STATE
+    storage_state = (
+        Path(args.storage_state) if args.storage_state else DEFAULT_STORAGE_STATE
+    )
     log(f"登录态文件: {storage_state}，存在: {storage_state.exists()}")
     async with async_playwright() as playwright:
         browser_options = {
@@ -684,14 +719,20 @@ async def run(args):
 
         if "order/list" not in page.url:
             log(f"当前不在订单列表页，重新跳转: {page.url}")
-            await page.goto(ORDER_LIST_URL, wait_until="domcontentloaded", timeout=90000)
+            await page.goto(
+                ORDER_LIST_URL, wait_until="domcontentloaded", timeout=90000
+            )
             await wait_network_quiet(page, timeout=45000)
             await human_pause(5.0, 10.0)
         log(f"业务页面确认: title={await page.title()} url={page.url}")
 
         results = []
         for shop_name in shops:
-            results.append(await collect_shop(page, data_date, output_dir, shop_name, args.page_size))
+            results.append(
+                await collect_shop(
+                    page, data_date, output_dir, shop_name, args.page_size
+                )
+            )
 
         await context.storage_state(path=str(storage_state))
         log(f"已刷新登录态文件: {storage_state}")
@@ -710,11 +751,19 @@ async def run(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="低频抓取抖店订单管理页“昨日”订单")
-    parser.add_argument("--date", help="数据日期，默认当前日期前一天；用于输出目录和文件名")
+    parser.add_argument(
+        "--date", help="数据日期，默认当前日期前一天；用于输出目录和文件名"
+    )
     parser.add_argument("--output-dir", help="输出目录，默认 output/orders/<数据日期>/")
-    parser.add_argument("--shop", action="append", help="指定店铺名，可重复传入；默认采集两家目标店铺")
-    parser.add_argument("--page-size", type=int, default=100, help="每页订单数，默认 100 以减少翻页点击")
-    parser.add_argument("--storage-state", help=f"登录态 JSON，默认 {DEFAULT_STORAGE_STATE}")
+    parser.add_argument(
+        "--shop", action="append", help="指定店铺名，可重复传入；默认采集两家目标店铺"
+    )
+    parser.add_argument(
+        "--page-size", type=int, default=100, help="每页订单数，默认 100 以减少翻页点击"
+    )
+    parser.add_argument(
+        "--storage-state", help=f"登录态 JSON，默认 {DEFAULT_STORAGE_STATE}"
+    )
     parser.add_argument("--login-timeout-minutes", type=int, default=10)
     parser.add_argument("--slow-mo", type=int, default=700)
     parser.add_argument("--headless", action="store_true")

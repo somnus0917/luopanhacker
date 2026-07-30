@@ -55,7 +55,7 @@ docker exec -it douyin-compass-collector bash
 ./docker/run_daily.sh
 
 # 或指定店铺
-./docker/run_daily.sh --shop "华硕凡飞笔记本电脑专卖店"
+./docker/run_daily.sh --shop "店铺 A"
 ```
 
 ### 3. 查看查看板
@@ -148,8 +148,8 @@ docker compose up -d
 
 ```python
 TARGET_SHOPS = (
-    "华硕凡飞笔记本电脑专卖店",
-    "acer宏碁凡飞专卖店",
+    "店铺 A",
+    "店铺 B",
 )
 ```
 
@@ -225,13 +225,13 @@ docker exec -e LUOPAN_DOCTOR_MAX_DATA_AGE_HOURS=48 -it douyin-compass \
 
 订单导入的 Excel 解析、确认写入和撤销均由 Rust API 完成。
 
-结算看板支持网页上传抖音结算 CSV，上传时填写店铺名称；也会读取本地 `output/settlement/` 目录中的 CSV，并支持按店铺筛选。当前历史文件名映射：`*3441.csv` 为惠普办公设备旗舰店，`*5137.csv` 为 HYPEX极度未知凡飞店。
+结算看板支持网页上传抖音结算 CSV，上传时填写店铺名称；也会读取本地 `output/settlement/` 目录中的 CSV，并支持按店铺筛选。真实历史文件名映射应保存到运行时数据目录，不应提交到仓库。
 
 ```bash
 mkdir -p output/settlement
 cp DL*.csv output/settlement/
 docker exec -it douyin-compass luopan-worker-rs settlement-json
-docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "HYPEX极度未知凡飞店"
+docker exec -it douyin-compass luopan-worker-rs settlement-json --shop "店铺 B"
 ```
 
 看板 API 日志位置：

@@ -2,7 +2,6 @@ import html
 import json
 import os
 import re
-import sqlite3
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -204,7 +203,9 @@ def parse_daily_metric(value, kind):
 
 
 def compact_lines(text):
-    return [" ".join(line.split()) for line in str(text or "").splitlines() if line.strip()]
+    return [
+        " ".join(line.split()) for line in str(text or "").splitlines() if line.strip()
+    ]
 
 
 def section(lines, start_label, end_label):
@@ -295,7 +296,9 @@ def parse_daily_dashboard_data(payloads):
                 "source_file": source_file,
             }
 
-    return sorted(records_by_key.values(), key=lambda item: (item["date"], item["shop_name"]))
+    return sorted(
+        records_by_key.values(), key=lambda item: (item["date"], item["shop_name"])
+    )
 
 
 def load_external_order_records():
@@ -347,8 +350,7 @@ def merge_records(*record_groups):
             existing_source = existing.get("source")
             record_source = record.get("source")
             prefer_record = (
-                record_source == "daily_json"
-                and existing_source != "daily_json"
+                record_source == "daily_json" and existing_source != "daily_json"
             ) or record.get("captured_at", "") >= existing.get("captured_at", "")
 
             if prefer_record:
@@ -361,9 +363,7 @@ def merge_records(*record_groups):
 
     records = list(merged.values())
     daily_dates = {
-        record["date"]
-        for record in records
-        if record.get("source") == "daily_json"
+        record["date"] for record in records if record.get("source") == "daily_json"
     }
     records = [
         record
@@ -395,7 +395,9 @@ def value_from(cell):
 
 
 def metric_values(payload, root_key="homepage_core_index"):
-    card = payload["data"]["module_data"][root_key]["compass_general_multi_index_card_value"]
+    card = payload["data"]["module_data"][root_key][
+        "compass_general_multi_index_card_value"
+    ]
     row = card.get("data", [{}])[0]
     return {key: value_from(cell) for key, cell in row.items()}
 
@@ -404,7 +406,17 @@ def parse_dashboard_data(rows):
     records_by_key = {}
 
     for row in rows:
-        row_id, captured_at, url, body, shop_id, shop_name, data_date, date_type, endpoint = row
+        (
+            row_id,
+            captured_at,
+            url,
+            body,
+            shop_id,
+            shop_name,
+            data_date,
+            date_type,
+            endpoint,
+        ) = row
         endpoint = endpoint or urlparse(url).path
         data_date = data_date or query_date(url)
         date_type = date_type or query_date_type(url)
@@ -441,11 +453,15 @@ def parse_dashboard_data(rows):
         elif endpoint.endswith("/content_detail_v3"):
             record["content"] = metric_values(payload)
         elif endpoint.endswith("/core_trend_v3"):
-            trend = payload["data"]["module_data"]["homepage_core_index_trend"]["unify_chart_info"]
+            trend = payload["data"]["module_data"]["homepage_core_index_trend"][
+                "unify_chart_info"
+            ]
             record["trend"] = trend.get("axis_data", {})
 
     records = [record for record in records_by_key.values() if record["metrics"]]
-    known_dates = {record["date"] for record in records if record["shop_id"] != "unknown"}
+    known_dates = {
+        record["date"] for record in records if record["shop_id"] != "unknown"
+    }
     records = [
         record
         for record in records
@@ -502,12 +518,20 @@ def aggregate(records):
     totals["product_show_click_ucnt_ratio"] = click / show if show else None
     totals["product_click_pay_ucnt_ratio"] = pay_users / click if click else None
     totals["product_show_pay_ucnt_ratio"] = pay_users / show if show else None
-    totals["product_show_click_cnt_ratio"] = click_count / show_count if show_count else None
-    totals["product_click_pay_cnt_ratio"] = pay_count / click_count if click_count else None
-    totals["product_show_pay_cnt_ratio"] = pay_count / show_count if show_count else None
+    totals["product_show_click_cnt_ratio"] = (
+        click_count / show_count if show_count else None
+    )
+    totals["product_click_pay_cnt_ratio"] = (
+        pay_count / click_count if click_count else None
+    )
+    totals["product_show_pay_cnt_ratio"] = (
+        pay_count / show_count if show_count else None
+    )
     pay_amt = totals.get("pay_amt") or 0
     totals["per_usr_pay_amt"] = pay_amt / pay_users if pay_users else None
-    totals["per_item_pay_amt"] = pay_amt / totals.get("pay_item_cnt") if totals.get("pay_item_cnt") else None
+    totals["per_item_pay_amt"] = (
+        pay_amt / totals.get("pay_item_cnt") if totals.get("pay_item_cnt") else None
+    )
     totals["pay_amt_per_k_show"] = pay_amt / show_count * 1000 if show_count else None
     totals["refund_amt_rate"] = refund / income if income else None
     return dict(totals)
@@ -517,7 +541,10 @@ def shop_list(records):
     shops = {}
     for record in records:
         shops[record["shop_id"]] = record["shop_name"]
-    return [{"shop_id": key, "shop_name": shops[key]} for key in sorted(shops, key=shops.get)]
+    return [
+        {"shop_id": key, "shop_name": shops[key]}
+        for key in sorted(shops, key=shops.get)
+    ]
 
 
 def dates(records):
@@ -563,7 +590,15 @@ def multi_line_chart(title, records, metric_code, formatter, include_total=True)
     all_dates = dates(records)
     shops = shop_list(records)
     shop_records = by_shop(records)
-    colors = ["#2563eb", "#16a34a", "#f97316", "#7c3aed", "#0891b2", "#dc2626", "#4b5563"]
+    colors = [
+        "#2563eb",
+        "#16a34a",
+        "#f97316",
+        "#7c3aed",
+        "#0891b2",
+        "#dc2626",
+        "#4b5563",
+    ]
     lines = []
     legend_items = []
 
@@ -577,7 +612,9 @@ def multi_line_chart(title, records, metric_code, formatter, include_total=True)
 
     for index, shop in enumerate(shops):
         rows = {record["date"]: record for record in shop_records[shop["shop_id"]]}
-        values = [rows.get(date, {}).get("metrics", {}).get(metric_code) for date in all_dates]
+        values = [
+            rows.get(date, {}).get("metrics", {}).get(metric_code) for date in all_dates
+        ]
         color = colors[index % len(colors)]
         lines.append(
             f'<polyline points="{points(values, width, height, pad)}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
@@ -593,7 +630,9 @@ def multi_line_chart(title, records, metric_code, formatter, include_total=True)
         for color, name in legend_items
     )
     latest_values = by_date(records)
-    latest_total = aggregate(latest_values[all_dates[-1]]).get(metric_code) if all_dates else None
+    latest_total = (
+        aggregate(latest_values[all_dates[-1]]).get(metric_code) if all_dates else None
+    )
 
     return f"""
     <section class="panel">
@@ -602,9 +641,9 @@ def multi_line_chart(title, records, metric_code, formatter, include_total=True)
         <div class="legend">{legend}</div>
       </div>
       <svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(title)}">
-        <line x1="{pad}" y1="{height-pad}" x2="{width-pad}" y2="{height-pad}" class="grid"/>
-        <line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height-pad}" class="grid"/>
-        {''.join(lines)}
+        <line x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{height - pad}" class="grid"/>
+        <line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" class="grid"/>
+        {"".join(lines)}
         {labels}
       </svg>
     </section>
@@ -645,17 +684,22 @@ def latest_content_table(records):
     table_rows = []
     for record in sorted(rows, key=lambda item: item["shop_name"]):
         cells = "".join(
-            f"<td>{money(record['content'].get(code))}</td>"
-            for code in CONTENT_LABELS
+            f"<td>{money(record['content'].get(code))}</td>" for code in CONTENT_LABELS
         )
-        table_rows.append(f"<tr><td>{html.escape(record['shop_name'])}</td>{cells}</tr>")
-    headers = "".join(f"<th>{html.escape(label)}</th>" for label in CONTENT_LABELS.values())
+        table_rows.append(
+            f"<tr><td>{html.escape(record['shop_name'])}</td>{cells}</tr>"
+        )
+    headers = "".join(
+        f"<th>{html.escape(label)}</th>" for label in CONTENT_LABELS.values()
+    )
     return f"<table><thead><tr><th>店铺</th>{headers}</tr></thead><tbody>{''.join(table_rows)}</tbody></table>"
 
 
 def detail_table(records):
     rows = []
-    for record in sorted(records, key=lambda item: (item["date"], item["shop_name"]), reverse=True):
+    for record in sorted(
+        records, key=lambda item: (item["date"], item["shop_name"]), reverse=True
+    ):
         metrics = record["metrics"]
         rows.append(
             "<tr>"
@@ -685,7 +729,9 @@ def render(records):
     latest_records = by_date(records).get(latest_date, [])
     latest_totals = aggregate(latest_records)
     previous_date = all_dates[-2] if len(all_dates) > 1 else None
-    previous_totals = aggregate(by_date(records).get(previous_date, [])) if previous_date else {}
+    previous_totals = (
+        aggregate(by_date(records).get(previous_date, [])) if previous_date else {}
+    )
 
     def delta(code):
         if not previous_date:

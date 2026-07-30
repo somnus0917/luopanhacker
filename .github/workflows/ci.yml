@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Test, lint and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/0.11.29/install.sh | env UV_UNMANAGED_INSTALL="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Sync locked Python environment
+        run: uv sync --locked
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check Rust
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.24.0
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: pnpm install --frozen-lockfile
+      - name: Check, test and build frontend
+        working-directory: apps/web
+        run: |
+          pnpm check
+          pnpm test
+          pnpm build
+      - name: Check Python
+        run: |
+          uv run ruff check apps tests
+          uv run ruff format --check apps tests
+          uv run pytest -q
+      - name: Check scripts and deployment configuration
+        run: |
+          node --check web/static/app.js
+          bash -n ops/deploy.sh ops/backup.sh ops/ssh-deploy-wrapper.sh docker/start.sh docker/cron_scrape.sh docker/cron_inventory_sync.sh docker/run_daily.sh docker/test-deploy.sh scripts/run_daily.sh scripts/run_dashboard.sh scripts/run_inventory_sync.sh scripts/deploy_from_github.sh
+          docker compose config >/dev/null
+          LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | grep -q '/srv/luopan-data/state'
+          grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
+          grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh

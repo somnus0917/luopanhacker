@@ -17,7 +17,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from apps.orders_py.import_external_orders import daily_records_from_orders, parse_workbook_orders
+from apps.orders_py.import_external_orders import (
+    daily_records_from_orders,
+    parse_workbook_orders,
+)
 
 
 APP_DIR = Path(__file__).resolve().parents[2]
@@ -46,7 +49,9 @@ def default_ledger():
 def atomic_write(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     os.replace(temporary, path)
 
 
@@ -95,7 +100,11 @@ def file_digest(content):
 
 def load_ledger():
     data = read_json(LEDGER_PATH, default_ledger())
-    if not isinstance(data, dict) or not isinstance(data.get("batches"), list) or not isinstance(data.get("orders"), list):
+    if (
+        not isinstance(data, dict)
+        or not isinstance(data.get("batches"), list)
+        or not isinstance(data.get("orders"), list)
+    ):
         return default_ledger()
     return data
 
@@ -180,7 +189,11 @@ def preview_upload(files):
 
     with ledger_lock():
         ledger = load_ledger()
-        known_file_hashes = {item.get("file_hash") for batch in ledger["batches"] for item in batch.get("files", [])}
+        known_file_hashes = {
+            item.get("file_hash")
+            for batch in ledger["batches"]
+            for item in batch.get("files", [])
+        }
         known_order_hashes = {item.get("order_key") for item in ledger["orders"]}
 
     preview_orders, file_rows, candidate_hashes = [], [], set()
@@ -229,7 +242,9 @@ def preview_upload(files):
     preview = {
         "token": token,
         "created_at": created_at.isoformat(timespec="seconds"),
-        "expires_at": (created_at + timedelta(minutes=PREVIEW_TTL_MINUTES)).isoformat(timespec="seconds"),
+        "expires_at": (created_at + timedelta(minutes=PREVIEW_TTL_MINUTES)).isoformat(
+            timespec="seconds"
+        ),
         "files": file_rows,
         "orders": preview_orders,
     }
@@ -247,7 +262,9 @@ def preview_public(preview):
         "files": preview["files"],
         "summary": {
             "added_orders": len(orders),
-            "duplicate_orders": sum(item["duplicate_orders"] for item in preview["files"]),
+            "duplicate_orders": sum(
+                item["duplicate_orders"] for item in preview["files"]
+            ),
             "pay_amt": sum(float(order["amount_cent"]) for order in orders),
             "pay_item_cnt": sum(int(order["quantity"]) for order in orders),
             "date_range": [dates[0], dates[-1]] if dates else [],
@@ -268,8 +285,16 @@ def commit_preview(token):
 
         ledger = load_ledger()
         known_hashes = {item.get("order_key") for item in ledger["orders"]}
-        known_files = {item.get("file_hash") for batch in ledger["batches"] for item in batch.get("files", [])}
-        new_orders = [order for order in preview["orders"] if order["order_key"] not in known_hashes]
+        known_files = {
+            item.get("file_hash")
+            for batch in ledger["batches"]
+            for item in batch.get("files", [])
+        }
+        new_orders = [
+            order
+            for order in preview["orders"]
+            if order["order_key"] not in known_hashes
+        ]
         files = []
         for item in preview["files"]:
             current = dict(item)
@@ -290,7 +315,8 @@ def commit_preview(token):
             "files": files,
             "source_labels": sorted({order["source_label"] for order in new_orders}),
             "added_orders": len(new_orders),
-            "duplicate_orders": sum(item["duplicate_orders"] for item in files) + (len(preview["orders"]) - len(new_orders)),
+            "duplicate_orders": sum(item["duplicate_orders"] for item in files)
+            + (len(preview["orders"]) - len(new_orders)),
             "date_range": [dates[0], dates[-1]],
             "pay_amt": sum(float(order["amount_cent"]) for order in new_orders),
             "pay_item_cnt": sum(int(order["quantity"]) for order in new_orders),
@@ -300,17 +326,26 @@ def commit_preview(token):
         atomic_write(LEDGER_PATH, ledger)
         write_snapshot(ledger)
         preview_path.unlink(missing_ok=True)
-    return {"batch": batch_public(batch), "records": len(daily_records_from_orders(new_orders))}
+    return {
+        "batch": batch_public(batch),
+        "records": len(daily_records_from_orders(new_orders)),
+    }
 
 
 def delete_batch(batch_id):
     with ledger_lock():
         ledger = load_ledger()
-        batch = next((item for item in ledger["batches"] if item.get("id") == batch_id), None)
+        batch = next(
+            (item for item in ledger["batches"] if item.get("id") == batch_id), None
+        )
         if batch is None:
             raise ImportValidationError("未找到该导入批次")
-        ledger["batches"] = [item for item in ledger["batches"] if item.get("id") != batch_id]
-        ledger["orders"] = [item for item in ledger["orders"] if item.get("batch_id") != batch_id]
+        ledger["batches"] = [
+            item for item in ledger["batches"] if item.get("id") != batch_id
+        ]
+        ledger["orders"] = [
+            item for item in ledger["orders"] if item.get("batch_id") != batch_id
+        ]
         atomic_write(LEDGER_PATH, ledger)
         write_snapshot(ledger)
     return batch_public(batch)
@@ -318,6 +353,7 @@ def delete_batch(batch_id):
 
 def bootstrap_files(paths):
     """Create a first ledger from trusted local files; used for one-time migration."""
+
     class LocalUpload:
         def __init__(self, path):
             self.filename = path.name

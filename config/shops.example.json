@@ -1,0 +1,7 @@
+{
+  "shops": ["店铺 A", "店铺 B", "店铺 C", "店铺 D"],
+  "settlement_file_map": {
+    "*xxxx.csv": "店铺 A",
+    "*yyyy.csv": "店铺 B"
+  }
+}

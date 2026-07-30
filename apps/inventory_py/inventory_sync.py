@@ -78,7 +78,11 @@ def inventory_key(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def deleted(row: dict[str, Any]) -> bool:
-    return str(row.get("is_deleted") or row.get("deleted") or "0").strip().lower() in {"1", "true", "yes"}
+    return str(row.get("is_deleted") or row.get("deleted") or "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def pid_running(pid: Any) -> bool:
@@ -96,12 +100,18 @@ def sync_lock(now: datetime) -> Iterator[None]:
     """Prevent concurrent API runs; recover only clearly stale local locks."""
     INVENTORY_DIR.mkdir(parents=True, exist_ok=True)
     token = uuid.uuid4().hex
-    metadata = {"token": token, "pid": os.getpid(), "started_at": now.isoformat(timespec="seconds")}
+    metadata = {
+        "token": token,
+        "pid": os.getpid(),
+        "started_at": now.isoformat(timespec="seconds"),
+    }
     try:
         descriptor = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         existing = read_json(LOCK_PATH, {}) or {}
-        age_seconds = max(0, time.time() - LOCK_PATH.stat().st_mtime) if LOCK_PATH.exists() else 0
+        age_seconds = (
+            max(0, time.time() - LOCK_PATH.stat().st_mtime) if LOCK_PATH.exists() else 0
+        )
         if age_seconds > STALE_LOCK_SECONDS and not pid_running(existing.get("pid")):
             LOCK_PATH.unlink(missing_ok=True)
             descriptor = os.open(LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -154,12 +164,18 @@ def request_page(api_name: str, params: dict[str, str]) -> dict[str, Any]:
     with urlopen(Request(url, data=body, method="POST"), timeout=45) as response:
         result = json.load(response)
     if result.get("code") != 0:
-        raise RuntimeError(f"{ALLOWED_APIS[api_name]} 调用失败：{result.get('message') or result.get('code')}")
+        raise RuntimeError(
+            f"{ALLOWED_APIS[api_name]} 调用失败：{result.get('message') or result.get('code')}"
+        )
     return result
 
 
-def fetch_all(api_name: str, params: dict[str, str], list_key: str) -> list[dict[str, Any]]:
-    first = request_page(api_name, {**params, "page_no": "0", "page_size": str(PAGE_SIZE)})
+def fetch_all(
+    api_name: str, params: dict[str, str], list_key: str
+) -> list[dict[str, Any]]:
+    first = request_page(
+        api_name, {**params, "page_no": "0", "page_size": str(PAGE_SIZE)}
+    )
     total = int(first.get("total_count") or 0)
     pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
     if pages > MAX_PAGES:
@@ -167,7 +183,9 @@ def fetch_all(api_name: str, params: dict[str, str], list_key: str) -> list[dict
 
     records = list(first.get(list_key) or [])
     for page_no in range(1, pages):
-        page = request_page(api_name, {**params, "page_no": str(page_no), "page_size": str(PAGE_SIZE)})
+        page = request_page(
+            api_name, {**params, "page_no": str(page_no), "page_size": str(PAGE_SIZE)}
+        )
         records.extend(page.get(list_key) or [])
     return records
 
@@ -186,7 +204,9 @@ def inventory_rows(now: datetime) -> list[dict[str, Any]]:
     return [
         {
             "warehouse_no": row.get("warehouse_no", ""),
-            "warehouse_name": row.get("warehouse_name") or row.get("warehouse_no") or "未命名仓库",
+            "warehouse_name": row.get("warehouse_name")
+            or row.get("warehouse_no")
+            or "未命名仓库",
             "brand_no": row.get("brand_no", ""),
             "brand_name": row.get("brand_name") or "未归类品牌",
             "goods_no": row.get("goods_no", ""),
@@ -225,7 +245,9 @@ def aggregate_order_details(
         for detail in order.get("details_list") or []:
             spec_no = str(detail.get("spec_no") or "")
             if spec_no:
-                totals[(warehouse_no, spec_no, business_date)] += number(detail.get(quantity_field))
+                totals[(warehouse_no, spec_no, business_date)] += number(
+                    detail.get(quantity_field)
+                )
     return [
         {
             "warehouse_no": warehouse_no,
@@ -275,7 +297,11 @@ def merge_inventory(
     for item in previous_rows:
         key = inventory_key(item)
         if all(key) and not deleted(item):
-            records[key] = {key: value for key, value in item.items() if key not in {"deleted", "is_deleted"}}
+            records[key] = {
+                key: value
+                for key, value in item.items()
+                if key not in {"deleted", "is_deleted"}
+            }
 
     updated = removed = skipped = 0
     for item in incremental_rows:
@@ -288,13 +314,19 @@ def merge_inventory(
                 records.pop(key)
                 removed += 1
             continue
-        records[key] = {key: value for key, value in item.items() if key not in {"deleted", "is_deleted"}}
+        records[key] = {
+            key: value
+            for key, value in item.items()
+            if key not in {"deleted", "is_deleted"}
+        }
         updated += 1
 
     return (
         [records[key] for key in sorted(records)],
         {
-            "mode": "incremental_merged" if previous_rows else "initial_incremental_window",
+            "mode": "incremental_merged"
+            if previous_rows
+            else "initial_incremental_window",
             "previous_records": len(previous_rows),
             "changed_records": updated,
             "deleted_records": removed,
@@ -304,7 +336,9 @@ def merge_inventory(
     )
 
 
-def validate_snapshot(snapshot: dict[str, Any], previous_snapshot: dict[str, Any] | None = None) -> None:
+def validate_snapshot(
+    snapshot: dict[str, Any], previous_snapshot: dict[str, Any] | None = None
+) -> None:
     """Reject incomplete or implausible data before it can replace a good file."""
     inventory = snapshot.get("inventory")
     if not isinstance(inventory, list) or not inventory:
@@ -320,7 +354,9 @@ def validate_snapshot(snapshot: dict[str, Any], previous_snapshot: dict[str, Any
         keys.add(key)
         for field in ("stock_num", "available_num", "lock_num", "today_num"):
             if not math.isfinite(number(row.get(field))):
-                raise RuntimeError(f"库存快照校验失败：{key[0]}/{key[1]} 的 {field} 无效")
+                raise RuntimeError(
+                    f"库存快照校验失败：{key[0]}/{key[1]} 的 {field} 无效"
+                )
 
     for name in ("sales_7d", "inbound_30d"):
         records = snapshot.get(name)
@@ -328,19 +364,30 @@ def validate_snapshot(snapshot: dict[str, Any], previous_snapshot: dict[str, Any
             raise RuntimeError(f"库存快照校验失败：{name} 不是列表")
         for row in records:
             if not all(inventory_key(row)) or not str(row.get("date") or ""):
-                raise RuntimeError(f"库存快照校验失败：{name} 存在缺少仓库、SKU 或日期的记录")
-            if not math.isfinite(number(row.get("quantity"))) or number(row.get("quantity")) < 0:
+                raise RuntimeError(
+                    f"库存快照校验失败：{name} 存在缺少仓库、SKU 或日期的记录"
+                )
+            if (
+                not math.isfinite(number(row.get("quantity")))
+                or number(row.get("quantity")) < 0
+            ):
                 raise RuntimeError(f"库存快照校验失败：{name} 存在无效数量")
 
     previous_inventory = (previous_snapshot or {}).get("inventory") or []
     if len(previous_inventory) >= 20 and len(inventory) < len(previous_inventory) * 0.5:
-        raise RuntimeError("库存快照校验失败：记录数较上一份快照骤降超过 50%，已保留旧快照")
+        raise RuntimeError(
+            "库存快照校验失败：记录数较上一份快照骤降超过 50%，已保留旧快照"
+        )
 
 
-def build_snapshot(now: datetime | None = None, previous_snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_snapshot(
+    now: datetime | None = None, previous_snapshot: dict[str, Any] | None = None
+) -> dict[str, Any]:
     now = now or datetime.now(SHANGHAI)
     previous_snapshot = previous_snapshot or {}
-    inventory, merge = merge_inventory(previous_snapshot.get("inventory") or [], inventory_rows(now))
+    inventory, merge = merge_inventory(
+        previous_snapshot.get("inventory") or [], inventory_rows(now)
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "captured_at": now.isoformat(timespec="seconds"),
@@ -368,7 +415,9 @@ def save_snapshot(snapshot: dict[str, Any]) -> Path:
 def history_path_for(snapshot: dict[str, Any]) -> Path:
     captured_at = str(snapshot.get("captured_at") or "")
     try:
-        history_date = datetime.fromisoformat(captured_at).astimezone(SHANGHAI).date().isoformat()
+        history_date = (
+            datetime.fromisoformat(captured_at).astimezone(SHANGHAI).date().isoformat()
+        )
     except ValueError as error:
         raise RuntimeError("库存快照缺少有效 captured_at，无法写入日结历史") from error
     return HISTORY_DIR / f"{history_date}.json"
@@ -426,12 +475,16 @@ def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[st
             latest_path = save_snapshot(snapshot)
 
             state = read_state()
-            state.update({
-                "last_success_at": now.isoformat(timespec="seconds"),
-                "last_inventory_records": len(snapshot["inventory"]),
-                "last_history_date": history_path.stem if history_path else state.get("last_history_date"),
-                "last_failure": None,
-            })
+            state.update(
+                {
+                    "last_success_at": now.isoformat(timespec="seconds"),
+                    "last_inventory_records": len(snapshot["inventory"]),
+                    "last_history_date": history_path.stem
+                    if history_path
+                    else state.get("last_history_date"),
+                    "last_failure": None,
+                }
+            )
             write_state(state)
             return {
                 "snapshot_path": str(latest_path),
@@ -446,7 +499,9 @@ def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[st
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="同步旺店通库存快照（只读）")
-    parser.add_argument("--refresh-only", action="store_true", help="只更新最新快照，不写入日结历史")
+    parser.add_argument(
+        "--refresh-only", action="store_true", help="只更新最新快照，不写入日结历史"
+    )
     args = parser.parse_args()
     result = run_sync(write_history=not args.refresh_only)
     print(json.dumps(result, ensure_ascii=False))

@@ -43,10 +43,46 @@ const wholeOrDash = (value) => hasValue(value) ? whole(value) : "—";
 const ratioOrDash = (value) => hasValue(value) ? ratio(value) : "—";
 function importTime(value) {
   if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const text = String(value);
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? text : date.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
-const COLLECTION_SHOPS = ["华硕凡飞笔记本电脑专卖店", "惠普办公设备旗舰店", "HYPERX极度未知凡飞专卖店", "acer宏碁凡飞专卖店"];
+function isEnvelope(payload) {
+  return Boolean(payload && typeof payload === "object" && "data" in payload && "error" in payload && "meta" in payload);
+}
+async function apiFetch(input, init) {
+  const response = await window.fetch(input, init);
+  const decode = response.json.bind(response);
+  response.json = async () => {
+    const payload = await decode();
+    if (!isEnvelope(payload)) return payload;
+    if (payload.meta.fallback) {
+      window.dispatchEvent(new CustomEvent("luopan-api-fallback", { detail: payload.meta }));
+    }
+    if (payload.error) {
+      return { error: payload.error.message, error_code: payload.error.code, request_id: payload.meta.request_id };
+    }
+    return payload.data;
+  };
+  return response;
+}
+let toastTimer;
+function showToast(message, tone = "info") {
+  const region = $("#toast-region");
+  if (!region || !message) return;
+  window.clearTimeout(toastTimer);
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${tone}`;
+  toast.setAttribute("role", tone === "error" ? "alert" : "status");
+  toast.textContent = message;
+  region.replaceChildren(toast);
+  toastTimer = window.setTimeout(() => region.replaceChildren(), tone === "error" ? 5200 : 3600);
+}
+let COLLECTION_SHOPS = [];
+function setCollectionShops(shops) {
+  COLLECTION_SHOPS = [...new Set(shops.filter(Boolean))];
+  state.collectionBackfillShops = new Set(COLLECTION_SHOPS);
+}
 const localDateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const currentLocalMonthStart = () => {
   const date = /* @__PURE__ */ new Date();
@@ -62,18 +98,6 @@ const latestBackfillDate = () => previousLocalDate() >= currentLocalMonthStart()
 const backfillDateAllowed = (value) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
 const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
 const isAdmin = () => state.currentUser?.role === "admin";
-let toastTimer;
-function showToast(message, tone = "info") {
-  const region = $("#toast-region");
-  if (!region || !message) return;
-  window.clearTimeout(toastTimer);
-  const toast = document.createElement("div");
-  toast.className = `toast toast-${tone}`;
-  toast.setAttribute("role", tone === "error" ? "alert" : "status");
-  toast.textContent = message;
-  region.replaceChildren(toast);
-  toastTimer = window.setTimeout(() => region.replaceChildren(), tone === "error" ? 5200 : 3600);
-}
 function renderAccount() {
   const target = $("#account-content");
   if (!target || !state.currentUser) return;
@@ -90,12 +114,12 @@ function renderAccount() {
   $$("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(button.dataset.deleteUser)));
 }
 async function logout() {
-  await fetch("/api/logout", { method: "POST" });
+  await apiFetch("/api/logout", { method: "POST" });
   showLogin();
 }
 async function loadUsers() {
   if (!isAdmin()) return;
-  const response = await fetch("/api/users");
+  const response = await apiFetch("/api/users");
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     state.accountMessage = payload.error || "用户列表读取失败。";
@@ -107,7 +131,7 @@ async function loadUsers() {
 async function changePassword(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+  const response = await apiFetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? payload.message || "密码已更新。" : payload.error || "密码更新失败。";
   showToast(state.accountMessage, response.ok ? "success" : "error");
@@ -117,7 +141,7 @@ async function changePassword(event) {
 async function createUser(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+  const response = await apiFetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : payload.error || "新增用户失败。";
   showToast(state.accountMessage, response.ok ? "success" : "error");
@@ -126,7 +150,7 @@ async function createUser(event) {
 }
 async function deleteUser(username) {
   if (!username || !window.confirm(`确定删除用户“${username}”吗？该用户的登录会话会立即失效。`)) return;
-  const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+  const response = await apiFetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : payload.error || "删除用户失败。";
   showToast(state.accountMessage, response.ok ? "success" : "error");
@@ -440,7 +464,7 @@ function renderOrderImportPanel() {
   $$("[data-delete-order-import]").forEach((button) => button.addEventListener("click", () => deleteOrderImport(button.dataset.deleteOrderImport)));
 }
 async function loadOrderImports() {
-  const response = await fetch("/api/orders/imports");
+  const response = await apiFetch("/api/orders/imports");
   if (response.status === 401) return showLogin();
   state.orderImports = await response.json();
   renderOrderImportPanel();
@@ -453,7 +477,7 @@ async function previewOrderImport(event) {
   button.disabled = true;
   button.textContent = "正在解析…";
   state.orderImportMessage = "";
-  const response = await fetch("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget) });
+  const response = await apiFetch("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     state.orderImportMessage = payload.error || "文件解析失败，请检查格式后重试。";
@@ -466,7 +490,7 @@ async function previewOrderImport(event) {
 }
 async function commitOrderImport() {
   if (!state.orderPreview?.preview_token) return;
-  const response = await fetch("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
+  const response = await apiFetch("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     state.orderImportMessage = payload.error || "写入失败，请重新预览。";
@@ -481,7 +505,7 @@ async function commitOrderImport() {
 }
 async function deleteOrderImport(batchId) {
   if (!batchId || !window.confirm("撤销后，该批次导入的数据将从经营看板移除。确定继续吗？")) return;
-  const response = await fetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+  const response = await apiFetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
   const payload = await response.json().catch(() => ({}));
   state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : payload.error || "撤销失败，请稍后重试。";
   showToast(state.orderImportMessage, response.ok ? "success" : "error");
@@ -863,7 +887,7 @@ function renderOperations() {
   if (hoverRecords.length) bindLineChartHover(hoverRecords);
 }
 async function loadChannel() {
-  const response = await fetch("/api/channel");
+  const response = await apiFetch("/api/channel");
   if (response.status === 401) return showLogin();
   state.channel = response.ok ? await response.json().catch(() => ({ records: [] })) : { records: [] };
   operationFilterItems("date").forEach((item) => state.operationDates.add(item));
@@ -881,7 +905,7 @@ function renderTable(records, content = false) {
   return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
 }
 async function loadCompass() {
-  const response = await fetch("/api/compass");
+  const response = await apiFetch("/api/compass");
   if (response.status === 401) return showLogin();
   const payload = await response.json();
   state.records = (payload.records || []).map(canonicalOperationRecord);
@@ -1093,7 +1117,7 @@ function renderInventory(payload, view = state.inventoryView) {
 async function loadInventory() {
   const target = $("#inventory-content");
   try {
-    const response = await fetch("/api/inventory");
+    const response = await apiFetch("/api/inventory");
     if (response.status === 401) return showLogin();
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "库存快照不可用");
@@ -1310,7 +1334,7 @@ async function uploadSettlement(event) {
   button.textContent = "正在上传…";
   state.settlementUploadMessage = "";
   const content = await uploadFile.text();
-  const response = await fetch("/api/settlement/uploads", {
+  const response = await apiFetch("/api/settlement/uploads", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content })
@@ -1335,7 +1359,7 @@ async function loadSettlement() {
     if (state.settlementShop) query.set("shop", state.settlementShop);
     if (state.settlementStartDate) query.set("start_date", state.settlementStartDate);
     if (state.settlementEndDate) query.set("end_date", state.settlementEndDate);
-    const response = await fetch(`/api/settlement${query.size ? `?${query}` : ""}`);
+    const response = await apiFetch(`/api/settlement${query.size ? `?${query}` : ""}`);
     if (response.status === 401) return showLogin();
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "结算数据不可用");
@@ -1489,7 +1513,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
 async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer);
   try {
-    const response = await fetch("/api/collection/status", { cache: "no-store" });
+    const response = await apiFetch("/api/collection/status", { cache: "no-store" });
     if (response.status === 401) return showLogin();
     if (!response.ok) throw new Error("status unavailable");
     const status = await response.json();
@@ -1499,6 +1523,12 @@ async function refreshCollectionStatus() {
   } catch {
     if (state.status) renderCollectionCenter(state.status, { logMessage: "暂时无法读取采集服务状态，请稍后重试。" });
   }
+}
+async function loadCollectionShops() {
+  const response = await apiFetch("/api/collection/shops");
+  if (!response.ok) return;
+  const payload = await response.json().catch(() => ({}));
+  setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
 }
 async function startCollection() {
   const button = $("#collection-run-button");
@@ -1511,7 +1541,7 @@ async function startCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交…";
-  const response = await fetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
+  const response = await apiFetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
   const payload = await response.json().catch(() => ({}));
   state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
   showToast(state.collectionMessage, response.ok ? "success" : "error");
@@ -1530,7 +1560,7 @@ async function startHistoricalCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交补采…";
-  const response = await fetch("/api/collection/run", {
+  const response = await apiFetch("/api/collection/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ modules: ["operations"], date, shops })
@@ -1547,7 +1577,7 @@ async function clearCollectionTerminal() {
   button.disabled = true;
   button.textContent = "正在清除…";
   try {
-    const response = await fetch("/api/collection/terminal", { method: "DELETE" });
+    const response = await apiFetch("/api/collection/terminal", { method: "DELETE" });
     if (response.status === 401) return showLogin();
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "终端数据清除失败");
@@ -1570,6 +1600,9 @@ function buildPlaceholders() {
     grid.innerHTML = grid.dataset.placeholder.split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
   });
 }
+window.addEventListener("luopan-api-fallback", () => {
+  showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
+});
 function activatePage(name) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
@@ -1616,7 +1649,7 @@ async function initialise() {
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
+    const response = await apiFetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
     const payload = await response.json();
     if (!response.ok) {
       $("#login-error").textContent = payload.error || "登录失败";
@@ -1628,16 +1661,16 @@ async function initialise() {
     loadOrderImports();
     loadInventory();
     loadSettlement();
-    refreshCollectionStatus();
+    loadCollectionShops().then(refreshCollectionStatus);
   });
-  const me = await fetch("/api/me").then((response) => response.json());
+  const me = await apiFetch("/api/me").then((response) => response.json());
   if (me.authenticated) {
     showApp(me);
     loadCompass();
     loadOrderImports();
     loadInventory();
     loadSettlement();
-    refreshCollectionStatus();
+    loadCollectionShops().then(refreshCollectionStatus);
   } else showLogin();
 }
 initialise();

@@ -11,12 +11,23 @@ OVERVIEW_URL = "https://compass.jinritemai.com/overview"
 SHOP_URL = "https://compass.jinritemai.com/shop"
 SESSION_DIR = APP_DIR / "session"
 BROWSERS_DIR = APP_DIR / ".playwright-browsers"
-TARGET_SHOPS = (
-    "华硕凡飞笔记本电脑专卖店",
-    "惠普办公设备旗舰店",
-    "HYPERX极度未知凡飞专卖店",
-    "acer宏碁凡飞专卖店",
-)
+SHOP_CONFIG_PATH = APP_DIR / "config" / "shops.local.json"
+
+
+def configured_shops():
+    if not SHOP_CONFIG_PATH.exists():
+        return ()
+    try:
+        payload = json.loads(SHOP_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    shops = payload.get("shops", []) if isinstance(payload, dict) else []
+    return tuple(
+        shop.strip() for shop in shops if isinstance(shop, str) and shop.strip()
+    )
+
+
+TARGET_SHOPS = configured_shops()
 IGNORE_URL_PARTS = (
     "mon.zijieapi.com",
     "mcs.zijieapi.com",
@@ -63,7 +74,10 @@ from playwright.async_api import async_playwright
 
 
 async def human_pause(min_seconds=None, max_seconds=None, reason=None):
-    low, high = min_seconds or ACTION_DELAY_RANGE[0], max_seconds or ACTION_DELAY_RANGE[1]
+    low, high = (
+        min_seconds or ACTION_DELAY_RANGE[0],
+        max_seconds or ACTION_DELAY_RANGE[1],
+    )
     delay = random.uniform(low, high)
     if reason:
         print(f"{reason}，随机等待 {delay:.1f}s", flush=True)
@@ -306,9 +320,11 @@ async def visible_view_switch_entry(page):
 
 async def switch_shop(page, shop_name):
     await ensure_shop_modal(page)
-    modal = page.locator('[role="dialog"]').filter(
-        has=page.get_by_text("请选择店铺", exact=True)
-    ).first
+    modal = (
+        page.locator('[role="dialog"]')
+        .filter(has=page.get_by_text("请选择店铺", exact=True))
+        .first
+    )
     await modal.wait_for(state="visible", timeout=30000)
     await human_pause(2.0, 4.0)
 
@@ -326,7 +342,9 @@ async def switch_shop(page, shop_name):
 
 def has_near_day_core_urls(items):
     near_day_urls = [item["url"] for item in items if "date_type=20" in item["url"]]
-    return all(any(part in url for url in near_day_urls) for part in CORE_NEAR_DAY_URL_PARTS)
+    return all(
+        any(part in url for url in near_day_urls) for part in CORE_NEAR_DAY_URL_PARTS
+    )
 
 
 async def wait_for_near_day_capture(items):
@@ -365,6 +383,10 @@ async def capture_near_day(page, state):
 async def scrape_once(target_shops=None):
     captured = []
     target_shops = target_shops or TARGET_SHOPS
+    if not target_shops:
+        raise RuntimeError(
+            "未配置店铺；请从 config/shops.example.json 创建 config/shops.local.json"
+        )
     state = {
         "enabled": False,
         "items": [],
@@ -448,14 +470,18 @@ async def scrape_once(target_shops=None):
         if await login_button.count():
             await click_with_pacing(login_button, "登录")
             async with context.expect_page() as page_info:
-                await click_with_pacing(page.get_by_role("link", name="商家入口"), "商家入口")
+                await click_with_pacing(
+                    page.get_by_role("link", name="商家入口"), "商家入口"
+                )
             page = await page_info.value
             await page.wait_for_load_state("domcontentloaded", timeout=30000)
             await human_pause(2.0, 4.5)
 
         if "login" in page.url.lower():
             print("检测到登录页，请在 120 秒内手动扫码登录...")
-            await page.wait_for_url(lambda url: "login" not in url.lower(), timeout=120000)
+            await page.wait_for_url(
+                lambda url: "login" not in url.lower(), timeout=120000
+            )
             await human_pause(2.0, 5.0)
 
         if page.url.rstrip("/") == HOME_URL.rstrip("/"):

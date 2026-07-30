@@ -49,7 +49,13 @@ def stale_lock():
 
 
 def acquire_lock():
-    payload = json.dumps({"pid": os.getpid(), "hostname": socket.gethostname(), "started_at": datetime.now().isoformat(timespec="seconds")})
+    payload = json.dumps(
+        {
+            "pid": os.getpid(),
+            "hostname": socket.gethostname(),
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
     for _ in range(2):
         try:
             with LOCK_PATH.open("x", encoding="utf-8") as lock:
@@ -76,7 +82,11 @@ async def main():
         write_status(state="skipped", message="已有采集任务在运行，跳过本次执行")
         return
     try:
-        delay = schedule.random_delay_seconds if schedule.random_delay_seconds is not None else random.randint(0, 3600)
+        delay = (
+            schedule.random_delay_seconds
+            if schedule.random_delay_seconds is not None
+            else random.randint(0, 3600)
+        )
         args = parse_args(remaining)
         requested = args.module or ["operations", "channel"]
         requested_date = args.date.isoformat() if args.date else None
@@ -100,30 +110,43 @@ async def main():
         try:
             result = await asyncio.wait_for(run(args), timeout=LOCK_EXPIRE_SECONDS)
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"采集运行超过 {LOCK_EXPIRE_SECONDS // 3600} 小时，已终止以避免浏览器会话长期占用") from exc
+            raise TimeoutError(
+                f"采集运行超过 {LOCK_EXPIRE_SECONDS // 3600} 小时，已终止以避免浏览器会话长期占用"
+            ) from exc
         outputs = save_run(result, args.output_dir)
         if not outputs:
             raise RuntimeError("所有采集模块均未生成输出")
         completed_at = datetime.now().isoformat(timespec="seconds")
         previous_modules = read_status().get("modules", {})
-        merged_modules = dict(previous_modules) if isinstance(previous_modules, dict) else {}
+        merged_modules = (
+            dict(previous_modules) if isinstance(previous_modules, dict) else {}
+        )
         for name in requested:
             module_result = dict(result["modules"][name])
             successes = module_result["success_count"]
             errors = module_result["error_count"]
-            module_result["state"] = "partial_success" if successes and errors else "success" if successes else "failed"
+            module_result["state"] = (
+                "partial_success"
+                if successes and errors
+                else "success"
+                if successes
+                else "failed"
+            )
             module_result["last_run_at"] = completed_at
             if name in outputs:
                 module_result["last_outputs"] = outputs[name]
             merged_modules[name] = module_result
         has_module_failure = any(
-            result["modules"][name]["error_count"] or not result["modules"][name]["success_count"]
+            result["modules"][name]["error_count"]
+            or not result["modules"][name]["success_count"]
             for name in requested
         )
         state = "partial_success" if has_module_failure else "success"
         write_status(
             state=state,
-            message="采集部分完成，请查看模块错误" if has_module_failure else "采集完成",
+            message="采集部分完成，请查看模块错误"
+            if has_module_failure
+            else "采集完成",
             last_success_at=completed_at,
             last_outputs=outputs,
             modules=merged_modules,

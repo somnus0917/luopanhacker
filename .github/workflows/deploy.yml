@@ -1,8 +1,10 @@
 name: Deploy production
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
     branches: [main]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -13,68 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Validate code and deployment configuration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out committed source
-        uses: actions/checkout@v6
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/0.11.29/install.sh | \
-            env UV_UNMANAGED_INSTALL="$HOME/.local/bin" sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Sync locked Python environment
-        run: uv sync --locked --no-dev
-      - name: Run Python syntax and unit checks
-        run: |
-          uv run --locked python -m compileall -q apps tests
-          uv run --locked python -m unittest discover -s tests -v
-      - name: Run Rust tests
-        run: cargo test --workspace
-      - name: Set up Node
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.24.0
-      - name: Install frontend dependencies
-        working-directory: apps/web
-        run: pnpm install --frozen-lockfile
-      - name: Check and build frontend
-        working-directory: apps/web
-        run: |
-          pnpm check
-          pnpm build
-      - name: Check JavaScript and shell scripts
-        run: |
-          node --check web/static/app.js
-          bash -n ops/deploy.sh ops/backup.sh ops/ssh-deploy-wrapper.sh \
-            docker/start.sh docker/cron_scrape.sh docker/cron_inventory_sync.sh \
-            docker/run_daily.sh docker/test-deploy.sh \
-            scripts/run_daily.sh scripts/run_dashboard.sh scripts/run_inventory_sync.sh \
-            scripts/deploy_from_github.sh
-      - name: Validate Docker Compose production mounts
-        run: |
-          docker compose config >/dev/null
-          LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | \
-            grep -q '/srv/luopan-data/state'
-          grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
-          grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh
-          for runtime_dir in config logs output session state; do
-            grep -q -- "--exclude='${runtime_dir}/'" ops/deploy.sh
-          done
-          grep -q -- '--alias douyin-compass-collector' ops/deploy.sh
-
   deploy:
-    needs: ci
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Configure restricted deployment key
         env:
@@ -90,7 +34,6 @@ jobs:
         env:
           DEPLOY_HOST: ${{ secrets.LUOPAN_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.LUOPAN_DEPLOY_USER }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=30 -o ServerAliveCountMax=20 \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${GITHUB_SHA}"
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${DEPLOY_SHA}"

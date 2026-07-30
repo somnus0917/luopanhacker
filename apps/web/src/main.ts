@@ -1,6 +1,8 @@
 import "./style.css";
 import { $, $$ } from "./dom";
 import { escapeHtml } from "./format";
+import { apiFetch } from "./api";
+import { showToast } from "./feedback";
 import { state } from "./state";
 import { loadUsers, showApp, showLogin } from "./pages/account";
 import {
@@ -9,7 +11,7 @@ import {
 import { loadInventory, renderInventory } from "./pages/inventory";
 import { loadSettlement } from "./pages/settlement";
 import {
-  refreshCollectionStatus, stopCollectionStatusRefresh,
+  loadCollectionShops, refreshCollectionStatus, stopCollectionStatusRefresh,
 } from "./pages/collection";
 
 function buildPlaceholders() {
@@ -17,6 +19,10 @@ function buildPlaceholders() {
     grid.innerHTML = grid.dataset.placeholder.split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
   });
 }
+
+window.addEventListener("luopan-api-fallback", () => {
+  showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
+});
 
 function activatePage(name) {
   state.page = name;
@@ -66,7 +72,7 @@ async function initialise() {
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
+    const response = await apiFetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
     const payload = await response.json();
     if (!response.ok) { $("#login-error").textContent = payload.error || "登录失败"; return; }
     $("#login-error").textContent = "";
@@ -75,10 +81,10 @@ async function initialise() {
     loadOrderImports();
     loadInventory();
     loadSettlement();
-    refreshCollectionStatus();
+    loadCollectionShops().then(refreshCollectionStatus);
   });
-  const me = await fetch("/api/me").then((response) => response.json());
-  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); refreshCollectionStatus(); } else showLogin();
+  const me = await apiFetch("/api/me").then((response) => response.json());
+  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
 }
 
 initialise();

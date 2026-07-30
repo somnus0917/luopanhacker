@@ -91,9 +91,13 @@ def parse_workbook_orders(path):
             "quantity": pd.to_numeric(frame[quantity_col], errors="coerce").fillna(0),
         }
     )
-    orders["order_id"] = orders["order_id"].mask(orders["order_id"] == "", "row-" + orders.index.astype(str))
+    orders["order_id"] = orders["order_id"].mask(
+        orders["order_id"] == "", "row-" + orders.index.astype(str)
+    )
     closed = orders["status"].str.contains("|".join(CLOSED_STATUS_WORDS), regex=True)
-    accepted = orders.loc[orders["paid_at"].notna() & orders["shop"].ne("") & ~closed].copy()
+    accepted = orders.loc[
+        orders["paid_at"].notna() & orders["shop"].ne("") & ~closed
+    ].copy()
 
     # A single order may have multiple product rows.  Amount is order-level in
     # these exports, so retain it once while adding the item quantities.
@@ -103,9 +107,10 @@ def parse_workbook_orders(path):
         .groupby(["date", "shop", "order_id"], as_index=False)
         .agg(amount_yuan=("amount_yuan", "first"), quantity=("quantity", "sum"))
     )
-    summary = (
-        deduplicated.groupby(["date", "shop"], as_index=False)
-        .agg(order_amount_yuan=("amount_yuan", "sum"), order_count=("order_id", "nunique"), item_count=("quantity", "sum"))
+    summary = deduplicated.groupby(["date", "shop"], as_index=False).agg(
+        order_amount_yuan=("amount_yuan", "sum"),
+        order_count=("order_id", "nunique"),
+        item_count=("quantity", "sum"),
     )
 
     orders = []
@@ -145,7 +150,12 @@ def daily_records_from_orders(orders):
                 "shop_id": f"external:{order['source_key']}:{order['shop_name']}",
                 "shop_name": order["shop_name"],
                 "date": order["date"],
-                "metrics": {"income_amt": 0, "pay_amt": 0, "pay_cnt": 0, "pay_item_cnt": 0},
+                "metrics": {
+                    "income_amt": 0,
+                    "pay_amt": 0,
+                    "pay_cnt": 0,
+                    "pay_item_cnt": 0,
+                },
                 "content": {},
                 "trend": {},
                 "source": "external_orders",
@@ -159,7 +169,10 @@ def daily_records_from_orders(orders):
         metrics["pay_amt"] += order["amount_cent"]
         metrics["pay_cnt"] += 1
         metrics["pay_item_cnt"] += order["quantity"]
-    return sorted(summary.values(), key=lambda item: (item["date"], item["shop_name"], item["source_key"]))
+    return sorted(
+        summary.values(),
+        key=lambda item: (item["date"], item["shop_name"], item["source_key"]),
+    )
 
 
 def parse_workbook(path):
@@ -176,14 +189,18 @@ def write_snapshot(records, imports, output_path):
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     os.replace(temporary, output_path)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="汇总外部平台订单明细到经营看板")
     parser.add_argument("files", nargs="+", type=Path, help="订单明细 .xlsx 文件")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="聚合快照输出路径")
+    parser.add_argument(
+        "--output", type=Path, default=DEFAULT_OUTPUT, help="聚合快照输出路径"
+    )
     return parser.parse_args()
 
 

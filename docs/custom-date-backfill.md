@@ -25,7 +25,7 @@
 UV_CACHE_DIR=.uv-cache uv run python apps/collector_py/scheduler.py \
   --random-delay-seconds 0 \
   --module operations \
-  --shop "华硕凡飞笔记本电脑专卖店" \
+  --shop "店铺 A" \
   --date 2026-07-25
 ```
 
@@ -35,7 +35,7 @@ UV_CACHE_DIR=.uv-cache uv run python apps/collector_py/scheduler.py \
 
 ## 2026-07-27 本地验证记录
 
-- 使用本地登录会话，在华硕店选择 `2026-07-25`。
+- 使用本地登录会话，在店铺 A 选择 `2026-07-25`。
 - 真实日历为双月区间选择器；第一次点击填写开始日期，第二次点击同一天填写结束日期并自动刷新。
 - `core_index_v3` 请求返回 `date_type=999`，开始、结束日期均为 `2026/07/25 00:00:00`。
 - 采集器的硬校验通过，读取 32 项经营指标。

@@ -36,7 +36,9 @@ async def main():
         for line in [item.strip() for item in lines.splitlines() if item.strip()][:80]:
             print(line)
 
-        items = await page.locator("a, button, [role=button], [class*=shop], [class*=Shop]").evaluate_all(
+        items = await page.locator(
+            "a, button, [role=button], [class*=shop], [class*=Shop]"
+        ).evaluate_all(
             """
             els => els.slice(0, 180).map((el, index) => {
                 const rect = el.getBoundingClientRect();
@@ -88,7 +90,7 @@ async def main():
                 item.h > 0 &&
                 (
                     item.cursor === 'pointer' ||
-                    item.text.includes('acer宏碁凡飞专卖店') ||
+                    item.text.includes('店铺 A') ||
                     String(item.cls).includes('header') ||
                     String(item.cls).includes('Header')
                 )

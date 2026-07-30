@@ -154,6 +154,35 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
         .execute(pool)
         .await?;
+    let session_columns = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<Vec<_>>();
+    if !session_columns
+        .iter()
+        .any(|column| column == "last_seen_at")
+    {
+        sqlx::query("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
+            .execute(pool)
+            .await?;
+        sqlx::query("UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL")
+            .execute(pool)
+            .await?;
+    }
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            username TEXT PRIMARY KEY,
+            failed_count INTEGER NOT NULL,
+            window_started_at INTEGER NOT NULL,
+            locked_until INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -453,7 +482,22 @@ pub async fn load_operations_records_from_db(pool: &SqlitePool) -> Result<Vec<Op
 }
 
 pub async fn kv_value(pool: &SqlitePool, key: &str) -> Result<Option<Value>> {
-    let row = sqlx::query("SELECT value_json FROM app_kv WHERE key = ?")
+    Ok(kv_value_with_updated_at(pool, key)
+        .await?
+        .map(|payload| payload.value))
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredPayload {
+    pub value: Value,
+    pub updated_at: String,
+}
+
+pub async fn kv_value_with_updated_at(
+    pool: &SqlitePool,
+    key: &str,
+) -> Result<Option<StoredPayload>> {
+    let row = sqlx::query("SELECT value_json, updated_at FROM app_kv WHERE key = ?")
         .bind(key)
         .fetch_optional(pool)
         .await?;
@@ -461,7 +505,10 @@ pub async fn kv_value(pool: &SqlitePool, key: &str) -> Result<Option<Value>> {
         return Ok(None);
     };
     let value_json: String = row.get("value_json");
-    Ok(Some(serde_json::from_str(&value_json)?))
+    Ok(Some(StoredPayload {
+        value: serde_json::from_str(&value_json)?,
+        updated_at: row.get("updated_at"),
+    }))
 }
 
 pub async fn public_imports_from_db(pool: &SqlitePool) -> Result<Option<Value>> {

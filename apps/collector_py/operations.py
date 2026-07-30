@@ -9,19 +9,58 @@ from apps.scraper_py.scraper import AFTER_CLICK_DELAY_RANGE, SHOP_URL, human_pau
 APP_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = APP_DIR / "output" / "daily"
 METRIC_LABELS = (
-    "成交金额", "用户支付金额", "平台补贴金额", "达人补贴金额", "结算金额",
-    "7日结算金额", "14日结算金额", "成交订单数", "成交件数", "件单价",
-    "商品曝光人数", "商品点击人数", "商品曝光次数", "商品点击次数", "客单价",
-    "成交人数", "退款金额（退款时间）", "退款金额（支付时间）", "退款率（支付时间）",
-    "成交退款金额（支付时间）", "成交退款金额（退款时间）", "退款订单数（退款时间）",
-    "退款订单数（支付时间）", "商品曝光-点击转化率（人数）", "商品点击-成交转化率（人数）",
-    "商品曝光-成交转化率（人数）", "商品曝光-点击转化率（次数）", "商品点击-成交转化率（次数）",
-    "商品曝光-成交转化率（次数）", "千次曝光用户支付金额", "支出金额",
-    "投放消耗（店铺被投）", "达人佣金（财务已结算）", "平台佣金（财务已结算）", "商家体验分",
+    "成交金额",
+    "用户支付金额",
+    "平台补贴金额",
+    "达人补贴金额",
+    "结算金额",
+    "7日结算金额",
+    "14日结算金额",
+    "成交订单数",
+    "成交件数",
+    "件单价",
+    "商品曝光人数",
+    "商品点击人数",
+    "商品曝光次数",
+    "商品点击次数",
+    "客单价",
+    "成交人数",
+    "退款金额（退款时间）",
+    "退款金额（支付时间）",
+    "退款率（支付时间）",
+    "成交退款金额（支付时间）",
+    "成交退款金额（退款时间）",
+    "退款订单数（退款时间）",
+    "退款订单数（支付时间）",
+    "商品曝光-点击转化率（人数）",
+    "商品点击-成交转化率（人数）",
+    "商品曝光-成交转化率（人数）",
+    "商品曝光-点击转化率（次数）",
+    "商品点击-成交转化率（次数）",
+    "商品曝光-成交转化率（次数）",
+    "千次曝光用户支付金额",
+    "支出金额",
+    "投放消耗（店铺被投）",
+    "达人佣金（财务已结算）",
+    "平台佣金（财务已结算）",
+    "商家体验分",
 )
 BREAK_LABELS = set(METRIC_LABELS) | {
-    "较上期", "较上周期", "昨日", "同行基准", "同行标杆", "同行顶尖", "同行中间值",
-    "数据趋势", "载体分布", "收支概况", "经营诊断", "构成", "配置", "全店效率", "效率",
+    "较上期",
+    "较上周期",
+    "昨日",
+    "同行基准",
+    "同行标杆",
+    "同行顶尖",
+    "同行中间值",
+    "数据趋势",
+    "载体分布",
+    "收支概况",
+    "经营诊断",
+    "构成",
+    "配置",
+    "全店效率",
+    "效率",
 }
 JOIN_UNITS = {"万", "分"}
 
@@ -31,8 +70,13 @@ def compact_lines(text):
 
 
 def section_bounds(lines, start_label, end_labels):
-    start = next((index + 1 for index, line in enumerate(lines) if line == start_label), 0)
-    end = next((index for index in range(start, len(lines)) if lines[index] in end_labels), len(lines))
+    start = next(
+        (index + 1 for index, line in enumerate(lines) if line == start_label), 0
+    )
+    end = next(
+        (index for index in range(start, len(lines)) if lines[index] in end_labels),
+        len(lines),
+    )
     return start, end
 
 
@@ -79,11 +123,18 @@ async def collect(page, shop_name, data_range):
     text = await page.locator("body").inner_text(timeout=30000)
     lines = compact_lines(text)
     overview_start, overview_end = section_bounds(lines, "经营概况", {"数据趋势"})
-    traffic_start, traffic_end = section_bounds(lines, "全店流量", {"收支概况", "经营诊断", "配置"})
+    traffic_start, traffic_end = section_bounds(
+        lines, "全店流量", {"收支概况", "经营诊断", "配置"}
+    )
     finance_start, finance_end = section_bounds(lines, "收支概况", {"商家体验分"})
     metrics = {}
     for label in METRIC_LABELS:
-        if label in {"支出金额", "投放消耗（店铺被投）", "达人佣金（财务已结算）", "平台佣金（财务已结算）"}:
+        if label in {
+            "支出金额",
+            "投放消耗（店铺被投）",
+            "达人佣金（财务已结算）",
+            "平台佣金（财务已结算）",
+        }:
             value = value_after(lines, label, finance_start, finance_end)
         elif label == "千次曝光用户支付金额":
             value = value_after(lines, label, traffic_start, traffic_end)
@@ -112,16 +163,45 @@ def save(results, captured_at=None, output_dir=None):
     json_path = directory / f"compass_daily_{day_slug}_{stamp}.json"
     csv_path = directory / f"compass_daily_{day_slug}_{stamp}.csv"
     captured_text = captured.isoformat(timespec="seconds")
-    json_path.write_text(json.dumps({
-        "captured_at": captured_text,
-        "source": SHOP_URL,
-        "pace": {"action_delay_seconds": list(AFTER_CLICK_DELAY_RANGE), "mode": "headed browser, low-frequency clicks"},
-        "results": results,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    json_path.write_text(
+        json.dumps(
+            {
+                "captured_at": captured_text,
+                "source": SHOP_URL,
+                "pace": {
+                    "action_delay_seconds": list(AFTER_CLICK_DELAY_RANGE),
+                    "mode": "headed browser, low-frequency clicks",
+                },
+                "results": results,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     with csv_path.open("w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.DictWriter(file, fieldnames=["captured_at", "data_start", "data_end", "shop_name", "metric", "value"])
+        writer = csv.DictWriter(
+            file,
+            fieldnames=[
+                "captured_at",
+                "data_start",
+                "data_end",
+                "shop_name",
+                "metric",
+                "value",
+            ],
+        )
         writer.writeheader()
         for item in results:
             for metric, value in item["metrics"].items():
-                writer.writerow({"captured_at": captured_text, "data_start": item.get("data_start") or "", "data_end": item.get("data_end") or "", "shop_name": item["shop_name"], "metric": metric, "value": value})
+                writer.writerow(
+                    {
+                        "captured_at": captured_text,
+                        "data_start": item.get("data_start") or "",
+                        "data_end": item.get("data_end") or "",
+                        "shop_name": item["shop_name"],
+                        "metric": metric,
+                        "value": value,
+                    }
+                )
     return json_path, csv_path

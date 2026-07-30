@@ -79,7 +79,9 @@ def load_users() -> dict:
 
 def save_users(users: dict):
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8")
+    USERS_FILE.write_text(
+        json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def init_default_admin():
@@ -135,6 +137,7 @@ def check_session():
         if not token:
             try:
                 from streamlit_cookies_controller import CookieController
+
                 controller = CookieController()
                 token = controller.get(SESSION_COOKIE_NAME)
             except Exception:
@@ -150,7 +153,8 @@ def check_session():
 
 
 def login_form():
-    st.markdown("""
+    st.markdown(
+        """
     <style>
         .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
             background: #0a0c18;
@@ -202,14 +206,19 @@ def login_form():
         }
         .stButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover { background: #ff5477 !important; border-color: #ff5477 !important; }
     </style>
-    """, unsafe_allow_html=True)
+    """,
+        unsafe_allow_html=True,
+    )
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown('<h1 class="login-title">罗盘数据中心</h1>', unsafe_allow_html=True)
-        st.markdown('<p class="login-subtitle">请登录以访问系统</p>', unsafe_allow_html=True)
+        st.markdown(
+            '<p class="login-subtitle">请登录以访问系统</p>', unsafe_allow_html=True
+        )
 
         from streamlit_cookies_controller import CookieController
+
         controller = CookieController()
         login_success = False
 
@@ -263,11 +272,11 @@ def logout():
 
     try:
         from streamlit_cookies_controller import CookieController
+
         controller = CookieController()
         controller.remove(SESSION_COOKIE_NAME, same_site="lax")
     except Exception:
         pass
-
 
 
 def require_auth():
@@ -277,8 +286,6 @@ def require_auth():
         if not st.session_state.authenticated:
             st.stop()
     return st.session_state.username
-
-
 
 
 def change_password(username: str, old_password: str, new_password: str) -> bool:
@@ -291,7 +298,9 @@ def change_password(username: str, old_password: str, new_password: str) -> bool
 
     hashed, _ = _hash_password(new_password)
     users[username]["password_hash"] = hashed
-    users[username]["password_changed_at"] = datetime.now().isoformat(timespec="seconds")
+    users[username]["password_changed_at"] = datetime.now().isoformat(
+        timespec="seconds"
+    )
     save_users(users)
     return True
 

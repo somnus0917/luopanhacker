@@ -46,7 +46,7 @@ async def main():
         for item in items:
             if item["text"] or item["href"]:
                 print(
-                    f'[{item["index"]}] {item["tag"]} visible={item["visible"]} '
+                    f"[{item['index']}] {item['tag']} visible={item['visible']} "
                     f'text="{item["text"]}" href="{item["href"]}" target="{item["target"]}"'
                 )
 
@@ -78,7 +78,7 @@ async def main():
                 for item in new_items:
                     if item["text"] or item["href"]:
                         print(
-                            f'NEW[{item["index"]}] {item["tag"]} visible={item["visible"]} '
+                            f"NEW[{item['index']}] {item['tag']} visible={item['visible']} "
                             f'text="{item["text"]}" href="{item["href"]}"'
                         )
             except Exception as exc:

@@ -1,9 +1,10 @@
 import { $, $$ } from "../dom";
+import { apiFetch as fetch } from "../api";
 import { showToast } from "../feedback";
 import { escapeHtml, number, whole } from "../format";
 import {
   backfillDateAllowed, COLLECTION_SHOPS, currentLocalMonthStart, isAdmin,
-  previousLocalDate, state,
+  previousLocalDate, setCollectionShops, state,
 } from "../state";
 import { showLogin } from "./account";
 
@@ -175,6 +176,13 @@ export async function refreshCollectionStatus() {
   } catch {
     if (state.status) renderCollectionCenter(state.status, { logMessage: "暂时无法读取采集服务状态，请稍后重试。" });
   }
+}
+
+export async function loadCollectionShops() {
+  const response = await fetch("/api/collection/shops");
+  if (!response.ok) return;
+  const payload = await response.json().catch(() => ({}));
+  setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
 }
 
 async function startCollection() {
