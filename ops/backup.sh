@@ -22,10 +22,10 @@ else
 fi
 date --iso-8601=seconds > "${DATA_DIR}/state/last_backup_requested_at.txt"
 
-cleanup_snapshot() {
-  rm -f "${SQLITE_SNAPSHOT}"
+cleanup() {
+  rm -f "${SQLITE_SNAPSHOT}" "${TEMP_ARCHIVE}"
 }
-trap cleanup_snapshot EXIT
+trap cleanup EXIT
 
 if [[ -f "${SQLITE_DB}" ]]; then
   # sqlite3.Connection.backup uses SQLite's online backup API, producing a
@@ -38,6 +38,7 @@ source_path, snapshot_path = sys.argv[1:]
 with sqlite3.connect(source_path) as source, sqlite3.connect(snapshot_path) as snapshot:
     source.backup(snapshot)
 ' "${SQLITE_DB}" "${SQLITE_SNAPSHOT}"
+  sqlite3 "${SQLITE_SNAPSHOT}" "PRAGMA quick_check;" | grep -qx "ok"
 fi
 
 # Chromium writes parts of the session as root.  sudo is intentionally
@@ -56,6 +57,7 @@ fi
 sudo -n tar "${tar_args[@]}" config output session logs state
 sudo -n chown "$(id -u):$(id -g)" "${TEMP_ARCHIVE}"
 mv "${TEMP_ARCHIVE}" "${ARCHIVE}"
+chmod 600 "${ARCHIVE}"
 tar -tzf "${ARCHIVE}" >/dev/null
 
 if [[ "$(date +%u)" == "7" ]]; then
