@@ -20,16 +20,13 @@ use axum::{
 };
 #[cfg(test)]
 use chrono::NaiveDate;
-use luopan_channels::load_channel_dashboard;
 use luopan_jobs::status_payload;
 use luopan_operations::load_operations_records;
 use luopan_orders::public_imports;
 use luopan_runtime::RuntimePaths;
 #[cfg(test)]
 use luopan_runtime::read_json_file;
-use luopan_storage::{
-    StoragePool, kv_value_with_updated_at, load_operations_records_from_db, summary,
-};
+use luopan_storage::{StoragePool, summary};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -49,6 +46,7 @@ mod collection;
 mod error;
 mod health;
 mod inventory;
+mod operations;
 mod orders;
 mod settlement;
 mod state;
@@ -71,6 +69,7 @@ use collection::{
 use error::{ApiError, api, api_with_meta, generate_request_id};
 use health::{healthz, readyz};
 use inventory::{inventory_dashboard, inventory_raw};
+use operations::{channel_dashboard, compass_dashboard};
 use orders::{commit_order_import, order_imports, preview_order_import, remove_order_import};
 #[cfg(test)]
 use settlement::validate_settlement_date_range;
@@ -768,7 +767,7 @@ fn format_system_time(time: SystemTime) -> String {
         .to_string()
 }
 
-fn latest_json_modified_at(path: &Path) -> Option<String> {
+pub(crate) fn latest_json_modified_at(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok();
     if metadata.as_ref().is_some_and(|metadata| metadata.is_file()) {
         return path
@@ -803,115 +802,6 @@ pub(crate) fn payload_updated_at(value: &Value, fallback_path: &Path) -> String 
         })
         .or_else(|| latest_json_modified_at(fallback_path))
         .unwrap_or_else(now_string)
-}
-
-fn operations_updated_at(
-    records: &[luopan_operations::OperationRecord],
-    paths: &RuntimePaths,
-) -> String {
-    records
-        .iter()
-        .map(|record| record.captured_at.as_str())
-        .max()
-        .map(ToOwned::to_owned)
-        .or_else(|| latest_json_modified_at(&paths.output_dir.join("daily")))
-        .or_else(|| latest_json_modified_at(&paths.output_dir.join("external_orders")))
-        .unwrap_or_else(now_string)
-}
-
-struct LoadedPayload {
-    value: Value,
-    source: &'static str,
-    fallback: bool,
-    updated_at: String,
-}
-
-async fn load_channel_payload(state: &AppState) -> Result<LoadedPayload, ApiError> {
-    if let Some(pool) = &state.storage_pool {
-        match kv_value_with_updated_at(pool, "channel_dashboard").await {
-            Ok(Some(payload)) => {
-                return Ok(LoadedPayload {
-                    value: payload.value,
-                    source: "sqlite",
-                    fallback: false,
-                    updated_at: payload.updated_at,
-                });
-            }
-            Ok(None) => tracing::warn!("SQLite channel payload is missing; falling back to JSON"),
-            Err(error) => {
-                tracing::warn!(%error, "SQLite channel read failed; falling back to JSON")
-            }
-        }
-    }
-    let value = load_channel_dashboard(&state.paths).map_err(ApiError::internal)?;
-    let updated_at = payload_updated_at(&value, &state.paths.output_dir.join("channel"));
-    Ok(LoadedPayload {
-        value,
-        source: "json",
-        fallback: state.storage_pool.is_some(),
-        updated_at,
-    })
-}
-
-async fn channel_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let payload = load_channel_payload(&state).await?;
-    Ok(api_with_meta(
-        payload.value,
-        payload.source,
-        payload.fallback,
-        payload.updated_at,
-    ))
-}
-
-async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let (records, records_source, records_fallback) = if let Some(pool) = &state.storage_pool {
-        match load_operations_records_from_db(pool).await {
-            Ok(records) if !records.is_empty() => (records, "sqlite", false),
-            Ok(_) => {
-                tracing::warn!("SQLite operations payload is empty; falling back to JSON");
-                (
-                    load_operations_records(&state.paths).map_err(ApiError::internal)?,
-                    "json",
-                    true,
-                )
-            }
-            Err(error) => {
-                tracing::warn!(%error, "SQLite operations read failed; falling back to JSON");
-                (
-                    load_operations_records(&state.paths).map_err(ApiError::internal)?,
-                    "json",
-                    true,
-                )
-            }
-        }
-    } else {
-        (
-            load_operations_records(&state.paths).map_err(ApiError::internal)?,
-            "json",
-            false,
-        )
-    };
-    let records_updated_at = operations_updated_at(&records, &state.paths);
-    let channel = load_channel_payload(&state).await?;
-    let source = if records_source == channel.source {
-        records_source
-    } else {
-        "mixed"
-    };
-    Ok(api_with_meta(
-        json!({
-            "records": records,
-            "channel": channel.value,
-            "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
-        }),
-        source,
-        records_fallback || channel.fallback,
-        if source == "mixed" {
-            json!({ "operations": records_updated_at, "channel": channel.updated_at })
-        } else {
-            json!(records_updated_at.max(channel.updated_at))
-        },
-    ))
 }
 
 async fn storage_summary(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
