@@ -21,10 +21,10 @@ use subtle::ConstantTimeEq;
 use crate::{ApiError, AppState, SecurityConfig, api, now_string};
 
 pub(crate) const SESSION_COOKIE_NAME: &str = "compass_session";
-pub(crate) const SESSION_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
-pub(crate) const SESSION_IDLE_TIMEOUT_SECONDS: i64 = 30 * 60;
+pub(crate) const SESSION_LIFETIME_SECONDS: i64 = 7 * 24 * 60 * 60;
+pub(crate) const SESSION_IDLE_TIMEOUT_SECONDS: i64 = 60 * 60;
 pub(crate) const SESSION_LAST_SEEN_WRITE_INTERVAL_SECONDS: i64 = 5 * 60;
-pub(crate) const LOGIN_FAILURE_LIMIT: i64 = 5;
+pub(crate) const LOGIN_FAILURE_LIMIT: i64 = 20;
 pub(crate) const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 pub(crate) const LOGIN_LOCKOUT_SECONDS: i64 = 15 * 60;
 
