@@ -46,6 +46,8 @@ tar_args=(--xattrs --acls --numeric-owner -C "${DATA_DIR}" -czf "${TEMP_ARCHIVE}
 if [[ -f "${SQLITE_SNAPSHOT}" ]]; then
   tar_args+=(
     --exclude='state/luopan.db'
+    --exclude='state/luopan.db-wal'
+    --exclude='state/luopan.db-shm'
     --transform="s|state/.luopan-backup-${STAMP}.db|state/luopan.db|"
   )
 fi
