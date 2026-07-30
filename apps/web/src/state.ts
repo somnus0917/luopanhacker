@@ -1,4 +1,4 @@
-import type { JsonObject, User } from "./types";
+import type { InventoryView, JsonObject, PageName, User } from "./types";
 
 export type AnyRecord = JsonObject;
 
@@ -32,9 +32,9 @@ export type AppState = {
   collectionBackfillDate: string;
   collectionBackfillShops: Set<string>;
   collectionMessage: string;
-  page: string;
+  page: PageName;
   inventory: AnyRecord | null;
-  inventoryView: string;
+  inventoryView: InventoryView;
   inventoryWarehouse: string;
   inventoryBrand: string;
   inventorySortKey: string;

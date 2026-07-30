@@ -1631,7 +1631,8 @@ function setTableDensity(density) {
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
+  const pageNames = ["inventory", "operations", "settlement", "collection", "account"];
+  activatePage(desired === "channel" ? "operations" : pageNames.includes(desired) ? desired : "operations");
   $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
   $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));

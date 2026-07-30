@@ -4,6 +4,7 @@ import { escapeHtml } from "./format";
 import { apiFetch } from "./api";
 import { showToast } from "./feedback";
 import { state } from "./state";
+import type { PageName } from "./types";
 import { loadUsers, showApp, showLogin } from "./pages/account";
 import {
   loadCompass, loadOrderImports,
@@ -24,7 +25,7 @@ window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
 
-function activatePage(name: string) {
+function activatePage(name: PageName) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => {
@@ -51,8 +52,9 @@ function setTableDensity(density: string) {
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab: HTMLElement) => tab.addEventListener("click", () => activatePage(tab.dataset.page ?? "operations")));
+  const pageNames: PageName[] = ["inventory", "operations", "settlement", "collection", "account"];
+  activatePage(desired === "channel" ? "operations" : pageNames.includes(desired as PageName) ? desired as PageName : "operations");
+  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab: HTMLElement) => tab.addEventListener("click", () => activatePage((tab.dataset.page as PageName | undefined) ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
   $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));
   $("#filter-quick-action")?.addEventListener("click", () => {

@@ -3,6 +3,7 @@ import { apiFetch as fetch } from "../api";
 import { escapeHtml, number, settlementMoney, whole } from "../format";
 import { state } from "../state";
 import type { AnyRecord } from "../state";
+import type { InventoryView } from "../types";
 import { showLogin } from "./account";
 
 export function sortRows(rows: AnyRecord[], key: string, dir: string): AnyRecord[] {
@@ -181,7 +182,7 @@ function inventoryTabs(view: string) {
   return `<div class="inventory-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="inventory-tab ${view === key ? "active" : ""}" type="button" data-inventory-view="${key}" role="tab" aria-selected="${view === key}">${label}</button>`).join("")}</div>`;
 }
 
-export function renderInventory(payload: AnyRecord | null, view = state.inventoryView) {
+export function renderInventory(payload: AnyRecord | null, view: InventoryView = state.inventoryView) {
   if (!payload) return;
   state.inventory = payload;
   state.inventoryView = view;
@@ -227,7 +228,7 @@ export function renderInventory(payload: AnyRecord | null, view = state.inventor
     state.inventoryBrand = "";
     renderInventory(payload);
   });
-  $$('[data-inventory-view]').forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView)));
+  $$('[data-inventory-view]').forEach((button) => button.addEventListener("click", () => renderInventory(payload, button.dataset.inventoryView as InventoryView)));
 }
 
 export async function loadInventory() {
