@@ -5,9 +5,10 @@ import {
   escapeHtml, number, settlementMoney, settlementMoneyOrDash, whole,
 } from "../format";
 import { isAdmin, state } from "../state";
+import type { AnyRecord } from "../state";
 import { showLogin } from "./account";
 
-function settlementGroupTable(title, groups) {
+function settlementGroupTable(title: string, groups: AnyRecord[]) {
   const rows = [...(groups || [])]
     .sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount))
     .map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`)
@@ -21,7 +22,7 @@ function settlementDates(payload = state.settlement) {
     .sort((a, b) => b.localeCompare(a));
 }
 
-function settlementCalendarDate(year, month, day) {
+function settlementCalendarDate(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
@@ -65,7 +66,7 @@ function settlementCalendarMonthMarkup(monthValue: string, availableDates: Set<s
   return `<section class="calendar-month" aria-label="${year}年${month}月"><h4>${year}年 ${month}月</h4><div class="calendar-weekdays" aria-hidden="true"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="calendar-days">${days}</div></section>`;
 }
 
-function settlementCalendarMarkup(payload) {
+function settlementCalendarMarkup(payload: AnyRecord) {
   const dates = settlementDates(payload);
   if (!dates.length) return `<div class="date-filter-field"><span>结算日期</span><button class="date-picker-trigger" type="button" disabled>暂无日期</button></div>`;
   const availableDates = new Set(dates);
@@ -79,10 +80,10 @@ function settlementCalendarMarkup(payload) {
   return `<div class="date-filter-field"><span>结算日期</span><details class="date-range-picker" ${state.settlementCalendarOpen ? "open" : ""}><summary class="date-picker-trigger"><span>${escapeHtml(settlementDateLabel())}</span><i aria-hidden="true"></i></summary><div class="calendar-popover"><div class="calendar-toolbar"><button type="button" data-settlement-calendar-shift="-12" aria-label="上一年">«</button><button type="button" data-settlement-calendar-shift="-1" aria-label="上个月">‹</button><span>${escapeHtml(hint)}</span><button type="button" data-settlement-calendar-shift="1" aria-label="下个月">›</button><button type="button" data-settlement-calendar-shift="12" aria-label="下一年">»</button></div><div class="calendar-months">${settlementCalendarMonthMarkup(cursor, availableDates, rangeStart, rangeEnd)}${settlementCalendarMonthMarkup(shiftSettlementCalendarMonth(cursor, 1), availableDates, rangeStart, rangeEnd)}</div><div class="calendar-footer"><span>${selectedCount} 个结算日</span><div><button type="button" data-settlement-calendar-all>全部日期</button><button class="calendar-confirm" type="button" data-settlement-calendar-confirm>确定</button></div></div></div></details></div>`;
 }
 
-function settlementFiltersMarkup(payload) {
+function settlementFiltersMarkup(payload: AnyRecord) {
   const shops = payload.shops || [];
   const selected = payload.selected_shop || state.settlementShop || "";
-  const options = `<option value="">全部店铺</option>${shops.map((name) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
+  const options = `<option value="">全部店铺</option>${shops.map((name: string) => `<option value="${escapeHtml(name)}" ${selected === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
   const tags = [settlementDateLabel(), selected ? `店铺：${selected}` : "全部店铺"]
     .map((tag) => `<span class="filter-summary-tag">${escapeHtml(tag)}</span>`).join("");
   return `<section class="table-filter-panel" aria-label="结算范围筛选"><div><strong>结算范围</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-settlement-filters>重置</button></div>${settlementCalendarMarkup(payload)}<label>店铺<select data-settlement-filter="shop">${options}</select></label></section>`;
@@ -102,12 +103,12 @@ function positionSettlementCalendar() {
   }
 }
 
-function renderSettlementFilters(payload) {
+function renderSettlementFilters(payload: AnyRecord) {
   const target = $("#settlement-filters");
   if (!target) return;
   target.innerHTML = settlementFiltersMarkup(payload);
-  $('[data-settlement-filter="shop"]', target)?.addEventListener("change", (event) => {
-    state.settlementShop = event.currentTarget.value;
+  $('[data-settlement-filter="shop"]', target)?.addEventListener("change", (event: Event) => {
+    state.settlementShop = (event.currentTarget as HTMLSelectElement).value;
     state.settlementCalendarCursor = "";
     state.settlementCalendarRangeStart = "";
     state.settlementCalendarOpen = false;
@@ -170,7 +171,7 @@ function settlementUploadPanel() {
   return `<details class="panel order-import-panel"><summary><span>结算 CSV 导入</span><small>填写店铺 → 上传 CSV → 自动刷新</small></summary><div class="order-import-body"><form id="settlement-upload-form" class="order-upload-form"><label>店铺名称<input name="shop_name" value="${escapeHtml(defaultShop)}" required /></label><label class="file-picker"><span>选择结算 CSV</span><input id="settlement-upload-file" type="file" name="file" accept=".csv,text/csv" required /></label><button class="button" type="submit">上传并解析</button></form>${message}<p class="import-help">上传后文件保存在服务器 <code>output/settlement/</code>，店铺名会保存为本地映射，用于后续筛选与汇总。</p></div></details>`;
 }
 
-function settlementDetailTable(rows) {
+function settlementDetailTable(rows: AnyRecord[]) {
   const body = [...(rows || [])].map((item) => {
     const governmentSubsidy = number(item.government_merchant) + number(item.government_platform);
     const cells = [
@@ -191,7 +192,7 @@ function settlementDetailTable(rows) {
   return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
 }
 
-export function renderSettlement(payload) {
+export function renderSettlement(payload: AnyRecord) {
   state.settlement = payload;
   state.settlementShop = payload.selected_shop || "";
   state.settlementAvailableDates = settlementDates(payload);
@@ -202,7 +203,7 @@ export function renderSettlement(payload) {
   }
   renderSettlementFilters(payload);
   const summary = payload.summary || {};
-  const fileNames = (payload.files || []).map((file) => file.name).filter(Boolean);
+  const fileNames = (payload.files || []).map((file: AnyRecord) => file.name).filter(Boolean);
   $("#settlement-freshness").textContent = state.settlementAvailableDates.length ? `结算至 ${state.settlementAvailableDates[0]}` : "暂无数据";
   const governmentSubsidy = number(summary.government_merchant) + number(summary.government_platform);
   const metrics = [
@@ -224,9 +225,9 @@ export function renderSettlement(payload) {
   $("#settlement-upload-form")?.addEventListener("submit", uploadSettlement);
 }
 
-async function uploadSettlement(event) {
+async function uploadSettlement(event: SubmitEvent) {
   event.preventDefault();
-  const form = event.currentTarget;
+  const form = event.currentTarget as HTMLFormElement;
   const button = $("button", form);
   const data = new FormData(form);
   const uploadFile = data.get("file");
@@ -275,6 +276,7 @@ export async function loadSettlement() {
     if (!response.ok) throw new Error(payload.error || "结算数据不可用");
     renderSettlement(payload);
   } catch (error) {
-    target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(error.message || "请检查 Rust API 与 output/settlement 目录")}</span></div>`;
+    const message = error instanceof Error ? error.message : "请检查 Rust API 与 output/settlement 目录";
+    target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }

@@ -1,4 +1,6 @@
-export type AnyRecord = Record<string, any>;
+import type { JsonObject, User } from "./types";
+
+export type AnyRecord = JsonObject;
 
 export type OperationRecord = AnyRecord & {
   date: string;
@@ -10,8 +12,8 @@ export type OperationRecord = AnyRecord & {
 };
 
 export type AppState = {
-  currentUser: { username: string; role: string } | null;
-  users: AnyRecord[];
+  currentUser: User | null;
+  users: User[];
   accountMessage: string;
   records: OperationRecord[];
   operationDates: Set<string>;

@@ -1,6 +1,7 @@
 import { $, $$ } from "./dom";
 import { escapeHtml, metricText, money, number, whole } from "./format";
 import type { OperationRecord } from "./state";
+import type { Scalar } from "./types";
 
 const COLORS = ["#3da7f5", "#31d380", "#a461d2", "#f18a21", "#f7c91b", "#e84d8a", "#2cced2", "#8b9dc3"];
 const METRIC_SEMANTICS: Record<string, { label: string; color: string }> = {
@@ -14,7 +15,7 @@ const METRIC_SEMANTICS: Record<string, { label: string; color: string }> = {
   ad_roi: { label: "效率指标", color: "#c5f36b" },
 };
 
-function metricSemantic(metricKey) {
+function metricSemantic(metricKey: string) {
   return METRIC_SEMANTICS[metricKey] || { label: "经营指标", color: "#b8d8ff" };
 }
 
@@ -24,7 +25,7 @@ export function seriesColor(key: string): string {
   return COLORS[hash % COLORS.length];
 }
 
-function compactMoney(cents) {
+function compactMoney(cents: Scalar) {
   const yuan = number(cents) / 100;
   const abs = Math.abs(yuan);
   if (abs >= 1e8) return `¥${(yuan / 1e8).toFixed(abs >= 1e9 ? 1 : 2)}亿`;
@@ -32,12 +33,12 @@ function compactMoney(cents) {
   return `¥${Math.round(yuan).toLocaleString("zh-CN")}`;
 }
 
-function chartAxisValue(metricKey, value) {
+function chartAxisValue(metricKey: string, value: Scalar) {
   if (metricKey === "ad_roi") return `${number(value).toFixed(2)}×`;
   return metricKey.endsWith("_amt") ? compactMoney(value) : Math.round(number(value)).toLocaleString("zh-CN");
 }
 
-function chartDateTicks(dates, maxLabels = 6) {
+function chartDateTicks(dates: string[], maxLabels = 6) {
   if (dates.length <= maxLabels) return dates.map((date, index) => ({ date, index }));
   const indexes = new Set<number>();
   for (let step = 0; step < maxLabels; step += 1) {
@@ -52,7 +53,7 @@ function latestRecords(records: OperationRecord[]) {
   return { date: latest, records: records.filter((item) => item.date === latest) };
 }
 
-export function lineChart(records: OperationRecord[], metricKey, title) {
+export function lineChart(records: OperationRecord[], metricKey: string, title: string) {
   const semantic = metricSemantic(metricKey);
   const dates = [...new Set(records.map((item) => item.date))].sort();
   const shops = [...new Set<string>(records.map((item) => item.shop_name))].sort((a, b) => a.localeCompare(b, "zh-CN"));
@@ -63,14 +64,14 @@ export function lineChart(records: OperationRecord[], metricKey, title) {
   const totals = dates.map((date, index) => values.reduce((sum, series) => sum + number(series[index]), 0));
   const max = Math.max(...totals, ...values.flat().filter((value) => value !== null).map(number), 1) * 1.08;
   const width = 760, height = 252, pad = { l: 68, r: 16, t: 15, b: 38 };
-  const point = (value, index) => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - (value / max) * (height - pad.t - pad.b)];
-  const path = (series) => {
+  const point = (value: number, index: number): [number, number] => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - (value / max) * (height - pad.t - pad.b)];
+  const path = (series: Array<number | null>) => {
     let previousMissing = true;
     return series.map((value, index) => {
       if (value === null) { previousMissing = true; return ""; }
       const command = previousMissing ? "M" : "L";
       previousMissing = false;
-      return `${command}${point(value, index).map((n) => n.toFixed(1)).join(" ")}`;
+      return `${command}${point(value, index).map((n: number) => n.toFixed(1)).join(" ")}`;
     }).join(" ");
   };
   const levels = [0.25, 0.5, 0.75, 1];
@@ -96,7 +97,7 @@ export function bindLineChartHover(records: OperationRecord[]) {
       tooltip.classList.add("hidden");
       hoverLine.setAttribute("visibility", "hidden");
     };
-    const move = (event) => {
+    const move = (event: MouseEvent) => {
       const bounds = chart.getBoundingClientRect();
       const x = ((event.clientX - bounds.left) / bounds.width) * width;
       const step = (width - leftPadding - rightPadding) / Math.max(dates.length - 1, 1);
@@ -122,7 +123,7 @@ export function bindLineChartHover(records: OperationRecord[]) {
   });
 }
 
-export function barPanel(records, metricKey, title) {
+export function barPanel(records: OperationRecord[], metricKey: string, title: string) {
   const semantic = metricSemantic(metricKey);
   const { date, records: latest } = latestRecords(records);
   const items = latest.map((item) => ({ name: item.shop_name, value: number(item.metrics?.[metricKey]) })).sort((a, b) => b.value - a.value);

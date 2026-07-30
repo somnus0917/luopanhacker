@@ -29,7 +29,7 @@
 })();
 const $ = (selector, scope = document) => scope.querySelector(selector);
 const $$ = (selector, scope = document) => [...scope.querySelectorAll(selector)];
-const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char] ?? char);
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const money = (cents) => `¥${(number(cents) / 100).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const whole = (value) => Math.round(number(value)).toLocaleString("zh-CN");
@@ -536,7 +536,7 @@ function operationDateLabel() {
   if (!selected.length) return "请选择日期";
   if (selected.length === available.length && available.every((date) => state.operationDates.has(date))) return "全部日期";
   if (selected.length === 1) return selected[0];
-  const isRange = available.filter((date) => date >= selected[0] && date <= selected.at(-1)).every((date) => state.operationDates.has(date));
+  const isRange = available.filter((date) => date >= (selected[0] ?? "") && date <= (selected.at(-1) ?? "")).every((date) => state.operationDates.has(date));
   return isRange ? `${selected[0]} 至 ${selected.at(-1)}` : `已选择 ${selected.length} 天`;
 }
 function calendarMonthMarkup(monthValue, availableDates, rangeStart, rangeEnd) {
@@ -1074,6 +1074,7 @@ function inventoryTabs(view) {
   return `<div class="inventory-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="inventory-tab ${view === key ? "active" : ""}" type="button" data-inventory-view="${key}" role="tab" aria-selected="${view === key}">${label}</button>`).join("")}</div>`;
 }
 function renderInventory(payload, view = state.inventoryView) {
+  if (!payload) return;
   state.inventory = payload;
   state.inventoryView = view;
   const rows = inventoryFilteredRows(payload);
@@ -1123,7 +1124,8 @@ async function loadInventory() {
     if (!response.ok) throw new Error(payload.error || "库存快照不可用");
     renderInventory(payload);
   } catch (error) {
-    target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(error.message || "请在服务器侧运行只读库存同步")}</span></div>`;
+    const message = error instanceof Error ? error.message : "请在服务器侧运行只读库存同步";
+    target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
 function settlementGroupTable(title, groups) {
@@ -1365,14 +1367,15 @@ async function loadSettlement() {
     if (!response.ok) throw new Error(payload.error || "结算数据不可用");
     renderSettlement(payload);
   } catch (error) {
-    target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(error.message || "请检查 Rust API 与 output/settlement 目录")}</span></div>`;
+    const message = error instanceof Error ? error.message : "请检查 Rust API 与 output/settlement 目录";
+    target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
 let statusRefreshTimer = null;
 let previousTerminalOutput = "";
 let terminalUnreadLines = 0;
 function terminalOutput(status) {
-  return typeof status.terminal_output === "string" ? status.terminal_output : "";
+  return typeof status?.terminal_output === "string" ? status.terminal_output : "";
 }
 function terminalAtBottom(terminal) {
   return terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
@@ -1426,7 +1429,7 @@ function collectionModuleCard(name, title, description, status) {
 }
 function collectionStateLabel(status) {
   const labels = { unknown: "等待首次运行", manual_requested: "请求已排队", waiting_random: "等待启动", running: "采集中", success: "采集成功", partial_success: "部分成功", failed: "采集失败", skipped: "已跳过" };
-  return labels[status.state] || status.state || "未知";
+  return labels[status.state ?? ""] || status.state || "未知";
 }
 function collectionShopOptions() {
   return COLLECTION_SHOPS.map((shop) => {
@@ -1449,7 +1452,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
   previousTerminalOutput = output;
   state.status = status;
   const online = Boolean(status.collector_online);
-  const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+  const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state ?? "");
   const health = online ? "采集服务在线" : "采集服务离线";
   const request = status.request_pending ? "有任务等待或执行中" : "队列为空";
   const feedback = state.collectionMessage ? `<p class="collection-feedback">${escapeHtml(state.collectionMessage)}</p>` : "";
@@ -1511,7 +1514,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
   $("#collection-clear-terminal-button")?.addEventListener("click", clearCollectionTerminal);
 }
 async function refreshCollectionStatus() {
-  window.clearTimeout(statusRefreshTimer);
+  window.clearTimeout(statusRefreshTimer ?? void 0);
   try {
     const response = await apiFetch("/api/collection/status", { cache: "no-store" });
     if (response.status === 401) return showLogin();
@@ -1587,17 +1590,17 @@ async function clearCollectionTerminal() {
     showToast(state.collectionMessage, "success");
     renderCollectionCenter(payload.status || {});
   } catch (error) {
-    state.collectionMessage = error.message || "终端数据清除失败";
+    state.collectionMessage = error instanceof Error ? error.message : "终端数据清除失败";
     showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
   }
 }
 function stopCollectionStatusRefresh() {
-  window.clearTimeout(statusRefreshTimer);
+  window.clearTimeout(statusRefreshTimer ?? void 0);
 }
 function buildPlaceholders() {
   $$("[data-placeholder]").forEach((grid) => {
-    grid.innerHTML = grid.dataset.placeholder.split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
+    grid.innerHTML = (grid.dataset.placeholder ?? "").split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
   });
 }
 window.addEventListener("luopan-api-fallback", () => {
@@ -1629,7 +1632,7 @@ async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
   activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
   $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));
   $("#filter-quick-action")?.addEventListener("click", () => {
@@ -1643,7 +1646,7 @@ async function initialise() {
     if (!th) return;
     const key = th.dataset.sortKey;
     state.inventorySortDir = state.inventorySortKey === key && state.inventorySortDir === "desc" ? "asc" : "desc";
-    state.inventorySortKey = key;
+    state.inventorySortKey = key ?? "";
     renderInventory(state.inventory);
   });
   $("#login-form").addEventListener("submit", async (event) => {

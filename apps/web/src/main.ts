@@ -15,8 +15,8 @@ import {
 } from "./pages/collection";
 
 function buildPlaceholders() {
-  $$('[data-placeholder]').forEach((grid) => {
-    grid.innerHTML = grid.dataset.placeholder.split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
+  $$('[data-placeholder]').forEach((grid: HTMLElement) => {
+    grid.innerHTML = (grid.dataset.placeholder ?? "").split("|").map((label) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">—</div><div class="metric-delta">等待数据接入</div></article>`).join("");
   });
 }
 
@@ -24,7 +24,7 @@ window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
 
-function activatePage(name) {
+function activatePage(name: string) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
   $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => {
@@ -38,7 +38,7 @@ function activatePage(name) {
   else stopCollectionStatusRefresh();
 }
 
-function setTableDensity(density) {
+function setTableDensity(density: string) {
   const compact = density === "compact";
   document.body.dataset.tableDensity = compact ? "compact" : "comfortable";
   const toggle = $("#table-density-toggle");
@@ -52,7 +52,7 @@ async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
   activatePage(desired === "channel" ? "operations" : ["inventory", "operations", "settlement", "collection", "account"].includes(desired) ? desired : "operations");
-  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page)));
+  $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab: HTMLElement) => tab.addEventListener("click", () => activatePage(tab.dataset.page ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
   $("#table-density-toggle")?.addEventListener("click", () => setTableDensity(document.body.dataset.tableDensity === "compact" ? "comfortable" : "compact"));
   $("#filter-quick-action")?.addEventListener("click", () => {
@@ -61,17 +61,17 @@ async function initialise() {
     panel.scrollIntoView({ behavior: "smooth", block: "start" });
     window.setTimeout(() => $("select, summary, button", panel)?.focus(), 280);
   });
-  $("#inventory-content").addEventListener("click", (event) => {
-    const th = event.target.closest("[data-sort-key]");
+  $("#inventory-content").addEventListener("click", (event: MouseEvent) => {
+    const th = (event.target as Element).closest<HTMLElement>("[data-sort-key]");
     if (!th) return;
     const key = th.dataset.sortKey;
     state.inventorySortDir = state.inventorySortKey === key && state.inventorySortDir === "desc" ? "asc" : "desc";
-    state.inventorySortKey = key;
+    state.inventorySortKey = key ?? "";
     renderInventory(state.inventory);
   });
-  $("#login-form").addEventListener("submit", async (event) => {
+  $("#login-form").addEventListener("submit", async (event: SubmitEvent) => {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(event.currentTarget as HTMLFormElement);
     const response = await apiFetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
     const payload = await response.json();
     if (!response.ok) { $("#login-error").textContent = payload.error || "登录失败"; return; }

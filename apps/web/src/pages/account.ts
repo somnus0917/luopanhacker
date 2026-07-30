@@ -3,6 +3,7 @@ import { apiFetch as fetch } from "../api";
 import { showToast } from "../feedback";
 import { escapeHtml, importTime } from "../format";
 import { isAdmin, state } from "../state";
+import type { User } from "../types";
 
 export function renderAccount() {
   const target = $("#account-content");
@@ -37,9 +38,9 @@ export async function loadUsers() {
   renderAccount();
 }
 
-async function changePassword(event) {
+async function changePassword(event: SubmitEvent) {
   event.preventDefault();
-  const form = event.currentTarget;
+  const form = event.currentTarget as HTMLFormElement;
   const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? (payload.message || "密码已更新。") : (payload.error || "密码更新失败。");
@@ -48,9 +49,9 @@ async function changePassword(event) {
   renderAccount();
 }
 
-async function createUser(event) {
+async function createUser(event: SubmitEvent) {
   event.preventDefault();
-  const form = event.currentTarget;
+  const form = event.currentTarget as HTMLFormElement;
   const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
   const payload = await response.json().catch(() => ({}));
   state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : (payload.error || "新增用户失败。");
@@ -59,7 +60,7 @@ async function createUser(event) {
   await loadUsers();
 }
 
-async function deleteUser(username) {
+async function deleteUser(username: string | undefined) {
   if (!username || !window.confirm(`确定删除用户“${username}”吗？该用户的登录会话会立即失效。`)) return;
   const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
   const payload = await response.json().catch(() => ({}));
@@ -77,7 +78,7 @@ export function showLogin() {
   $("#app-shell").classList.add("hidden");
 }
 
-export function showApp(user) {
+export function showApp(user: User) {
   state.currentUser = { username: user.username, role: user.role };
   $("#login-layer").classList.add("hidden");
   $("#app-shell").classList.remove("hidden");

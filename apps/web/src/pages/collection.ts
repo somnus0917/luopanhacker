@@ -7,16 +7,17 @@ import {
   previousLocalDate, setCollectionShops, state,
 } from "../state";
 import { showLogin } from "./account";
+import type { CollectionStatus } from "../types";
 
 let statusRefreshTimer: number | null = null;
 let previousTerminalOutput = "";
 let terminalUnreadLines = 0;
 
-function terminalOutput(status) {
-  return typeof status.terminal_output === "string" ? status.terminal_output : "";
+function terminalOutput(status: CollectionStatus | null) {
+  return typeof status?.terminal_output === "string" ? status.terminal_output : "";
 }
 
-function terminalAtBottom(terminal) {
+function terminalAtBottom(terminal: HTMLElement) {
   return terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
 }
 
@@ -26,13 +27,13 @@ function terminalViewport() {
   return { scrollTop: terminal.scrollTop, atBottom: terminalAtBottom(terminal) };
 }
 
-function addedTerminalLines(previous, next) {
+function addedTerminalLines(previous: string, next: string) {
   if (!previous || !next || previous === next) return 0;
   const appended = next.startsWith(previous) ? next.slice(previous.length) : next;
   return appended.split("\n").filter(Boolean).length;
 }
 
-function statusTerminal(status, logMessage) {
+function statusTerminal(status: CollectionStatus | null, logMessage: string) {
   const output = terminalOutput(status);
   if (output) {
     const lineCount = output.split("\n").length;
@@ -42,7 +43,7 @@ function statusTerminal(status, logMessage) {
   return `<p class="status-log-empty">${escapeHtml(logMessage || "当前还没有采集终端输出。")}</p>`;
 }
 
-function restoreTerminalViewport(viewport) {
+function restoreTerminalViewport(viewport: { scrollTop: number; atBottom: boolean } | null) {
   const terminal = $("[data-collection-terminal]");
   if (!terminal) return;
   if (!viewport || viewport.atBottom) terminal.scrollTop = terminal.scrollHeight;
@@ -60,7 +61,7 @@ function restoreTerminalViewport(viewport) {
   });
 }
 
-function collectionModuleCard(name, title, description, status) {
+function collectionModuleCard(name: string, title: string, description: string, status: CollectionStatus) {
   const result = status.modules?.[name] || {};
   const selected = state.collectionModules.has(name);
   const finished = number(result.success_count) + number(result.error_count);
@@ -74,9 +75,9 @@ function collectionModuleCard(name, title, description, status) {
   </label>`;
 }
 
-function collectionStateLabel(status) {
-  const labels = { unknown: "等待首次运行", manual_requested: "请求已排队", waiting_random: "等待启动", running: "采集中", success: "采集成功", partial_success: "部分成功", failed: "采集失败", skipped: "已跳过" };
-  return labels[status.state] || status.state || "未知";
+function collectionStateLabel(status: CollectionStatus) {
+  const labels: Record<string, string> = { unknown: "等待首次运行", manual_requested: "请求已排队", waiting_random: "等待启动", running: "采集中", success: "采集成功", partial_success: "部分成功", failed: "采集失败", skipped: "已跳过" };
+  return labels[status.state ?? ""] || status.state || "未知";
 }
 
 function collectionShopOptions() {
@@ -89,7 +90,7 @@ function collectionShopOptions() {
   }).join("");
 }
 
-export function renderCollectionCenter(status, { logMessage = "" } = {}) {
+export function renderCollectionCenter(status: CollectionStatus, { logMessage = "" }: { logMessage?: string } = {}) {
   const slot = $("#collection-center");
   if (!slot) return;
   const viewport = terminalViewport();
@@ -101,7 +102,7 @@ export function renderCollectionCenter(status, { logMessage = "" } = {}) {
   previousTerminalOutput = output;
   state.status = status;
   const online = Boolean(status.collector_online);
-  const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+  const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state ?? "");
   const health = online ? "采集服务在线" : "采集服务离线";
   const request = status.request_pending ? "有任务等待或执行中" : "队列为空";
   const feedback = state.collectionMessage ? `<p class="collection-feedback">${escapeHtml(state.collectionMessage)}</p>` : "";
@@ -154,8 +155,8 @@ export function renderCollectionCenter(status, { logMessage = "" } = {}) {
     else state.collectionBackfillShops.delete(input.dataset.backfillShop);
     renderCollectionCenter(state.status || {});
   }));
-  $("#collection-backfill-date")?.addEventListener("change", (event) => {
-    state.collectionBackfillDate = event.currentTarget.value;
+  $("#collection-backfill-date")?.addEventListener("change", (event: Event) => {
+    state.collectionBackfillDate = (event.currentTarget as HTMLInputElement).value;
     renderCollectionCenter(state.status || {});
   });
   $("#collection-run-button")?.addEventListener("click", startCollection);
@@ -164,7 +165,7 @@ export function renderCollectionCenter(status, { logMessage = "" } = {}) {
 }
 
 export async function refreshCollectionStatus() {
-  window.clearTimeout(statusRefreshTimer);
+  window.clearTimeout(statusRefreshTimer ?? undefined);
   try {
     const response = await fetch("/api/collection/status", { cache: "no-store" });
     if (response.status === 401) return showLogin();
@@ -244,12 +245,12 @@ async function clearCollectionTerminal() {
     showToast(state.collectionMessage, "success");
     renderCollectionCenter(payload.status || {});
   } catch (error) {
-    state.collectionMessage = error.message || "终端数据清除失败";
+    state.collectionMessage = error instanceof Error ? error.message : "终端数据清除失败";
     showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
   }
 }
 
 export function stopCollectionStatusRefresh() {
-  window.clearTimeout(statusRefreshTimer);
+  window.clearTimeout(statusRefreshTimer ?? undefined);
 }

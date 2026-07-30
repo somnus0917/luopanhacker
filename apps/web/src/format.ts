@@ -1,6 +1,6 @@
-type Scalar = string | number | boolean | null | undefined;
+type Scalar = unknown;
 
-export const escapeHtml = (value: Scalar) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
+export const escapeHtml = (value: Scalar) => String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[char] ?? char));
 
 export const number = (value: Scalar) => Number.isFinite(Number(value)) ? Number(value) : 0;
 

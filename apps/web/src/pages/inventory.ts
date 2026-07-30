@@ -13,21 +13,21 @@ export function sortRows(rows: AnyRecord[], key: string, dir: string): AnyRecord
   });
 }
 
-function inventoryDays(value) {
+function inventoryDays(value: unknown) {
   return value === null || value === undefined ? "—" : `${number(value).toFixed(1)} 天`;
 }
 
-function coverageDays(value) {
+function coverageDays(value: unknown) {
   return value === null || value === undefined ? "—" : `${Math.ceil(number(value))} 天`;
 }
 
-function costMoney(value) {
+function costMoney(value: unknown) {
   return value === null || value === undefined ? "—" : settlementMoney(value);
 }
 
 const INVENTORY_HEALTH_ORDER = ["out_of_stock", "urgent", "replenish", "healthy", "high", "overstock", "no_movement", "unavailable"];
 
-const INVENTORY_HEALTH_NAMES = {
+const INVENTORY_HEALTH_NAMES: Record<string, string> = {
   out_of_stock: "已缺货",
   urgent: "紧急补货",
   replenish: "需安排补货",
@@ -38,27 +38,27 @@ const INVENTORY_HEALTH_NAMES = {
   unavailable: "暂无可售",
 };
 
-function inventoryWarehouseOptions(payload): string[] {
-  return [...new Set<string>((payload.rows || []).map((item) => item.warehouse_name || "未命名仓库"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+function inventoryWarehouseOptions(payload: AnyRecord): string[] {
+  return [...new Set<string>((payload.rows || []).map((item: AnyRecord) => item.warehouse_name || "未命名仓库"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
-function inventoryBrandOptions(payload): string[] {
-  return [...new Set<string>((payload.rows || []).map((item) => item.brand_name || "未归类品牌"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+function inventoryBrandOptions(payload: AnyRecord): string[] {
+  return [...new Set<string>((payload.rows || []).map((item: AnyRecord) => item.brand_name || "未归类品牌"))].sort((a, b) => a.localeCompare(b, "zh-CN"));
 }
 
-function inventoryFilteredRows(payload) {
+function inventoryFilteredRows(payload: AnyRecord): AnyRecord[] {
   const warehouses = inventoryWarehouseOptions(payload);
   const brands = inventoryBrandOptions(payload);
   if (state.inventoryWarehouse && !warehouses.includes(state.inventoryWarehouse)) state.inventoryWarehouse = "";
   if (state.inventoryBrand && !brands.includes(state.inventoryBrand)) state.inventoryBrand = "";
-  return (payload.rows || []).filter((item) => {
+  return (payload.rows || []).filter((item: AnyRecord) => {
     const warehouseMatch = !state.inventoryWarehouse || (item.warehouse_name || "未命名仓库") === state.inventoryWarehouse;
     const brandMatch = !state.inventoryBrand || (item.brand_name || "未归类品牌") === state.inventoryBrand;
     return warehouseMatch && brandMatch;
   });
 }
 
-function inventoryGroup(rows, keyName) {
+function inventoryGroup(rows: AnyRecord[], keyName: string): AnyRecord[] {
   const groups = new Map<string, AnyRecord>();
   rows.forEach((row) => {
     const name = row[keyName] || "未归类";
@@ -113,7 +113,7 @@ export function inventorySummary(rows: AnyRecord[]) {
   };
 }
 
-function inventorySalesTrend(payload) {
+function inventorySalesTrend(payload: AnyRecord): AnyRecord[] {
   if (state.inventoryWarehouse && state.inventoryBrand) {
     return payload.sales_trend_7d_by_warehouse_brand?.[state.inventoryWarehouse]?.[state.inventoryBrand] || [];
   }
@@ -122,7 +122,7 @@ function inventorySalesTrend(payload) {
   return payload.sales_trend_7d || [];
 }
 
-function inventoryWarehouseFilter(payload) {
+function inventoryWarehouseFilter(payload: AnyRecord): string {
   const warehouses = inventoryWarehouseOptions(payload);
   const brands = inventoryBrandOptions(payload);
   const warehouseOptions = `<option value="">全部仓库</option>${warehouses.map((name) => `<option value="${escapeHtml(name)}" ${state.inventoryWarehouse === name ? "selected" : ""}>${escapeHtml(name)}</option>`).join("")}`;
@@ -132,18 +132,18 @@ function inventoryWarehouseFilter(payload) {
   return `<section class="table-filter-panel inventory-filter" aria-label="库存筛选"><div><strong>库存筛选</strong></div><div class="filter-summary" aria-live="polite"><span class="filter-summary-label">当前范围</span>${tags}<button class="filter-reset" type="button" data-reset-inventory-filters>重置</button></div><label>仓库<select data-inventory-filter="warehouse">${warehouseOptions}</select></label><label>品牌<select data-inventory-filter="brand">${brandOptions}</select></label></section>`;
 }
 
-function inventoryBarPanel(items, title, key, formatter = whole) {
+function inventoryBarPanel(items: AnyRecord[], title: string, key: string, formatter: (value: unknown) => string = whole) {
   const top = [...items].sort((a, b) => number(b[key]) - number(a[key])).slice(0, 10);
   const max = Math.max(...top.map((item) => number(item[key])), 1);
   const bars = top.map((item) => `<div class="bar-row"><span class="bar-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(3, number(item[key]) / max * 100)}%"></div></div><span class="bar-value">${formatter(item[key])}</span></div>`).join("");
   return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按可发库存排序 · 前 10</span></div></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
 }
 
-function healthPill(item) {
+function healthPill(item: AnyRecord) {
   return `<span class="health-pill ${escapeHtml(item.health_key || item.key)}">${escapeHtml(item.health_name || item.name)}</span>`;
 }
 
-function inventoryTable(rows, mode = "detail") {
+function inventoryTable(rows: AnyRecord[], mode = "detail") {
   const total = rows.length;
   const rowsWithTurnover = rows.map((item) => ({
     ...item,
@@ -164,24 +164,25 @@ function inventoryTable(rows, mode = "detail") {
   return `${notice}<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headerCells}</tr></thead><tbody>${body || `<tr><td colspan="${columnConfigs.length}">暂无符合条件的库存记录</td></tr>`}</tbody></table></div>`;
 }
 
-function healthDistribution(items) {
+function healthDistribution(items: AnyRecord[]) {
   const max = Math.max(...items.map((item) => number(item.sku_records)), 1);
   const cards = items.map((item) => `<div class="health-row"><div class="health-row-head">${healthPill(item)}<strong>${whole(item.sku_records)} 条</strong></div><div class="health-track"><i class="${escapeHtml(item.key)}" style="width:${Math.max(2, number(item.sku_records) / max * 100)}%"></i></div><span>可发 ${whole(item.available_num)}</span></div>`).join("");
   return `<section class="panel health-panel"><div class="panel-head"><div><h3>库存健康结构</h3><span>按仓库 × SKU 记录划分</span></div></div>${cards}</section>`;
 }
 
-function salesTrendPanel(items) {
+function salesTrendPanel(items: AnyRecord[]) {
   const max = Math.max(...items.map((item) => number(item.quantity)), 1);
   const bars = items.map((item) => `<div class="sales-day"><span>${escapeHtml(String(item.date || "").slice(5) || "—")}</span><div class="sales-column"><i style="height:${Math.max(4, number(item.quantity) / max * 100)}%"></i></div><strong>${whole(item.quantity)}</strong></div>`).join("");
   return `<section class="panel sales-trend"><div class="panel-head"><div><h3>近 7 天销售出库</h3><span>按出库日期汇总</span></div></div><div class="sales-days">${bars || "<span class='metric-delta'>暂无销售出库明细</span>"}</div></section>`;
 }
 
-function inventoryTabs(view) {
+function inventoryTabs(view: string) {
   const tabs = [["overview", "总览"], ["replenish", "补货清单"], ["overstock", "积压 / 未动销"], ["detail", "单品维度"]];
   return `<div class="inventory-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="inventory-tab ${view === key ? "active" : ""}" type="button" data-inventory-view="${key}" role="tab" aria-selected="${view === key}">${label}</button>`).join("")}</div>`;
 }
 
-export function renderInventory(payload, view = state.inventoryView) {
+export function renderInventory(payload: AnyRecord | null, view = state.inventoryView) {
+  if (!payload) return;
   state.inventory = payload;
   state.inventoryView = view;
   const rows = inventoryFilteredRows(payload);
@@ -213,12 +214,12 @@ export function renderInventory(payload, view = state.inventoryView) {
         ? `<h3 class="section-title inventory-first-title">单品维度<small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}`
         : overview;
   $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
-  $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
-    state.inventoryWarehouse = event.currentTarget.value;
+  $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event: Event) => {
+    state.inventoryWarehouse = (event.currentTarget as HTMLSelectElement).value;
     renderInventory(payload);
   });
-  $('[data-inventory-filter="brand"]')?.addEventListener("change", (event) => {
-    state.inventoryBrand = event.currentTarget.value;
+  $('[data-inventory-filter="brand"]')?.addEventListener("change", (event: Event) => {
+    state.inventoryBrand = (event.currentTarget as HTMLSelectElement).value;
     renderInventory(payload);
   });
   $("[data-reset-inventory-filters]")?.addEventListener("click", () => {
@@ -238,6 +239,7 @@ export async function loadInventory() {
     if (!response.ok) throw new Error(payload.error || "库存快照不可用");
     renderInventory(payload);
   } catch (error) {
-    target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(error.message || "请在服务器侧运行只读库存同步")}</span></div>`;
+    const message = error instanceof Error ? error.message : "请在服务器侧运行只读库存同步";
+    target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
