@@ -46,7 +46,7 @@ make docker-up
 Compose 默认仅在宿主机 `127.0.0.1` 映射看板 `8501` 和 noVNC `6080`，不需要预先创建 Docker 网络。可通过 `.env` 中的 `LUOPAN_HOST_BIND`、`LUOPAN_DASHBOARD_PORT` 和 `LUOPAN_NOVNC_PORT` 调整；只有在配置了防火墙或额外认证时才应把 `LUOPAN_HOST_BIND` 改为 `0.0.0.0`。
 
 生产环境请在 HTTPS 反向代理后访问看板。`SESSION_COOKIE_SECURE=true` 是默认且强制的生产设置；只有本地开发脚本会显式关闭它。
-将 `config/shops.local.json` 中的示例店铺替换为真实店铺；该文件已被忽略，不会提交到公开仓库。
+将 `config/shops.local.json` 中的示例店铺替换为真实店铺；`aliases` 可把原始店铺名统一为脱敏展示名。该文件已被忽略，不会提交到公开仓库。
 
 ### 2. 首次登录
 

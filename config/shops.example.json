@@ -1,5 +1,8 @@
 {
   "shops": ["店铺 A", "店铺 B", "店铺 C", "店铺 D"],
+  "aliases": {
+    "原始店铺名": "统一展示名"
+  },
   "settlement_file_map": {
     "*xxxx.csv": "店铺 A",
     "*yyyy.csv": "店铺 B"

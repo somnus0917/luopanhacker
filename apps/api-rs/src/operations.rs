@@ -1,6 +1,6 @@
 use axum::{Json, extract::State};
 use luopan_channels::load_channel_dashboard;
-use luopan_operations::load_operations_records;
+use luopan_operations::{apply_shop_aliases, load_operations_records, load_shop_aliases};
 use luopan_runtime::RuntimePaths;
 use luopan_storage::{kv_value_with_updated_at, load_operations_records_from_db};
 use serde_json::{Value, json};
@@ -74,7 +74,11 @@ pub(crate) async fn compass_dashboard(
 ) -> Result<Json<Value>, ApiError> {
     let (records, records_source, records_fallback) = if let Some(pool) = &state.storage_pool {
         match load_operations_records_from_db(pool).await {
-            Ok(records) if !records.is_empty() => (records, "sqlite", false),
+            Ok(mut records) if !records.is_empty() => {
+                let aliases = load_shop_aliases(&state.paths).map_err(ApiError::internal)?;
+                apply_shop_aliases(&mut records, &aliases);
+                (records, "sqlite", false)
+            }
             Ok(_) => {
                 tracing::warn!("SQLite operations payload is empty; falling back to JSON");
                 (

@@ -160,7 +160,7 @@ docker compose up -d
 
 ```bash
 cp config/shops.example.json config/shops.local.json
-# 编辑 config/shops.local.json 中的 shops 数组
+# 编辑 shops 数组；如需统一或脱敏展示名，也可填写 aliases 映射
 ```
 
 ### Rust 迁移开关

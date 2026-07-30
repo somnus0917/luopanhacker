@@ -14,13 +14,6 @@ function recordSourceLabel(item: OperationRecord) {
   return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
 }
 
-function canonicalOperationRecord(item: OperationRecord): OperationRecord {
-  if (item.source_key === "miaosuda" || item.shop_name === "羚稀官方旗舰店") {
-    return { ...item, shop_name: "喵速达" };
-  }
-  return item;
-}
-
 function recordPlatform(item: OperationRecord) {
   const explicit = item.platform || item.channel || item.content?.platform;
   if (explicit) return String(explicit);
@@ -689,7 +682,7 @@ function renderTable(records: OperationRecord[], content = false) {
 export async function loadCompass() {
   try {
     const payload = await request<AnyRecord>("/api/compass");
-    state.records = (Array.isArray(payload.records) ? payload.records : []).map((record) => canonicalOperationRecord(record as OperationRecord));
+    state.records = (Array.isArray(payload.records) ? payload.records : []) as OperationRecord[];
     state.channel = (payload.channel as AnyRecord | undefined) ?? null;
     state.operationDates = new Set(operationFilterItems("date"));
     state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";

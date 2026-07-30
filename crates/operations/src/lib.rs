@@ -23,13 +23,43 @@ pub struct OperationRecord {
 }
 
 pub fn load_operations_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
+    let aliases = load_shop_aliases(paths)?;
     Ok(merge_records(vec![
-        load_daily_records(paths)?,
-        load_external_order_records(paths)?,
+        load_daily_records(paths, &aliases)?,
+        load_external_order_records(paths, &aliases)?,
     ]))
 }
 
-fn load_daily_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
+pub fn load_shop_aliases(paths: &RuntimePaths) -> Result<BTreeMap<String, String>> {
+    let path = paths.config_dir.join("shops.local.json");
+    let Some(payload) = read_json_file(&path)? else {
+        return Ok(BTreeMap::new());
+    };
+    Ok(payload
+        .get("aliases")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter_map(|(raw, display)| {
+            let display = display.as_str()?.trim();
+            (!raw.trim().is_empty() && !display.is_empty())
+                .then(|| (raw.trim().to_string(), display.to_string()))
+        })
+        .collect())
+}
+
+pub fn apply_shop_aliases(records: &mut [OperationRecord], aliases: &BTreeMap<String, String>) {
+    for record in records {
+        if let Some(display) = aliases.get(&record.shop_name) {
+            record.shop_name = display.clone();
+        }
+    }
+}
+
+fn load_daily_records(
+    paths: &RuntimePaths,
+    aliases: &BTreeMap<String, String>,
+) -> Result<Vec<OperationRecord>> {
     let daily_root = paths.output_dir.join("daily");
     if !daily_root.exists() {
         return Ok(Vec::new());
@@ -51,8 +81,12 @@ fn load_daily_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
         };
 
         for item in results {
-            let shop_name =
+            let raw_shop_name =
                 string_value(item.get("shop_name")).unwrap_or_else(|| "当前店铺".to_string());
+            let shop_name = aliases
+                .get(&raw_shop_name)
+                .cloned()
+                .unwrap_or(raw_shop_name);
             let Some(date) = parse_daily_date(
                 string_value(item.get("data_end"))
                     .or_else(|| string_value(item.get("data_start")))
@@ -111,7 +145,10 @@ fn collect_daily_payload_paths(root: &Path, paths: &mut Vec<std::path::PathBuf>)
     Ok(())
 }
 
-fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
+fn load_external_order_records(
+    paths: &RuntimePaths,
+    aliases: &BTreeMap<String, String>,
+) -> Result<Vec<OperationRecord>> {
     let path = paths
         .output_dir
         .join("external_orders")
@@ -129,12 +166,10 @@ fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
         let source_key =
             string_value(item.get("source_key")).unwrap_or_else(|| "external_orders".to_string());
         let raw_shop_name = string_value(item.get("shop_name")).unwrap_or_default();
-        let shop_name = canonical_external_shop_name(&source_key, &raw_shop_name);
-        let shop_id = if source_key == "miaosuda" {
-            format!("external:{source_key}:{shop_name}")
-        } else {
-            string_value(item.get("shop_id")).unwrap_or_default()
-        };
+        let shop_name = canonical_external_shop_name(aliases, &raw_shop_name);
+        let shop_id = string_value(item.get("shop_id"))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| format!("external:{source_key}:{shop_name}"));
         let Some(date) = parse_daily_date(string_value(item.get("date")).as_deref()) else {
             continue;
         };
@@ -165,12 +200,11 @@ fn load_external_order_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
     Ok(records)
 }
 
-fn canonical_external_shop_name(source_key: &str, shop_name: &str) -> String {
-    if source_key == "miaosuda" || shop_name == "羚稀官方旗舰店" {
-        "喵速达".to_string()
-    } else {
-        shop_name.to_string()
-    }
+fn canonical_external_shop_name(aliases: &BTreeMap<String, String>, shop_name: &str) -> String {
+    aliases
+        .get(shop_name)
+        .cloned()
+        .unwrap_or_else(|| shop_name.to_string())
 }
 
 fn merge_records(record_groups: Vec<Vec<OperationRecord>>) -> Vec<OperationRecord> {
@@ -403,14 +437,15 @@ mod tests {
     }
 
     #[test]
-    fn canonicalizes_miaosuda_shop_name() {
+    fn canonicalizes_shop_name_from_configured_alias() {
+        let aliases = BTreeMap::from([("原始店铺名".to_string(), "统一展示名".to_string())]);
         assert_eq!(
-            canonical_external_shop_name("miaosuda", "羚稀官方旗舰店"),
-            "喵速达"
+            canonical_external_shop_name(&aliases, "原始店铺名"),
+            "统一展示名"
         );
         assert_eq!(
-            canonical_external_shop_name("tmall_global", "天猫国际进口超市"),
-            "天猫国际进口超市"
+            canonical_external_shop_name(&aliases, "未配置店铺"),
+            "未配置店铺"
         );
     }
 }

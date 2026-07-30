@@ -338,12 +338,6 @@ function barPanel(records, metricKey, title) {
 function recordSourceLabel(item) {
   return item.source_label || (item.source === "external_orders" ? "订单明细" : "抖店罗盘");
 }
-function canonicalOperationRecord(item) {
-  if (item.source_key === "miaosuda" || item.shop_name === "羚稀官方旗舰店") {
-    return { ...item, shop_name: "喵速达" };
-  }
-  return item;
-}
 function recordPlatform(item) {
   const explicit = item.platform || item.channel || item.content?.platform;
   if (explicit) return String(explicit);
@@ -955,7 +949,7 @@ function renderTable(records, content = false) {
 async function loadCompass() {
   try {
     const payload = await request("/api/compass");
-    state.records = (Array.isArray(payload.records) ? payload.records : []).map((record) => canonicalOperationRecord(record));
+    state.records = Array.isArray(payload.records) ? payload.records : [];
     state.channel = payload.channel ?? null;
     state.operationDates = new Set(operationFilterItems("date"));
     state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
