@@ -60,7 +60,7 @@ Compose 默认仅在宿主机 `127.0.0.1` 映射看板 `8501` 和 noVNC `6080`�
 ### 3. 访问服务
 
 - **数据看板/API 服务**: `https://YOUR_DOMAIN`（生产环境需要登录）
-- **独立采集服务 noVNC**: `http://YOUR_SERVER_IP:6080`（用于扫码登录抖音）
+- **独立采集服务 noVNC**: 通过受访问控制的 HTTPS 反向代理访问，例如 `https://YOUR_DOMAIN/novnc/`（用于扫码登录抖音）。默认端口仅绑定宿主机 `127.0.0.1`，不应直接暴露。
 
 Compose 会启动 `compass-dashboard` 与 `compass-collector` 两个容器。前者只负责账户、API 和看板，后者独立持有 Chromium、采集队列、定时任务和 noVNC；两者通过持久化目录共享任务状态与采集结果。
 

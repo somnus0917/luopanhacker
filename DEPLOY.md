@@ -27,7 +27,7 @@ docker compose up -d
 
 ### 3. 访问服务
 
-- **noVNC 网页远程桌面**: `http://YOUR_SERVER_IP:6080`
+- **noVNC 网页远程桌面**: 通过受访问控制的 HTTPS 反向代理访问，例如 `https://YOUR_DOMAIN/novnc/`。默认端口只绑定宿主机 `127.0.0.1`，不应直接暴露。
 - **数据看板**: 生产环境通过 HTTPS 反向代理访问，例如 `https://YOUR_DOMAIN`
 
 Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预先存在的外部 Docker 网络。正式部署脚本会在共享 `proxy` 网络存在时自动把容器接入该网络，供 Caddy 等容器反向代理使用。只有配置了防火墙或额外认证时才应设置 `LUOPAN_HOST_BIND=0.0.0.0`。
@@ -36,7 +36,7 @@ Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预�
 
 ### 1. 登录抖音电商罗盘
 
-1. 打开 noVNC 网页远程桌面: `http://YOUR_SERVER_IP:6080`
+1. 通过受访问控制的 HTTPS 反向代理打开 noVNC，例如 `https://YOUR_DOMAIN/novnc/`
 2. 在终端中运行抓取脚本:
    ```bash
    docker exec -it douyin-compass-collector bash
@@ -215,10 +215,10 @@ LUOPAN_STORAGE_DB=/app/state/luopan.db
 LUOPAN_API_RS_STORAGE_READS=false
 ```
 
-打开后也可以直接检查 Rust API 的数据库汇总：
+数据库汇总接口受登录保护。请登录看板后查看，或使用 worker 的健康检查：
 
 ```bash
-curl -s http://127.0.0.1:8501/api/storage/summary
+docker exec -it douyin-compass luopan-worker-rs doctor
 ```
 
 一条命令做部署健康检查：

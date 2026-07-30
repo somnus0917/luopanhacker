@@ -4,7 +4,7 @@ use luopan_runtime::read_json_file;
 use luopan_storage::kv_value_with_updated_at;
 use serde_json::Value;
 
-use crate::{ApiError, AppState, api_with_meta, now_string, payload_updated_at};
+use crate::{ApiError, AppState, api_with_meta, payload_updated_at};
 
 pub(crate) async fn inventory_dashboard(
     State(state): State<AppState>,
@@ -47,7 +47,10 @@ pub(crate) async fn inventory_dashboard(
 pub(crate) async fn inventory_raw(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let path = state.paths.inventory_snapshot_path();
     match read_json_file(&path).map_err(ApiError::internal)? {
-        Some(value) => Ok(api_with_meta(value, "json", false, now_string())),
+        Some(value) => {
+            let updated_at = payload_updated_at(&value, &path);
+            Ok(api_with_meta(value, "json", false, updated_at))
+        }
         None => Err(ApiError::client(
             StatusCode::NOT_FOUND,
             "INVENTORY_NOT_FOUND",
