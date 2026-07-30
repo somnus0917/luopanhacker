@@ -64,6 +64,18 @@ docker exec -it douyin-compass-collector bash
 
 ## 定时任务
 
+## 备份与恢复演练
+
+`ops/backup.sh` 会先通过 SQLite 在线备份 API 生成一致性快照，再打包配置、采集结果、浏览器会话、日志和状态目录；归档写入完成后会立即执行完整性校验。
+
+```bash
+LUOPAN_APP_DIR=/home/ubuntu/luopan-app \
+LUOPAN_DATA_DIR=/home/ubuntu/luopan-data \
+./ops/backup.sh
+```
+
+若配置 `LUOPAN_BACKUP_SYNC_TARGET=user@backup-host:/srv/luopan/`，归档会在本地校验后同步到异机或对象存储挂载点。应定期在隔离目录解压归档，并用 `sqlite3 state/luopan.db 'PRAGMA integrity_check'` 验证恢复结果。
+
 ### 自动定时采集
 
 系统已配置定时任务：

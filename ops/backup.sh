@@ -10,6 +10,9 @@ DAILY_DIR="${BACKUP_ROOT}/daily"
 WEEKLY_DIR="${BACKUP_ROOT}/weekly"
 ARCHIVE="${DAILY_DIR}/luopan-data-${STAMP}.tar.gz"
 TEMP_ARCHIVE="${ARCHIVE}.partial"
+SQLITE_DB="${DATA_DIR}/state/luopan.db"
+SQLITE_SNAPSHOT="${DATA_DIR}/state/.luopan-backup-${STAMP}.db"
+BACKUP_SYNC_TARGET="${LUOPAN_BACKUP_SYNC_TARGET:-}"
 
 mkdir -p "${DAILY_DIR}" "${WEEKLY_DIR}" "${DATA_DIR}/state"
 if [[ -s "${APP_DIR}/.deploy-revision" ]]; then
@@ -19,12 +22,39 @@ else
 fi
 date --iso-8601=seconds > "${DATA_DIR}/state/last_backup_requested_at.txt"
 
+cleanup_snapshot() {
+  rm -f "${SQLITE_SNAPSHOT}"
+}
+trap cleanup_snapshot EXIT
+
+if [[ -f "${SQLITE_DB}" ]]; then
+  # sqlite3.Connection.backup uses SQLite's online backup API, producing a
+  # consistent snapshot without copying a live WAL database file directly.
+  python3 -c '
+import sqlite3
+import sys
+
+source_path, snapshot_path = sys.argv[1:]
+with sqlite3.connect(source_path) as source, sqlite3.connect(snapshot_path) as snapshot:
+    source.backup(snapshot)
+' "${SQLITE_DB}" "${SQLITE_SNAPSHOT}"
+fi
+
 # Chromium writes parts of the session as root.  sudo is intentionally
 # non-interactive; the migration provisions this narrow requirement first.
-sudo -n tar --xattrs --acls --numeric-owner -C "${DATA_DIR}" -czf "${TEMP_ARCHIVE}" \
-  config output session logs state
+tar_args=(--xattrs --acls --numeric-owner -C "${DATA_DIR}" -czf "${TEMP_ARCHIVE}")
+if [[ -f "${SQLITE_SNAPSHOT}" ]]; then
+  tar_args+=(
+    --exclude='state/luopan.db'
+    --transform="s|state/.luopan-backup-${STAMP}.db|state/luopan.db|"
+  )
+fi
+# Chromium writes parts of the session as root. sudo remains intentionally
+# non-interactive; the deployment provisions this narrow requirement first.
+sudo -n tar "${tar_args[@]}" config output session logs state
 sudo -n chown "$(id -u):$(id -g)" "${TEMP_ARCHIVE}"
 mv "${TEMP_ARCHIVE}" "${ARCHIVE}"
+tar -tzf "${ARCHIVE}" >/dev/null
 
 if [[ "$(date +%u)" == "7" ]]; then
   cp -f "${ARCHIVE}" "${WEEKLY_DIR}/$(basename "${ARCHIVE}")"
@@ -32,4 +62,7 @@ fi
 
 find "${DAILY_DIR}" -type f -name 'luopan-data-*.tar.gz' -mtime +30 -delete
 find "${WEEKLY_DIR}" -type f -name 'luopan-data-*.tar.gz' -mtime +84 -delete
+if [[ -n "${BACKUP_SYNC_TARGET}" ]]; then
+  rsync -a --protect-args "${ARCHIVE}" "${BACKUP_SYNC_TARGET}"
+fi
 echo "${ARCHIVE}"
