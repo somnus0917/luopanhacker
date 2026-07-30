@@ -65,3 +65,15 @@ jobs:
           LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | grep -q '/srv/luopan-data/state'
           grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
           grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh
+      - name: Build Docker frontend stage
+        run: |
+          docker build \
+            --target web-builder \
+            --tag luopan-web-check:${{ github.sha }} \
+            .
+      - name: Build production Docker image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          docker build \
+            --tag luopan-production-check:${{ github.sha }} \
+            .

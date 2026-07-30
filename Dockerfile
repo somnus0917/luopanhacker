@@ -12,7 +12,9 @@ RUN corepack enable && \
     pnpm install --frozen-lockfile
 
 COPY apps/web ./
-RUN pnpm build
+RUN pnpm build && \
+    test -s /src/web/static/app.js && \
+    test -s /src/web/static/style.css
 
 FROM ${RUST_IMAGE} AS rust-builder
 
