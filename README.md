@@ -118,7 +118,9 @@ http://127.0.0.1:8501
 
 登录后可以在“账户设置”修改密码；管理员还可以添加或删除用户。
 
-当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。前端源码位于 `apps/web/src/main.ts`，运行时静态产物仍提交在 `web/static/`。
+当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。前端 HTML、TypeScript 与 CSS 的唯一源码都位于 `apps/web/`；运行时静态产物由构建命令生成到 `web/static/`，不直接编辑。
+
+项目各目录的生产、归档和运行时边界见 [docs/architecture.md](./docs/architecture.md)。常用入口可通过 `make help` 查看。
 
 “采集中心”是独立入口：管理员可单独采集经营模块或渠道模块，查看采集服务在线状态、队列、各模块最近结果与终端日志。业务看板刷新只读取本地 SQLite/JSON，不会触发浏览器采集。
 

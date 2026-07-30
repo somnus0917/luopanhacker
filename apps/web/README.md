@@ -1,11 +1,12 @@
 # Luopan Web
 
-The production dashboard is authored from `apps/web/src/main.ts` and served by
-`luopan-api-rs` from `web/static`.
+The production dashboard is authored in `apps/web/` (`index.html`, TypeScript,
+and CSS) and served by `luopan-api-rs` from the generated `web/static` output.
 
 The committed `web/static/app.js` remains the runtime artifact so Docker builds
-do not need Node.js. When changing frontend behavior, update `src/main.ts` and
-rebuild the static asset:
+do not need Node.js. When changing frontend behavior or styling, update files
+under `apps/web/` and rebuild the static assets; never edit `web/static/`
+directly:
 
 ```bash
 cd apps/web
@@ -27,4 +28,4 @@ Vite serves `apps/web/index.html` and proxies `/api` plus `/assets` to
 
 - `web/static/index.html`
 - `web/static/app.js`
-- `web/static/style.css`
+- `web/static/style.css` (generated from `apps/web/src/style.css`)

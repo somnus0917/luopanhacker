@@ -1,3 +1,4 @@
+import "./style.css";
 import { $, $$ } from "./dom";
 import { escapeHtml } from "./format";
 import { state } from "./state";

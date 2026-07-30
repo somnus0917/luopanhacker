@@ -82,9 +82,10 @@ accounts are read-only.
 
 ## Frontend
 
-The dashboard frontend runtime is served from `web/static`. Its TypeScript
-source lives in `apps/web/src/main.ts`; `web/static/app.js` is committed as the
-runtime artifact so Docker does not need Node.js for production builds.
+The dashboard frontend runtime is served from `web/static`. Its HTML,
+TypeScript, and CSS source live in `apps/web/`; the committed static files are
+generated runtime artifacts so Docker does not need Node.js for production
+builds. Do not edit `web/static/` directly.
 
 ```bash
 cd apps/web
