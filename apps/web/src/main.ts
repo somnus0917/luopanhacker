@@ -1,7 +1,7 @@
 import "./style.css";
 import { $, $$ } from "./dom";
 import { escapeHtml } from "./format";
-import { apiFetch } from "./api";
+import { errorMessage, request } from "./api";
 import { showToast } from "./feedback";
 import { state } from "./state";
 import type { PageName } from "./types";
@@ -74,19 +74,25 @@ async function initialise() {
   $("#login-form").addEventListener("submit", async (event: SubmitEvent) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget as HTMLFormElement);
-    const response = await apiFetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
-    const payload = await response.json();
-    if (!response.ok) { $("#login-error").textContent = payload.error || "登录失败"; return; }
-    $("#login-error").textContent = "";
-    showApp(payload);
-    loadCompass();
-    loadOrderImports();
-    loadInventory();
-    loadSettlement();
-    loadCollectionShops().then(refreshCollectionStatus);
+    try {
+      const user = await request<{ username: string; role: "admin" | "viewer" }>("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
+      $("#login-error").textContent = "";
+      showApp(user);
+      loadCompass();
+      loadOrderImports();
+      loadInventory();
+      loadSettlement();
+      loadCollectionShops().then(refreshCollectionStatus);
+    } catch (error) {
+      $("#login-error").textContent = errorMessage(error, "登录失败");
+    }
   });
-  const me = await apiFetch("/api/me").then((response) => response.json());
-  if (me.authenticated) { showApp(me); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+  try {
+    const me = await request<{ authenticated: boolean; username?: string; role?: "admin" | "viewer" }>("/api/me");
+    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+  } catch {
+    showLogin();
+  }
 }
 
 initialise();

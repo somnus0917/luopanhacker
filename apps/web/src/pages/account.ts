@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { apiFetch as fetch } from "../api";
+import { errorMessage, request } from "../api";
 import { showToast } from "../feedback";
 import { escapeHtml, importTime } from "../format";
 import { isAdmin, state } from "../state";
@@ -22,18 +22,17 @@ export function renderAccount() {
 }
 
 async function logout() {
-  await fetch("/api/logout", { method: "POST" });
+  await request("/api/logout", { method: "POST" }).catch(() => undefined);
   showLogin();
 }
 
 export async function loadUsers() {
   if (!isAdmin()) return;
-  const response = await fetch("/api/users");
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.accountMessage = payload.error || "用户列表读取失败。";
-  } else {
-    state.users = payload.users || [];
+  try {
+    const payload = await request<{ users?: User[] }>("/api/users");
+    state.users = payload.users ?? [];
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "用户列表读取失败。");
   }
   renderAccount();
 }
@@ -41,31 +40,43 @@ export async function loadUsers() {
 async function changePassword(event: SubmitEvent) {
   event.preventDefault();
   const form = event.currentTarget as HTMLFormElement;
-  const response = await fetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? (payload.message || "密码已更新。") : (payload.error || "密码更新失败。");
-  showToast(state.accountMessage, response.ok ? "success" : "error");
-  if (response.ok) form.reset();
+  try {
+    const payload = await request<{ message?: string }>("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+    state.accountMessage = payload.message ?? "密码已更新。";
+    showToast(state.accountMessage, "success");
+    form.reset();
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "密码更新失败。");
+    showToast(state.accountMessage, "error");
+  }
   renderAccount();
 }
 
 async function createUser(event: SubmitEvent) {
   event.preventDefault();
   const form = event.currentTarget as HTMLFormElement;
-  const response = await fetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : (payload.error || "新增用户失败。");
-  showToast(state.accountMessage, response.ok ? "success" : "error");
-  if (response.ok) form.reset();
+  try {
+    const payload = await request<{ user?: User }>("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+    state.accountMessage = `已新增用户 ${payload.user?.username ?? ""}。`;
+    showToast(state.accountMessage, "success");
+    form.reset();
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "新增用户失败。");
+    showToast(state.accountMessage, "error");
+  }
   await loadUsers();
 }
 
 async function deleteUser(username: string | undefined) {
   if (!username || !window.confirm(`确定删除用户“${username}”吗？该用户的登录会话会立即失效。`)) return;
-  const response = await fetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : (payload.error || "删除用户失败。");
-  showToast(state.accountMessage, response.ok ? "success" : "error");
+  try {
+    const payload = await request<{ deleted?: string }>(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+    state.accountMessage = `已删除用户 ${payload.deleted ?? username}。`;
+    showToast(state.accountMessage, "success");
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "删除用户失败。");
+    showToast(state.accountMessage, "error");
+  }
   await loadUsers();
 }
 

@@ -47,24 +47,69 @@ function importTime(value) {
   const date = new Date(text);
   return Number.isNaN(date.getTime()) ? text : date.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
+class ApiRequestError extends Error {
+  constructor(message, status, code = "REQUEST_FAILED", requestId) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+    this.name = "ApiRequestError";
+  }
+  status;
+  code;
+  requestId;
+}
 function isEnvelope(payload) {
   return Boolean(payload && typeof payload === "object" && "data" in payload && "error" in payload && "meta" in payload);
 }
-async function apiFetch(input, init) {
+function errorMessage(error, fallback) {
+  return error instanceof ApiRequestError ? error.message : fallback;
+}
+function isApiRequestError(error) {
+  return error instanceof ApiRequestError;
+}
+async function request(input, init) {
   const response = await window.fetch(input, init);
-  const decode = response.json.bind(response);
-  response.json = async () => {
-    const payload = await decode();
-    if (!isEnvelope(payload)) return payload;
-    if (payload.meta.fallback) {
-      window.dispatchEvent(new CustomEvent("luopan-api-fallback", { detail: payload.meta }));
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiRequestError("服务器返回了无效响应", response.status);
+  }
+  if (!isEnvelope(payload)) {
+    throw new ApiRequestError("服务器返回了未知响应格式", response.status);
+  }
+  if (payload.meta.fallback) {
+    window.dispatchEvent(new CustomEvent("luopan-api-fallback", { detail: payload.meta }));
+  }
+  if (!response.ok || payload.error) {
+    throw new ApiRequestError(
+      payload.error?.message ?? "请求失败",
+      response.status,
+      payload.error?.code,
+      payload.meta.request_id
+    );
+  }
+  return payload.data;
+}
+async function apiFetch(input, init) {
+  try {
+    const data = await request(input, init);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => data
+    };
+  } catch (error) {
+    if (isApiRequestError(error)) {
+      return {
+        ok: false,
+        status: error.status,
+        json: async () => ({ error: error.message, error_code: error.code, request_id: error.requestId })
+      };
     }
-    if (payload.error) {
-      return { error: payload.error.message, error_code: payload.error.code, request_id: payload.meta.request_id };
-    }
-    return payload.data;
-  };
-  return response;
+    throw error;
+  }
 }
 let toastTimer;
 function showToast(message, tone = "info") {
@@ -114,46 +159,57 @@ function renderAccount() {
   $$("[data-delete-user]").forEach((button) => button.addEventListener("click", () => deleteUser(button.dataset.deleteUser)));
 }
 async function logout() {
-  await apiFetch("/api/logout", { method: "POST" });
+  await request("/api/logout", { method: "POST" }).catch(() => void 0);
   showLogin();
 }
 async function loadUsers() {
   if (!isAdmin()) return;
-  const response = await apiFetch("/api/users");
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.accountMessage = payload.error || "用户列表读取失败。";
-  } else {
-    state.users = payload.users || [];
+  try {
+    const payload = await request("/api/users");
+    state.users = payload.users ?? [];
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "用户列表读取失败。");
   }
   renderAccount();
 }
 async function changePassword(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await apiFetch("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? payload.message || "密码已更新。" : payload.error || "密码更新失败。";
-  showToast(state.accountMessage, response.ok ? "success" : "error");
-  if (response.ok) form.reset();
+  try {
+    const payload = await request("/api/account/password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+    state.accountMessage = payload.message ?? "密码已更新。";
+    showToast(state.accountMessage, "success");
+    form.reset();
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "密码更新失败。");
+    showToast(state.accountMessage, "error");
+  }
   renderAccount();
 }
 async function createUser(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const response = await apiFetch("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? `已新增用户 ${payload.user?.username || ""}。` : payload.error || "新增用户失败。";
-  showToast(state.accountMessage, response.ok ? "success" : "error");
-  if (response.ok) form.reset();
+  try {
+    const payload = await request("/api/users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(form))) });
+    state.accountMessage = `已新增用户 ${payload.user?.username ?? ""}。`;
+    showToast(state.accountMessage, "success");
+    form.reset();
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "新增用户失败。");
+    showToast(state.accountMessage, "error");
+  }
   await loadUsers();
 }
 async function deleteUser(username) {
   if (!username || !window.confirm(`确定删除用户“${username}”吗？该用户的登录会话会立即失效。`)) return;
-  const response = await apiFetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
-  const payload = await response.json().catch(() => ({}));
-  state.accountMessage = response.ok ? `已删除用户 ${payload.deleted || username}。` : payload.error || "删除用户失败。";
-  showToast(state.accountMessage, response.ok ? "success" : "error");
+  try {
+    const payload = await request(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+    state.accountMessage = `已删除用户 ${payload.deleted ?? username}。`;
+    showToast(state.accountMessage, "success");
+  } catch (error) {
+    state.accountMessage = errorMessage(error, "删除用户失败。");
+    showToast(state.accountMessage, "error");
+  }
   await loadUsers();
 }
 function showLogin() {
@@ -1118,13 +1174,11 @@ function renderInventory(payload, view = state.inventoryView) {
 async function loadInventory() {
   const target = $("#inventory-content");
   try {
-    const response = await apiFetch("/api/inventory");
-    if (response.status === 401) return showLogin();
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "库存快照不可用");
+    const payload = await request("/api/inventory");
     renderInventory(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "请在服务器侧运行只读库存同步";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const message = errorMessage(error, "请在服务器侧运行只读库存同步");
     target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
@@ -1454,7 +1508,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
   const online = Boolean(status.collector_online);
   const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state ?? "");
   const health = online ? "采集服务在线" : "采集服务离线";
-  const request = status.request_pending ? "有任务等待或执行中" : "队列为空";
+  const request2 = status.request_pending ? "有任务等待或执行中" : "队列为空";
   const feedback = state.collectionMessage ? `<p class="collection-feedback">${escapeHtml(state.collectionMessage)}</p>` : "";
   const permission = isAdmin() ? "选择本次要更新的数据；模块异常互不影响。" : "当前账户为只读权限，可查看状态但不能提交任务。";
   const backfillReady = Boolean(backfillDateAllowed(state.collectionBackfillDate) && state.collectionBackfillShops.size);
@@ -1462,7 +1516,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
     <div class="collection-health-grid">
       <article class="collection-health"><span class="health-indicator ${online ? "online" : "offline"}"></span><small>服务状态</small><strong>${health}</strong></article>
       <article class="collection-health"><small>任务状态</small><strong>${escapeHtml(collectionStateLabel(status))}</strong><span>${escapeHtml(status.message || "暂无采集记录")}</span></article>
-      <article class="collection-health"><small>任务队列</small><strong>${request}</strong><span>最近成功：${escapeHtml(status.last_success_at || "—")}</span></article>
+      <article class="collection-health"><small>任务队列</small><strong>${request2}</strong><span>最近成功：${escapeHtml(status.last_success_at || "—")}</span></article>
     </div>
     <div class="collection-action-grid">
       <section class="panel collection-control"><div class="panel-head"><div><p class="collection-kicker">DAILY UPDATE</p><h3>日常更新</h3><span>${permission}</span></div><span class="collection-tag">近 1 天</span></div>
@@ -1516,22 +1570,20 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
 async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer ?? void 0);
   try {
-    const response = await apiFetch("/api/collection/status", { cache: "no-store" });
-    if (response.status === 401) return showLogin();
-    if (!response.ok) throw new Error("status unavailable");
-    const status = await response.json();
+    const status = await request("/api/collection/status", { cache: "no-store" });
     renderCollectionCenter(status);
-    const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+    const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state ?? "");
     if (state.page === "collection") statusRefreshTimer = window.setTimeout(refreshCollectionStatus, busy ? 5e3 : 15e3);
   } catch {
     if (state.status) renderCollectionCenter(state.status, { logMessage: "暂时无法读取采集服务状态，请稍后重试。" });
   }
 }
 async function loadCollectionShops() {
-  const response = await apiFetch("/api/collection/shops");
-  if (!response.ok) return;
-  const payload = await response.json().catch(() => ({}));
-  setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
+  try {
+    const payload = await request("/api/collection/shops");
+    setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
+  } catch {
+  }
 }
 async function startCollection() {
   const button = $("#collection-run-button");
@@ -1544,11 +1596,15 @@ async function startCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交…";
-  const response = await apiFetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
-  const payload = await response.json().catch(() => ({}));
-  state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
-  showToast(state.collectionMessage, response.ok ? "success" : "error");
-  if (payload.status) renderCollectionCenter(payload.status);
+  try {
+    const payload = await request("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
+    state.collectionMessage = payload.message ?? "请求已发送";
+    showToast(state.collectionMessage, "success");
+    if (payload.status) renderCollectionCenter(payload.status);
+  } catch (error) {
+    state.collectionMessage = errorMessage(error, "提交失败");
+    showToast(state.collectionMessage, "error");
+  }
   window.setTimeout(refreshCollectionStatus, 700);
 }
 async function startHistoricalCollection() {
@@ -1563,15 +1619,19 @@ async function startHistoricalCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交补采…";
-  const response = await apiFetch("/api/collection/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ modules: ["operations"], date, shops })
-  });
-  const payload = await response.json().catch(() => ({}));
-  state.collectionMessage = payload.message || payload.error || (response.ok ? `已提交 ${date} 补采` : "补采提交失败");
-  showToast(state.collectionMessage, response.ok ? "success" : "error");
-  if (payload.status) renderCollectionCenter(payload.status);
+  try {
+    const payload = await request("/api/collection/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modules: ["operations"], date, shops })
+    });
+    state.collectionMessage = payload.message ?? `已提交 ${date} 补采`;
+    showToast(state.collectionMessage, "success");
+    if (payload.status) renderCollectionCenter(payload.status);
+  } catch (error) {
+    state.collectionMessage = errorMessage(error, "补采提交失败");
+    showToast(state.collectionMessage, "error");
+  }
   window.setTimeout(refreshCollectionStatus, 700);
 }
 async function clearCollectionTerminal() {
@@ -1580,17 +1640,15 @@ async function clearCollectionTerminal() {
   button.disabled = true;
   button.textContent = "正在清除…";
   try {
-    const response = await apiFetch("/api/collection/terminal", { method: "DELETE" });
-    if (response.status === 401) return showLogin();
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "终端数据清除失败");
+    const payload = await request("/api/collection/terminal", { method: "DELETE" });
     previousTerminalOutput = "";
     terminalUnreadLines = 0;
-    state.collectionMessage = payload.message || "采集终端数据已清除";
+    state.collectionMessage = payload.message ?? "采集终端数据已清除";
     showToast(state.collectionMessage, "success");
     renderCollectionCenter(payload.status || {});
   } catch (error) {
-    state.collectionMessage = error instanceof Error ? error.message : "终端数据清除失败";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.collectionMessage = errorMessage(error, "终端数据清除失败");
     showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
   }
@@ -1653,28 +1711,31 @@ async function initialise() {
   $("#login-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const response = await apiFetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
-    const payload = await response.json();
-    if (!response.ok) {
-      $("#login-error").textContent = payload.error || "登录失败";
-      return;
+    try {
+      const user = await request("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
+      $("#login-error").textContent = "";
+      showApp(user);
+      loadCompass();
+      loadOrderImports();
+      loadInventory();
+      loadSettlement();
+      loadCollectionShops().then(refreshCollectionStatus);
+    } catch (error) {
+      $("#login-error").textContent = errorMessage(error, "登录失败");
     }
-    $("#login-error").textContent = "";
-    showApp(payload);
-    loadCompass();
-    loadOrderImports();
-    loadInventory();
-    loadSettlement();
-    loadCollectionShops().then(refreshCollectionStatus);
   });
-  const me = await apiFetch("/api/me").then((response) => response.json());
-  if (me.authenticated) {
-    showApp(me);
-    loadCompass();
-    loadOrderImports();
-    loadInventory();
-    loadSettlement();
-    loadCollectionShops().then(refreshCollectionStatus);
-  } else showLogin();
+  try {
+    const me = await request("/api/me");
+    if (me.authenticated && me.username && me.role) {
+      showApp({ username: me.username, role: me.role });
+      loadCompass();
+      loadOrderImports();
+      loadInventory();
+      loadSettlement();
+      loadCollectionShops().then(refreshCollectionStatus);
+    } else showLogin();
+  } catch {
+    showLogin();
+  }
 }
 initialise();

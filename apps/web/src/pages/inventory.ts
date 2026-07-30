@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { apiFetch as fetch } from "../api";
+import { errorMessage, isApiRequestError, request } from "../api";
 import { escapeHtml, number, settlementMoney, whole } from "../format";
 import { state } from "../state";
 import type { AnyRecord } from "../state";
@@ -234,13 +234,11 @@ export function renderInventory(payload: AnyRecord | null, view: InventoryView =
 export async function loadInventory() {
   const target = $("#inventory-content");
   try {
-    const response = await fetch("/api/inventory");
-    if (response.status === 401) return showLogin();
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "库存快照不可用");
+    const payload = await request<AnyRecord>("/api/inventory");
     renderInventory(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "请在服务器侧运行只读库存同步";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const message = errorMessage(error, "请在服务器侧运行只读库存同步");
     target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }

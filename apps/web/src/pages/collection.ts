@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { apiFetch as fetch } from "../api";
+import { errorMessage, isApiRequestError, request } from "../api";
 import { showToast } from "../feedback";
 import { escapeHtml, number, whole } from "../format";
 import {
@@ -167,12 +167,9 @@ export function renderCollectionCenter(status: CollectionStatus, { logMessage = 
 export async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer ?? undefined);
   try {
-    const response = await fetch("/api/collection/status", { cache: "no-store" });
-    if (response.status === 401) return showLogin();
-    if (!response.ok) throw new Error("status unavailable");
-    const status = await response.json();
+    const status = await request<CollectionStatus>("/api/collection/status", { cache: "no-store" });
     renderCollectionCenter(status);
-    const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
+    const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state ?? "");
     if (state.page === "collection") statusRefreshTimer = window.setTimeout(refreshCollectionStatus, busy ? 5000 : 15000);
   } catch {
     if (state.status) renderCollectionCenter(state.status, { logMessage: "暂时无法读取采集服务状态，请稍后重试。" });
@@ -180,10 +177,10 @@ export async function refreshCollectionStatus() {
 }
 
 export async function loadCollectionShops() {
-  const response = await fetch("/api/collection/shops");
-  if (!response.ok) return;
-  const payload = await response.json().catch(() => ({}));
-  setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
+  try {
+    const payload = await request<{ shops?: string[] }>("/api/collection/shops");
+    setCollectionShops(Array.isArray(payload.shops) ? payload.shops : []);
+  } catch { /* collection status remains usable without the selector */ }
 }
 
 async function startCollection() {
@@ -197,11 +194,15 @@ async function startCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交…";
-  const response = await fetch("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
-  const payload = await response.json().catch(() => ({}));
-  state.collectionMessage = payload.message || payload.error || (response.ok ? "请求已发送" : "提交失败");
-  showToast(state.collectionMessage, response.ok ? "success" : "error");
-  if (payload.status) renderCollectionCenter(payload.status);
+  try {
+    const payload = await request<{ message?: string; status?: CollectionStatus }>("/api/collection/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ modules }) });
+    state.collectionMessage = payload.message ?? "请求已发送";
+    showToast(state.collectionMessage, "success");
+    if (payload.status) renderCollectionCenter(payload.status);
+  } catch (error) {
+    state.collectionMessage = errorMessage(error, "提交失败");
+    showToast(state.collectionMessage, "error");
+  }
   window.setTimeout(refreshCollectionStatus, 700);
 }
 
@@ -217,15 +218,19 @@ async function startHistoricalCollection() {
   }
   button.disabled = true;
   button.textContent = "正在提交补采…";
-  const response = await fetch("/api/collection/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ modules: ["operations"], date, shops }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  state.collectionMessage = payload.message || payload.error || (response.ok ? `已提交 ${date} 补采` : "补采提交失败");
-  showToast(state.collectionMessage, response.ok ? "success" : "error");
-  if (payload.status) renderCollectionCenter(payload.status);
+  try {
+    const payload = await request<{ message?: string; status?: CollectionStatus }>("/api/collection/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ modules: ["operations"], date, shops }),
+    });
+    state.collectionMessage = payload.message ?? `已提交 ${date} 补采`;
+    showToast(state.collectionMessage, "success");
+    if (payload.status) renderCollectionCenter(payload.status);
+  } catch (error) {
+    state.collectionMessage = errorMessage(error, "补采提交失败");
+    showToast(state.collectionMessage, "error");
+  }
   window.setTimeout(refreshCollectionStatus, 700);
 }
 
@@ -235,17 +240,15 @@ async function clearCollectionTerminal() {
   button.disabled = true;
   button.textContent = "正在清除…";
   try {
-    const response = await fetch("/api/collection/terminal", { method: "DELETE" });
-    if (response.status === 401) return showLogin();
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "终端数据清除失败");
+    const payload = await request<{ message?: string; status?: CollectionStatus }>("/api/collection/terminal", { method: "DELETE" });
     previousTerminalOutput = "";
     terminalUnreadLines = 0;
-    state.collectionMessage = payload.message || "采集终端数据已清除";
+    state.collectionMessage = payload.message ?? "采集终端数据已清除";
     showToast(state.collectionMessage, "success");
     renderCollectionCenter(payload.status || {});
   } catch (error) {
-    state.collectionMessage = error instanceof Error ? error.message : "终端数据清除失败";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.collectionMessage = errorMessage(error, "终端数据清除失败");
     showToast(state.collectionMessage, "error");
     renderCollectionCenter(state.status || {});
   }
