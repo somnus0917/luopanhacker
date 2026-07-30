@@ -37,8 +37,13 @@ import sys
 source_path, snapshot_path = sys.argv[1:]
 with sqlite3.connect(source_path) as source, sqlite3.connect(snapshot_path) as snapshot:
     source.backup(snapshot)
+
+    result =snapshot.execute("PRAGMA quick_check").fetchall()
+    if result != [("ok",)]:
+        raise RuntimeError(
+            f"SQLite quick_check failed for {snapshot_path}:{result}"
+        )
 ' "${SQLITE_DB}" "${SQLITE_SNAPSHOT}"
-  sqlite3 "${SQLITE_SNAPSHOT}" "PRAGMA quick_check;" | grep -qx "ok"
 fi
 
 # Chromium writes parts of the session as root.  sudo is intentionally
