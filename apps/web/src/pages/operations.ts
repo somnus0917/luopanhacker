@@ -202,12 +202,14 @@ async function previewOrderImport(event: SubmitEvent) {
   const button = $("#order-upload-form button");
   button.disabled = true;
   button.textContent = "正在解析…";
+  state.orderPreview = null;
   state.orderImportMessage = "";
   try {
     state.orderPreview = await request<AnyRecord>("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
     state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
     showToast(state.orderImportMessage, "success");
   } catch (error) {
+    state.orderPreview = null;
     state.orderImportMessage = errorMessage(error, "文件解析失败，请检查格式后重试。");
     showToast(state.orderImportMessage, "error");
   }
