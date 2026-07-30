@@ -45,6 +45,7 @@ jobs:
           pnpm check
           pnpm test
           pnpm build
+          git diff --exit-code -- web/static
       - name: Check Python
         run: |
           uv run ruff check apps tests

@@ -1,5 +1,18 @@
 ARG RUST_IMAGE=rust:1.95-slim
 ARG PYTHON_IMAGE=python:3.11-slim
+ARG NODE_IMAGE=node:20-slim
+
+FROM ${NODE_IMAGE} AS web-builder
+
+WORKDIR /src/apps/web
+
+COPY apps/web/package.json apps/web/pnpm-lock.yaml apps/web/pnpm-workspace.yaml ./
+RUN corepack enable && \
+    corepack prepare pnpm@10.24.0 --activate && \
+    pnpm install --frozen-lockfile
+
+COPY apps/web ./
+RUN pnpm build
 
 FROM ${RUST_IMAGE} AS rust-builder
 
@@ -94,6 +107,10 @@ RUN uv venv --python /usr/local/bin/python3 && \
 
 # 复制应用代码
 COPY . .
+
+# Build the dashboard from the TypeScript source in every image build. This
+# prevents a stale committed web/static bundle from reaching production.
+COPY --from=web-builder /src/web/static /app/web/static
 
 # Rust control-plane binaries. Python remains only for browser automation.
 COPY --from=rust-builder /artifacts/luopan-worker-rs /usr/local/bin/luopan-worker-rs
