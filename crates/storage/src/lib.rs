@@ -154,6 +154,35 @@ pub async fn migrate(pool: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
         .execute(pool)
         .await?;
+    let session_columns = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<Vec<_>>();
+    if !session_columns
+        .iter()
+        .any(|column| column == "last_seen_at")
+    {
+        sqlx::query("ALTER TABLE sessions ADD COLUMN last_seen_at INTEGER")
+            .execute(pool)
+            .await?;
+        sqlx::query("UPDATE sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL")
+            .execute(pool)
+            .await?;
+    }
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            username TEXT PRIMARY KEY,
+            failed_count INTEGER NOT NULL,
+            window_started_at INTEGER NOT NULL,
+            locked_until INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
