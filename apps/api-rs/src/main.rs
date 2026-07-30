@@ -18,13 +18,14 @@ use axum::{
 };
 use chrono::NaiveDate;
 use luopan_channels::load_channel_dashboard;
-use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::status_payload;
 use luopan_operations::load_operations_records;
 use luopan_orders::{
     UploadedWorkbook, commit_preview, delete_batch, preview_upload, public_imports,
 };
-use luopan_runtime::{RuntimePaths, read_json_file};
+use luopan_runtime::RuntimePaths;
+#[cfg(test)]
+use luopan_runtime::read_json_file;
 use luopan_settlement::{
     load_settlement_dashboard_filtered, load_settlement_dashboard_for_shop, save_settlement_upload,
 };
@@ -49,6 +50,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod accounts;
 mod collection;
 mod error;
+mod health;
+mod inventory;
 mod state;
 
 #[cfg(test)]
@@ -67,6 +70,8 @@ use collection::{
     status_raw,
 };
 use error::{ApiError, api, api_with_meta, generate_request_id};
+use health::{healthz, readyz};
+use inventory::{inventory_dashboard, inventory_raw};
 use state::{AppState, SecurityConfig};
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
@@ -120,12 +125,6 @@ struct MeResponse {
 
 fn default_role() -> String {
     "viewer".to_string()
-}
-
-#[derive(Serialize)]
-struct HealthPayload {
-    service: &'static str,
-    ok: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -279,40 +278,6 @@ async fn main() -> Result<()> {
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, app).await?;
     Ok(())
-}
-
-async fn healthz() -> Json<Value> {
-    api(HealthPayload {
-        service: "luopan-api-rs",
-        ok: true,
-    })
-}
-
-async fn readyz(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let sqlite_available = sqlx::query("SELECT 1")
-        .fetch_one(&*state.auth_pool)
-        .await
-        .is_ok();
-    let static_files_available = state.paths.app_dir.join("web/static/index.html").is_file();
-    let runtime_dir_available = state.paths.state_dir.is_dir();
-    if !(sqlite_available && static_files_available && runtime_dir_available) {
-        tracing::warn!(
-            sqlite_available,
-            static_files_available,
-            runtime_dir_available,
-            "readiness check failed"
-        );
-        return Err(ApiError::client(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "NOT_READY",
-            "服务尚未就绪",
-        ));
-    }
-    Ok(api(json!({
-        "service": "luopan-api-rs",
-        "ready": true,
-        "checks": { "sqlite": true, "static_files": true, "runtime_dir": true },
-    })))
 }
 
 async fn request_logging(request: Request, next: Next) -> Response {
@@ -830,7 +795,7 @@ fn latest_json_modified_at(path: &Path) -> Option<String> {
         .max()
 }
 
-fn payload_updated_at(value: &Value, fallback_path: &Path) -> String {
+pub(crate) fn payload_updated_at(value: &Value, fallback_path: &Path) -> String {
     let record_timestamp = value
         .get("records")
         .and_then(Value::as_array)
@@ -863,42 +828,6 @@ fn operations_updated_at(
         .or_else(|| latest_json_modified_at(&paths.output_dir.join("daily")))
         .or_else(|| latest_json_modified_at(&paths.output_dir.join("external_orders")))
         .unwrap_or_else(now_string)
-}
-
-async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    if let Some(pool) = &state.storage_pool {
-        match kv_value_with_updated_at(pool, "inventory_dashboard").await {
-            Ok(Some(payload)) => {
-                return Ok(api_with_meta(
-                    payload.value,
-                    "sqlite",
-                    false,
-                    payload.updated_at,
-                ));
-            }
-            Ok(None) => tracing::warn!("SQLite inventory payload is missing; falling back to JSON"),
-            Err(error) => {
-                tracing::warn!(%error, "SQLite inventory read failed; falling back to JSON")
-            }
-        }
-    }
-
-    match load_inventory_dashboard(&state.paths).map_err(ApiError::internal)? {
-        Some(value) => {
-            let updated_at = payload_updated_at(&value, &state.paths.inventory_snapshot_path());
-            Ok(api_with_meta(
-                value,
-                "json",
-                state.storage_pool.is_some(),
-                updated_at,
-            ))
-        }
-        None => Err(ApiError::client(
-            StatusCode::NOT_FOUND,
-            "INVENTORY_NOT_FOUND",
-            "暂无库存快照",
-        )),
-    }
 }
 
 struct LoadedPayload {
@@ -1148,18 +1077,6 @@ async fn remove_order_import(
     let deleted = delete_batch(&state.paths, &batch_id).map_err(ApiError::bad_request)?;
     sync_storage_best_effort(&state).await;
     Ok(api(json!({ "deleted": deleted })))
-}
-
-async fn inventory_raw(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let path = state.paths.inventory_snapshot_path();
-    match read_json_file(&path).map_err(ApiError::internal)? {
-        Some(value) => Ok(api_with_meta(value, "json", false, now_string())),
-        None => Err(ApiError::client(
-            StatusCode::NOT_FOUND,
-            "INVENTORY_NOT_FOUND",
-            "暂无库存快照",
-        )),
-    }
 }
 
 async fn storage_summary(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
