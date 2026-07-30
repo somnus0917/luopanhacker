@@ -51,17 +51,13 @@ struct AppState {
 }
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
-const SESSION_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
-const SESSION_IDLE_TIMEOUT_SECONDS: i64 = 30 * 60;
-const LOGIN_FAILURE_LIMIT: i64 = 5;
-const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
-const LOGIN_LOCKOUT_SECONDS: i64 = 15 * 60;
+// Operationally persistent dashboard login; this is not the Douyin browser session.
+const SESSION_LIFETIME_SECONDS: i64 = 10 * 365 * 24 * 60 * 60;
 const ADMIN_UPLOAD_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug)]
 struct SecurityConfig {
     production: bool,
-    session_cookie_secure: bool,
     trusted_origins: Vec<String>,
 }
 
@@ -71,13 +67,8 @@ impl SecurityConfig {
             env::var("LUOPAN_ENV").ok().as_deref(),
             Some("development" | "dev" | "test")
         );
-        let configured_secure = env_bool("SESSION_COOKIE_SECURE", production);
-        if production && !configured_secure {
-            tracing::warn!("SESSION_COOKIE_SECURE=false is ignored in production");
-        }
         Self {
             production,
-            session_cookie_secure: production || configured_secure,
             trusted_origins: env::var("LUOPAN_TRUSTED_ORIGINS")
                 .unwrap_or_default()
                 .split(',')
@@ -459,37 +450,18 @@ async fn login(
     Json(payload): Json<LoginPayload>,
 ) -> Result<Response, ApiError> {
     let username = payload.username.trim();
-    if login_is_rate_limited(&state.auth_pool, username)
-        .await
-        .map_err(ApiError::internal)?
-    {
-        return Err(ApiError::client(
-            StatusCode::TOO_MANY_REQUESTS,
-            "LOGIN_RATE_LIMITED",
-            "登录失败次数过多，请 15 分钟后再试",
-        ));
-    }
     let user = sqlx::query("SELECT password_hash, role FROM users WHERE username = ?")
         .bind(username)
         .fetch_optional(&*state.auth_pool)
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
     let Some(user) = user else {
-        record_failed_login(&state.auth_pool, username)
-            .await
-            .map_err(ApiError::internal)?;
         return Err(invalid_credentials());
     };
     let password_hash: String = user.get("password_hash");
     if !verify_password(&payload.password, &password_hash) {
-        record_failed_login(&state.auth_pool, username)
-            .await
-            .map_err(ApiError::internal)?;
         return Err(invalid_credentials());
     }
-    clear_login_attempts(&state.auth_pool, username)
-        .await
-        .map_err(ApiError::internal)?;
     if is_legacy_password_hash(&password_hash) {
         let upgraded = hash_password(&payload.password).map_err(ApiError::internal)?;
         sqlx::query(
@@ -514,7 +486,7 @@ async fn login(
     .into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, session_cookie(&token, &state.security));
+        .insert(header::SET_COOKIE, session_cookie(&token));
     Ok(response)
 }
 
@@ -530,7 +502,7 @@ async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let mut response = (StatusCode::OK, api(json!({ "logged_out": true }))).into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, expired_session_cookie(&state.security));
+        .insert(header::SET_COOKIE, expired_session_cookie());
     response
 }
 
@@ -581,14 +553,6 @@ async fn change_password(
         .await
         .map_err(|error| ApiError::internal(error.into()))?;
 
-    if let Some(token) = session_token(&headers) {
-        sqlx::query("DELETE FROM sessions WHERE username = ? AND token_hash != ?")
-            .bind(&username)
-            .bind(token_hash(&token))
-            .execute(&*state.auth_pool)
-            .await
-            .map_err(|error| ApiError::internal(error.into()))?;
-    }
     Ok(api(json!({ "message": "密码已更新" })))
 }
 
@@ -910,13 +874,12 @@ async fn create_session(pool: &StoragePool, username: &str) -> Result<String> {
         .collect::<String>();
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        "INSERT INTO sessions (token_hash, username, created_at, expires_at, last_seen_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO sessions (token_hash, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
     )
     .bind(token_hash(&token))
     .bind(username)
     .bind(now)
     .bind(now + SESSION_LIFETIME_SECONDS)
-    .bind(now)
     .execute(pool)
     .await?;
     Ok(token)
@@ -929,24 +892,14 @@ async fn authenticated_user(
     let Some(token) = session_token(headers) else {
         return Ok(None);
     };
-    let now = chrono::Utc::now().timestamp();
     let row = sqlx::query(
-        "SELECT users.username, users.role FROM sessions JOIN users ON users.username = sessions.username WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND sessions.last_seen_at > ?",
+        "SELECT users.username, users.role FROM sessions JOIN users ON users.username = sessions.username WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
     )
     .bind(token_hash(&token))
-    .bind(now)
-    .bind(now - SESSION_IDLE_TIMEOUT_SECONDS)
+    .bind(chrono::Utc::now().timestamp())
     .fetch_optional(pool)
     .await?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    sqlx::query("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?")
-        .bind(now)
-        .bind(token_hash(&token))
-        .execute(pool)
-        .await?;
-    Ok(Some((row.get("username"), row.get("role"))))
+    Ok(row.map(|row| (row.get("username"), row.get("role"))))
 }
 
 fn session_token(headers: &HeaderMap) -> Option<String> {
@@ -965,95 +918,14 @@ fn token_hash(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
-fn session_cookie(token: &str, security: &SecurityConfig) -> HeaderValue {
-    let secure = if security.session_cookie_secure {
-        "; Secure"
-    } else {
-        ""
-    };
+fn session_cookie(token: &str) -> HeaderValue {
     HeaderValue::from_str(&format!(
-        "{SESSION_COOKIE_NAME}={token}; Path=/; Max-Age={SESSION_LIFETIME_SECONDS}; HttpOnly; SameSite=Lax{secure}"
+        "{SESSION_COOKIE_NAME}={token}; Path=/; Max-Age={SESSION_LIFETIME_SECONDS}; HttpOnly; SameSite=Lax"
     ))
     .expect("session cookie is valid")
 }
-
-async fn login_is_rate_limited(pool: &StoragePool, username: &str) -> Result<bool> {
-    let now = chrono::Utc::now().timestamp();
-    let row = sqlx::query("SELECT failed_count, window_started_at, locked_until FROM login_attempts WHERE username = ?")
-        .bind(username)
-        .fetch_optional(pool)
-        .await?;
-    let Some(row) = row else {
-        return Ok(false);
-    };
-    let locked_until: i64 = row.get("locked_until");
-    if locked_until > now {
-        return Ok(true);
-    }
-    let window_started_at: i64 = row.get("window_started_at");
-    if window_started_at + LOGIN_FAILURE_WINDOW_SECONDS <= now {
-        sqlx::query("DELETE FROM login_attempts WHERE username = ?")
-            .bind(username)
-            .execute(pool)
-            .await?;
-    }
-    Ok(false)
-}
-
-async fn record_failed_login(pool: &StoragePool, username: &str) -> Result<()> {
-    let now = chrono::Utc::now().timestamp();
-    let row = sqlx::query(
-        "SELECT failed_count, window_started_at FROM login_attempts WHERE username = ?",
-    )
-    .bind(username)
-    .fetch_optional(pool)
-    .await?;
-    let (failed_count, window_started_at) = match row {
-        Some(row)
-            if row.get::<i64, _>("window_started_at") + LOGIN_FAILURE_WINDOW_SECONDS > now =>
-        {
-            (
-                row.get::<i64, _>("failed_count") + 1,
-                row.get::<i64, _>("window_started_at"),
-            )
-        }
-        _ => (1, now),
-    };
-    let locked_until = if failed_count >= LOGIN_FAILURE_LIMIT {
-        now + LOGIN_LOCKOUT_SECONDS
-    } else {
-        0
-    };
-    sqlx::query(
-        "INSERT INTO login_attempts (username, failed_count, window_started_at, locked_until) VALUES (?, ?, ?, ?) ON CONFLICT(username) DO UPDATE SET failed_count = excluded.failed_count, window_started_at = excluded.window_started_at, locked_until = excluded.locked_until",
-    )
-    .bind(username)
-    .bind(failed_count)
-    .bind(window_started_at)
-    .bind(locked_until)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-async fn clear_login_attempts(pool: &StoragePool, username: &str) -> Result<()> {
-    sqlx::query("DELETE FROM login_attempts WHERE username = ?")
-        .bind(username)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
-fn expired_session_cookie(security: &SecurityConfig) -> HeaderValue {
-    let secure = if security.session_cookie_secure {
-        "; Secure"
-    } else {
-        ""
-    };
-    HeaderValue::from_str(&format!(
-        "compass_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax{secure}"
-    ))
-    .expect("session cookie is valid")
+fn expired_session_cookie() -> HeaderValue {
+    HeaderValue::from_static("compass_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
 }
 
 fn now_string() -> String {
@@ -1709,7 +1581,6 @@ mod tests {
     fn test_security() -> Arc<SecurityConfig> {
         Arc::new(SecurityConfig {
             production: false,
-            session_cookie_secure: false,
             trusted_origins: vec!["http://127.0.0.1:5173".to_string()],
         })
     }
@@ -1832,59 +1703,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(authenticated_user(&pool, &headers).await.unwrap(), None);
-    }
-
-    #[tokio::test]
-    async fn idle_sessions_are_rejected() {
-        let pool = test_pool().await;
-        sqlx::query(
-            "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-        )
-        .bind("idle-user")
-        .bind(hash_password("password").unwrap())
-        .bind("viewer")
-        .bind(now_string())
-        .execute(&pool)
-        .await
-        .unwrap();
-        let token = create_session(&pool, "idle-user").await.unwrap();
-        sqlx::query("UPDATE sessions SET last_seen_at = 0 WHERE token_hash = ?")
-            .bind(token_hash(&token))
-            .execute(&pool)
-            .await
-            .unwrap();
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::COOKIE,
-            HeaderValue::from_str(&format!("{SESSION_COOKIE_NAME}={token}")).unwrap(),
-        );
-        assert!(authenticated_user(&pool, &headers).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn repeated_login_failures_are_rate_limited() {
-        let pool = test_pool().await;
-        for _ in 0..LOGIN_FAILURE_LIMIT {
-            record_failed_login(&pool, "unknown-user").await.unwrap();
-        }
-        assert!(login_is_rate_limited(&pool, "unknown-user").await.unwrap());
-        clear_login_attempts(&pool, "unknown-user").await.unwrap();
-        assert!(!login_is_rate_limited(&pool, "unknown-user").await.unwrap());
-    }
-
-    #[test]
-    fn production_cookie_is_secure() {
-        let security = SecurityConfig {
-            production: true,
-            session_cookie_secure: true,
-            trusted_origins: Vec::new(),
-        };
-        assert!(
-            session_cookie("token", &security)
-                .to_str()
-                .unwrap()
-                .contains("; Secure")
-        );
     }
 
     #[tokio::test]
