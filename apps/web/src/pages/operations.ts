@@ -460,10 +460,15 @@ function channelInsightsMarkup(records) {
     const period = record.search?.period || {};
     return period.begin_date && period.end_date ? `${period.begin_date} 至 ${period.end_date}` : "";
   }).filter(Boolean))];
+  const searchPeriodLabel = periods.length ? `搜索：${whole(periods.length)} 个周周期` : "搜索：暂无周期";
+  const searchPeriodDetails = periods.length
+    ? periods.map((period) => `<li>${escapeHtml(period)}</li>`).join("")
+    : "<li>当前范围暂无搜索周期</li>";
+  const context = `<section class="section-context channel-context"><div class="section-context-title"><strong>抖音流量拆解</strong><small>自然搜索、推荐、广告和短视频</small></div><div class="channel-context-meta"><span class="channel-context-chip">${whole(records.length)} 个店铺日</span><details class="channel-context-details"><summary aria-label="查看搜索数据口径"><b>${searchPeriodLabel}</b><i aria-hidden="true">i</i></summary><div class="channel-context-popover"><strong>搜索数据口径</strong><p>按罗盘独立周口径统计，可能与经营日维度不完全一致。</p><ul>${searchPeriodDetails}</ul></div></details></div></section>`;
   const trendSource = channelTrendRecords(records);
   const charts = `<div class="chart-grid"><div class="chart-stack">${lineChart(trendSource, "organic_search", "自然搜索曝光趋势")}${lineChart(trendSource, "recommendation", "推荐流量曝光趋势")}</div><div class="chart-stack"><section class="panel"><div class="panel-head"><div><h3>商品卡流量来源</h3><span>按罗盘商品曝光人数口径</span></div></div>${simpleTable(["来源", "曝光人数", "占比"], sourceRows)}</section><section class="panel operations-note"><h3>渠道口径</h3><p>自然搜索对应“非投放时段-搜索”；推荐流量包含“猜你喜欢”和“顶Tab推荐”；广告流量包含全域投广及标准/品牌投放。</p><p>搜索模块采用罗盘独立周口径，日期可能晚于经营数据更新。</p></section></div></div>`;
   const details = `<div class="detail-table-stack"><details class="detail-table-disclosure" open><summary><span>商品表现</span><small>商品卡TOP商品 · ${whole(productRows.length)} 条</small></summary><div class="detail-table-content">${simpleTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率", "曝光变化"], productRows)}</div></details><details class="detail-table-disclosure"><summary><span>搜索渠道</span><small>商品卡、直播、短视频与图文搜索</small></summary><div class="detail-table-content">${simpleTable(["店铺", "搜索渠道", "曝光人数", "环比", "支付金额", "同行基准"], searchSourceRows)}</div></details><details class="detail-table-disclosure"><summary><span>本店搜索词</span><small>罗盘搜索周报TOP词</small></summary><div class="detail-table-content">${simpleTable(["店铺", "排名", "搜索词", "曝光人数", "环比", "支付金额"], searchTermRows)}</div></details></div>`;
-  return `<section class="section-context"><span>抖音渠道下钻</span><small>${whole(records.length)} 条店铺日数据 · 搜索口径：${escapeHtml(periods.join("、") || "暂无")}</small></section>${cardHtml}${charts}${details}`;
+  return `${context}${cardHtml}${charts}${details}`;
 }
 
 function metricCards(metrics, columns = "six") {
