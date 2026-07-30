@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from apps.inventory_py import inventory_sync
@@ -27,6 +28,7 @@ def stock(warehouse: str, spec: str, available: float) -> dict[str, object]:
         "available_num": available,
         "lock_num": 0,
         "today_num": 0,
+        "cost_price": 0,
         "last_inout_time": "2026-07-01 00:00:00",
         "modified": "2026-07-01 00:00:00",
     }
@@ -84,6 +86,20 @@ class InventorySyncTest(unittest.TestCase):
         self.assertEqual(next(row for row in current["inventory"] if row["spec_no"] == "A")["available_num"], 8)
         history = json.loads((inventory_sync.HISTORY_DIR / "2026-07-01.json").read_text(encoding="utf-8"))
         self.assertEqual(next(row for row in history["inventory"] if row["spec_no"] == "A")["available_num"], 10)
+
+    def test_inventory_rows_preserves_wdt_cost_price(self) -> None:
+        now = datetime(2026, 7, 1, 3, 0, tzinfo=SHANGHAI)
+        with patch.object(inventory_sync, "fetch_all", return_value=[{
+            "warehouse_no": "001",
+            "warehouse_name": "主仓",
+            "spec_no": "A",
+            "stock_num": "10",
+            "avaliable_num": "8",
+            "cost_price": "12.34",
+        }]):
+            rows = inventory_sync.inventory_rows(now)
+
+        self.assertEqual(rows[0]["cost_price"], 12.34)
 
     def test_failed_sync_keeps_last_known_good_snapshot(self) -> None:
         now = datetime(2026, 7, 2, 3, 0, tzinfo=SHANGHAI)

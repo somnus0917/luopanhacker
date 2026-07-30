@@ -40,7 +40,7 @@ ALLOWED_APIS = {
 PAGE_SIZE = 100
 MAX_PAGES = 500
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 STALE_LOCK_SECONDS = 3 * 60 * 60
 
 
@@ -197,6 +197,9 @@ def inventory_rows(now: datetime) -> list[dict[str, Any]]:
             "available_num": number(row.get("avaliable_num", row.get("available_num"))),
             "lock_num": number(row.get("lock_num")),
             "today_num": number(row.get("today_num", row.get("stock_today_num"))),
+            # WDT returns unit cost in yuan. Keep zero values too; the
+            # dashboard treats non-positive costs as not yet maintained.
+            "cost_price": number(row.get("cost_price")),
             "last_inout_time": row.get("last_inout_time"),
             "modified": row.get("modified"),
             # Deletion markers are only used while merging incremental data;

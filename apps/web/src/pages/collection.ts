@@ -8,13 +8,55 @@ import {
 import { showLogin } from "./account";
 
 let statusRefreshTimer: number | null = null;
+let previousTerminalOutput = "";
+let terminalUnreadLines = 0;
+
+function terminalOutput(status) {
+  return typeof status.terminal_output === "string" ? status.terminal_output : "";
+}
+
+function terminalAtBottom(terminal) {
+  return terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
+}
+
+function terminalViewport() {
+  const terminal = $("[data-collection-terminal]");
+  if (!terminal) return null;
+  return { scrollTop: terminal.scrollTop, atBottom: terminalAtBottom(terminal) };
+}
+
+function addedTerminalLines(previous, next) {
+  if (!previous || !next || previous === next) return 0;
+  const appended = next.startsWith(previous) ? next.slice(previous.length) : next;
+  return appended.split("\n").filter(Boolean).length;
+}
 
 function statusTerminal(status, logMessage) {
-  if (typeof status.terminal_output === "string" && status.terminal_output) {
-    const lineCount = status.terminal_output.split("\n").length;
-    return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><small>最近 ${escapeHtml(String(lineCount))} 行</small></div><pre>${escapeHtml(status.terminal_output)}</pre></div>`;
+  const output = terminalOutput(status);
+  if (output) {
+    const lineCount = output.split("\n").length;
+    const follow = terminalUnreadLines ? `<button class="status-log-follow" type="button" data-terminal-follow>有 ${escapeHtml(String(terminalUnreadLines))} 条新输出 · 回到底部</button>` : "";
+    return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><div class="status-log-meta"><small>最近 ${escapeHtml(String(lineCount))} 行</small>${follow}</div></div><pre data-collection-terminal>${escapeHtml(output)}</pre></div>`;
   }
   return `<p class="status-log-empty">${escapeHtml(logMessage || "当前还没有采集终端输出。")}</p>`;
+}
+
+function restoreTerminalViewport(viewport) {
+  const terminal = $("[data-collection-terminal]");
+  if (!terminal) return;
+  if (!viewport || viewport.atBottom) terminal.scrollTop = terminal.scrollHeight;
+  else terminal.scrollTop = Math.min(viewport.scrollTop, Math.max(0, terminal.scrollHeight - terminal.clientHeight));
+  terminal.addEventListener("scroll", () => {
+    if (terminalAtBottom(terminal)) {
+      terminalUnreadLines = 0;
+      $("[data-terminal-follow]")?.remove();
+    }
+  });
+  $("[data-terminal-follow]")?.addEventListener("click", () => {
+    terminalUnreadLines = 0;
+    terminal.scrollTop = terminal.scrollHeight;
+    $("[data-terminal-follow]")?.remove();
+  });
 }
 
 function collectionModuleCard(name, title, description, status) {
@@ -49,6 +91,13 @@ function collectionShopOptions() {
 export function renderCollectionCenter(status, { logMessage = "" } = {}) {
   const slot = $("#collection-center");
   if (!slot) return;
+  const viewport = terminalViewport();
+  const output = terminalOutput(status);
+  const newLines = addedTerminalLines(previousTerminalOutput, output);
+  if (!output) terminalUnreadLines = 0;
+  else if (!viewport || viewport.atBottom) terminalUnreadLines = 0;
+  else terminalUnreadLines += newLines;
+  previousTerminalOutput = output;
   state.status = status;
   const online = Boolean(status.collector_online);
   const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
@@ -91,7 +140,9 @@ export function renderCollectionCenter(status, { logMessage = "" } = {}) {
       <p>状态更新时间：${escapeHtml(status.updated_at || "—")} · 请求模块：${escapeHtml((status.requested_modules || []).join("、") || "—")}${status.requested_date ? ` · 补采日期：${escapeHtml(status.requested_date)}` : ""}${status.requested_shops?.length ? ` · 指定店铺：${escapeHtml(status.requested_shops.join("、"))}` : ""}</p>
       ${status.last_error ? `<p class="collection-error">${escapeHtml(status.last_error)}</p>` : ""}
       ${statusTerminal(status, logMessage)}
+      ${isAdmin() ? `<div class="status-actions"><button id="collection-clear-terminal-button" class="button" type="button">清除终端数据</button></div>` : ""}
     </div></details>`;
+  restoreTerminalViewport(viewport);
   $$('[data-collection-module]', slot).forEach((input) => input.addEventListener("change", () => {
     if (input.checked) state.collectionModules.add(input.dataset.collectionModule);
     else state.collectionModules.delete(input.dataset.collectionModule);
@@ -108,6 +159,7 @@ export function renderCollectionCenter(status, { logMessage = "" } = {}) {
   });
   $("#collection-run-button")?.addEventListener("click", startCollection);
   $("#collection-backfill-button")?.addEventListener("click", startHistoricalCollection);
+  $("#collection-clear-terminal-button")?.addEventListener("click", clearCollectionTerminal);
 }
 
 export async function refreshCollectionStatus() {
@@ -166,6 +218,28 @@ async function startHistoricalCollection() {
   showToast(state.collectionMessage, response.ok ? "success" : "error");
   if (payload.status) renderCollectionCenter(payload.status);
   window.setTimeout(refreshCollectionStatus, 700);
+}
+
+async function clearCollectionTerminal() {
+  if (!window.confirm("确定清除采集终端数据吗？这不会影响已经采集的数据或任务状态；任务运行中时，后续输出仍会继续写入。")) return;
+  const button = $("#collection-clear-terminal-button");
+  button.disabled = true;
+  button.textContent = "正在清除…";
+  try {
+    const response = await fetch("/api/collection/terminal", { method: "DELETE" });
+    if (response.status === 401) return showLogin();
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "终端数据清除失败");
+    previousTerminalOutput = "";
+    terminalUnreadLines = 0;
+    state.collectionMessage = payload.message || "采集终端数据已清除";
+    showToast(state.collectionMessage, "success");
+    renderCollectionCenter(payload.status || {});
+  } catch (error) {
+    state.collectionMessage = error.message || "终端数据清除失败";
+    showToast(state.collectionMessage, "error");
+    renderCollectionCenter(state.status || {});
+  }
 }
 
 export function stopCollectionStatusRefresh() {

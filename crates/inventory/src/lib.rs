@@ -68,6 +68,25 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
             coverage_days.map_or(Value::Null, |value| json!(value)),
         );
         item.insert("replenish_qty".to_string(), json!(replenish_qty));
+        let cost_price = number(item.get("cost_price"));
+        let cost_covered = cost_price > 0.0;
+        item.insert("cost_covered".to_string(), json!(cost_covered));
+        item.insert(
+            "stock_cost_amount".to_string(),
+            if cost_covered {
+                json!(rounded(number(item.get("stock_num")) * cost_price))
+            } else {
+                Value::Null
+            },
+        );
+        item.insert(
+            "available_cost_amount".to_string(),
+            if cost_covered {
+                json!(rounded(number(item.get("available_num")) * cost_price))
+            } else {
+                Value::Null
+            },
+        );
         rows.push(Value::Object(item));
     }
 
@@ -110,6 +129,32 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
             }
         })
         .collect();
+    let cost_covered_records = rows
+        .iter()
+        .filter(|row| {
+            row.get("cost_covered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .count();
+    let stock_cost_amount: f64 = rows
+        .iter()
+        .filter(|row| {
+            row.get("cost_covered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .map(|row| number(row.get("stock_cost_amount")))
+        .sum();
+    let available_cost_amount: f64 = rows
+        .iter()
+        .filter(|row| {
+            row.get("cost_covered")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .map(|row| number(row.get("available_cost_amount")))
+        .sum();
 
     let history = historical_turnover(history_dir)?;
     let mut summary = json!({
@@ -126,6 +171,10 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         "replenishment_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "out_of_stock" | "urgent" | "replenish")).count(),
         "no_movement_records": rows.iter().filter(|row| text(row.get("health_key")) == "no_movement").count(),
         "overstock_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "overstock" | "high")).count(),
+        "cost_covered_records": cost_covered_records,
+        "cost_coverage_rate": if rows.is_empty() { Value::Null } else { json!(rounded(cost_covered_records as f64 / rows.len() as f64)) },
+        "stock_cost_amount": if cost_covered_records == 0 { Value::Null } else { json!(rounded(stock_cost_amount)) },
+        "available_cost_amount": if cost_covered_records == 0 { Value::Null } else { json!(rounded(available_cost_amount)) },
     });
     if let Some(object) = summary.as_object_mut() {
         object.insert(
@@ -261,6 +310,15 @@ fn build_group(rows: &[Value], key_name: &str) -> Vec<Value> {
         group.sales_7d += number(row.get("sales_7d"));
         group.inbound_30d += number(row.get("inbound_30d"));
         group.negative_available += usize::from(number(row.get("available_num")) < 0.0);
+        if row
+            .get("cost_covered")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            group.cost_covered_records += 1;
+            group.stock_cost_amount += number(row.get("stock_cost_amount"));
+            group.available_cost_amount += number(row.get("available_cost_amount"));
+        }
     }
 
     let mut values: Vec<Value> = groups
@@ -275,6 +333,10 @@ fn build_group(rows: &[Value], key_name: &str) -> Vec<Value> {
                 "inbound_30d": rounded(group.inbound_30d),
                 "negative_available": group.negative_available,
                 "turnover_days": if group.sales_7d > 0.0 { json!(rounded(group.available_num / (group.sales_7d / 7.0))) } else { Value::Null },
+                "cost_covered_records": group.cost_covered_records,
+                "cost_coverage_rate": if group.sku_records == 0 { Value::Null } else { json!(rounded(group.cost_covered_records as f64 / group.sku_records as f64)) },
+                "stock_cost_amount": if group.cost_covered_records == 0 { Value::Null } else { json!(rounded(group.stock_cost_amount)) },
+                "available_cost_amount": if group.cost_covered_records == 0 { Value::Null } else { json!(rounded(group.available_cost_amount)) },
             })
         })
         .collect();
@@ -295,6 +357,9 @@ struct Group {
     sales_7d: f64,
     inbound_30d: f64,
     negative_available: usize,
+    cost_covered_records: usize,
+    stock_cost_amount: f64,
+    available_cost_amount: f64,
 }
 
 fn build_health(rows: &[Value]) -> Vec<Value> {
@@ -564,4 +629,44 @@ fn historical_turnover(history_dir: &Path) -> Result<Value> {
         );
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cost_summary_excludes_unmaintained_costs() {
+        let snapshot = json!({
+            "inventory": [
+                {"warehouse_no": "001", "spec_no": "A", "stock_num": 10, "available_num": 8, "cost_price": 12.5},
+                {"warehouse_no": "001", "spec_no": "B", "stock_num": 6, "available_num": 6, "cost_price": 0}
+            ],
+            "sales_7d": [],
+            "inbound_30d": []
+        });
+
+        let dashboard = build_dashboard(&snapshot, Path::new("/tmp/luopan-inventory-no-history"))
+            .expect("dashboard should build");
+        let rows = dashboard["rows"]
+            .as_array()
+            .expect("rows should be an array");
+        let costed_row = rows
+            .iter()
+            .find(|row| row["spec_no"] == "A")
+            .expect("costed row");
+        let unmaintained_row = rows
+            .iter()
+            .find(|row| row["spec_no"] == "B")
+            .expect("unmaintained row");
+
+        assert_eq!(costed_row["cost_covered"], true);
+        assert_eq!(costed_row["stock_cost_amount"], 125.0);
+        assert_eq!(costed_row["available_cost_amount"], 100.0);
+        assert_eq!(unmaintained_row["cost_covered"], false);
+        assert!(unmaintained_row["stock_cost_amount"].is_null());
+        assert_eq!(dashboard["summary"]["cost_covered_records"], 1);
+        assert_eq!(dashboard["summary"]["cost_coverage_rate"], 0.5);
+        assert_eq!(dashboard["summary"]["stock_cost_amount"], 125.0);
+    }
 }

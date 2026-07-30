@@ -88,6 +88,16 @@ pub fn progress_log_tail(paths: &RuntimePaths) -> Result<Option<String>> {
     Ok(Some(lines[tail_start..].join("\n")))
 }
 
+pub fn clear_progress_log(paths: &RuntimePaths) -> Result<()> {
+    fs::create_dir_all(paths.collection_dir())
+        .with_context(|| format!("create {}", paths.collection_dir().display()))?;
+    // Truncate rather than remove the file. The collector writes with an
+    // append-only descriptor, so a running task can continue logging after
+    // the clear without losing its output stream.
+    fs::write(paths.progress_log_path(), "")
+        .with_context(|| format!("clear {}", paths.progress_log_path().display()))
+}
+
 fn write_status_file(path: &Path, value: &Value) -> Result<()> {
     let text = serde_json::to_string_pretty(value)?;
     let temporary_path = path.with_extension("json.tmp");
@@ -204,6 +214,18 @@ mod tests {
         assert_eq!(payload["job_running"], json!(false));
         assert_eq!(payload["novnc_url"], json!("http://127.0.0.1:6080"));
         assert_eq!(payload["terminal_output"], json!("line1\nline2"));
+        cleanup(&paths);
+    }
+
+    #[test]
+    fn clears_only_the_progress_log() {
+        let paths = temp_paths();
+        fs::create_dir_all(paths.collection_dir()).unwrap();
+        fs::write(paths.progress_log_path(), "old output\n").unwrap();
+
+        clear_progress_log(&paths).unwrap();
+
+        assert_eq!(progress_log_tail(&paths).unwrap(), Some(String::new()));
         cleanup(&paths);
     }
 }
