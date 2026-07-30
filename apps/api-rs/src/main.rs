@@ -357,6 +357,9 @@ async fn login(
     Json(payload): Json<LoginPayload>,
 ) -> Result<Response, ApiError> {
     let username = payload.username.trim();
+    if validate_username(username).is_err() {
+        return Err(invalid_credentials());
+    }
     if login_is_rate_limited(&state.auth_pool, username)
         .await
         .map_err(ApiError::internal)?
@@ -901,6 +904,14 @@ async fn login_is_rate_limited(pool: &StoragePool, username: &str) -> Result<boo
 
 async fn record_failed_login(pool: &StoragePool, username: &str) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
+    sqlx::query(
+        "DELETE FROM login_attempts WHERE locked_until <= ? AND window_started_at + ? <= ?",
+    )
+    .bind(now)
+    .bind(LOGIN_FAILURE_WINDOW_SECONDS)
+    .bind(now)
+    .execute(pool)
+    .await?;
     let row = sqlx::query(
         "SELECT failed_count, window_started_at FROM login_attempts WHERE username = ?",
     )
@@ -1564,9 +1575,27 @@ mod tests {
     #[tokio::test]
     async fn repeated_login_failures_are_rate_limited() {
         let pool = test_pool().await;
+        let expired_window = chrono::Utc::now().timestamp() - LOGIN_FAILURE_WINDOW_SECONDS - 1;
+        sqlx::query(
+            "INSERT INTO login_attempts (username, failed_count, window_started_at, locked_until) VALUES (?, ?, ?, ?)",
+        )
+        .bind("expired-user")
+        .bind(1_i64)
+        .bind(expired_window)
+        .bind(0_i64)
+        .execute(&pool)
+        .await
+        .unwrap();
         for _ in 0..LOGIN_FAILURE_LIMIT {
             record_failed_login(&pool, "unknown-user").await.unwrap();
         }
+        let expired_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM login_attempts WHERE username = 'expired-user'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(expired_count, 0);
         assert!(login_is_rate_limited(&pool, "unknown-user").await.unwrap());
         clear_login_attempts(&pool, "unknown-user").await.unwrap();
         assert!(!login_is_rate_limited(&pool, "unknown-user").await.unwrap());
@@ -1737,6 +1766,7 @@ mod tests {
         assert_eq!(validate_username(" alice ").unwrap(), "alice");
         assert!(validate_username("").is_err());
         assert!(validate_username("bad\nname").is_err());
+        assert!(validate_username(&"a".repeat(65)).is_err());
         assert_eq!(normalize_role("admin"), "admin");
         assert_eq!(normalize_role("unexpected"), "viewer");
     }
