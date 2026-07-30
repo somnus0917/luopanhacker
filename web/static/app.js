@@ -949,8 +949,8 @@ function renderTable(records, content = false) {
 async function loadCompass() {
   try {
     const payload = await request("/api/compass");
-    state.records = Array.isArray(payload.records) ? payload.records : [];
-    state.channel = payload.channel ?? null;
+    state.records = payload.records;
+    state.channel = payload.channel;
     state.operationDates = new Set(operationFilterItems("date"));
     state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
     state.operationCalendarRangeStart = "";

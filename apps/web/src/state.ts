@@ -1,15 +1,8 @@
-import type { InventoryView, JsonObject, PageName, User } from "./types";
+import type { ChannelDashboard, InventoryView, JsonObject, OperationRecord as OperationRecordData, OrderImports, OrderPreview, PageName, SettlementDashboard, User } from "./types";
 
 export type AnyRecord = JsonObject;
 
-export type OperationRecord = AnyRecord & {
-  date: string;
-  shop_name: string;
-  source?: string;
-  source_label?: string;
-  metrics?: AnyRecord;
-  content?: AnyRecord;
-};
+export type OperationRecord = OperationRecordData;
 
 export type AppState = {
   currentUser: User | null;
@@ -39,7 +32,7 @@ export type AppState = {
   inventoryBrand: string;
   inventorySortKey: string;
   inventorySortDir: "asc" | "desc";
-  settlement: AnyRecord | null;
+  settlement: SettlementDashboard | null;
   settlementShop: string;
   settlementAvailableDates: string[];
   settlementStartDate: string;
@@ -48,10 +41,10 @@ export type AppState = {
   settlementCalendarCursor: string;
   settlementCalendarRangeStart: string;
   settlementUploadMessage: string;
-  orderImports: { batches: AnyRecord[]; summary: AnyRecord };
-  orderPreview: AnyRecord | null;
+  orderImports: OrderImports;
+  orderPreview: OrderPreview | null;
   orderImportMessage: string;
-  channel: AnyRecord | null;
+  channel: ChannelDashboard | null;
 };
 
 export let COLLECTION_SHOPS: string[] = [];

@@ -15,6 +15,79 @@ export type User = {
   password_changed_at?: string | null;
 };
 
+export type OperationRecord = JsonObject & {
+  date: string;
+  shop_name: string;
+  source?: string;
+  source_key?: string;
+  source_label?: string;
+  metrics?: JsonObject;
+  content?: JsonObject;
+};
+
+export type ChannelDashboard = JsonObject & {
+  records: JsonObject[];
+};
+
+export type CompassResponse = {
+  records: OperationRecord[];
+  channel: ChannelDashboard | null;
+};
+
+export type OrderPreviewFile = JsonObject & {
+  source_label: string;
+  file_name: string;
+  known_file: boolean;
+  added_orders: number;
+  duplicate_orders: number;
+};
+
+export type OrderPreview = JsonObject & {
+  preview_token: string;
+  summary: JsonObject & {
+    added_orders: number;
+    duplicate_orders: number;
+    pay_amt: number;
+    pay_item_cnt: number;
+    date_range: [string, string] | null;
+  };
+  files: OrderPreviewFile[];
+};
+
+export type OrderImports = {
+  batches: JsonObject[];
+  summary: JsonObject;
+};
+
+export type OrderImportCommit = {
+  batch?: JsonObject & { added_orders?: number };
+};
+
+export type OrderImportDelete = {
+  deleted?: JsonObject & { added_orders?: number };
+};
+
+export type SettlementDashboard = JsonObject & {
+  summary: JsonObject;
+  rows: JsonObject[];
+  shops: string[];
+  available_dates: string[];
+  selected_shop?: string;
+  selected_start_date?: string;
+  selected_end_date?: string;
+};
+
+export type SettlementUpload = {
+  upload?: JsonObject & {
+    file?: JsonObject & {
+      shop_name?: string;
+      original_name?: string;
+      name?: string;
+      rows?: number;
+    };
+  };
+};
+
 export type ApiErrorPayload = {
   error?: string;
   error_code?: string;

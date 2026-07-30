@@ -8,6 +8,7 @@ import {
 import { barPanel, bindLineChartHover, lineChart } from "../charts";
 import { isAdmin, state } from "../state";
 import type { AnyRecord, OperationRecord } from "../state";
+import type { ChannelDashboard, CompassResponse, OrderImportCommit, OrderImportDelete, OrderImports, OrderPreview } from "../types";
 import { showLogin } from "./account";
 
 function recordSourceLabel(item: OperationRecord) {
@@ -180,7 +181,7 @@ function renderOrderImportPanel() {
 
 export async function loadOrderImports() {
   try {
-    state.orderImports = await request<typeof state.orderImports>("/api/orders/imports");
+    state.orderImports = await request<OrderImports>("/api/orders/imports");
   } catch (error) {
     if (isApiRequestError(error) && error.status === 401) return showLogin();
     state.orderImportMessage = errorMessage(error, "订单导入记录读取失败。");
@@ -198,7 +199,7 @@ async function previewOrderImport(event: SubmitEvent) {
   state.orderPreview = null;
   state.orderImportMessage = "";
   try {
-    state.orderPreview = await request<AnyRecord>("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
+    state.orderPreview = await request<OrderPreview>("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
     state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
     showToast(state.orderImportMessage, "success");
   } catch (error) {
@@ -212,9 +213,9 @@ async function previewOrderImport(event: SubmitEvent) {
 async function commitOrderImport() {
   if (!state.orderPreview?.preview_token) return;
   try {
-    const payload = await request<AnyRecord>("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
+    const payload = await request<OrderImportCommit>("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
     state.orderPreview = null;
-    state.orderImportMessage = `已写入 ${whole((payload.batch as AnyRecord | undefined)?.added_orders)} 单订单汇总。`;
+    state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
     showToast(state.orderImportMessage, "success");
     await Promise.all([loadCompass(), loadOrderImports()]);
   } catch (error) {
@@ -227,8 +228,8 @@ async function commitOrderImport() {
 async function deleteOrderImport(batchId: string) {
   if (!batchId || !window.confirm("撤销后，该批次导入的数据将从经营看板移除。确定继续吗？")) return;
   try {
-    const payload = await request<AnyRecord>(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
-    state.orderImportMessage = `已撤销 ${whole((payload.deleted as AnyRecord | undefined)?.added_orders)} 单导入数据。`;
+    const payload = await request<OrderImportDelete>(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+    state.orderImportMessage = `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。`;
     showToast(state.orderImportMessage, "success");
   } catch (error) {
     state.orderImportMessage = errorMessage(error, "撤销失败，请稍后重试。");
@@ -655,7 +656,7 @@ export function renderOperations() {
 
 export async function loadChannel() {
   try {
-    state.channel = await request<AnyRecord>("/api/channel");
+    state.channel = await request<ChannelDashboard>("/api/channel");
   } catch (error) {
     if (isApiRequestError(error) && error.status === 401) return showLogin();
     state.channel = { records: [] };
@@ -681,9 +682,9 @@ function renderTable(records: OperationRecord[], content = false) {
 
 export async function loadCompass() {
   try {
-    const payload = await request<AnyRecord>("/api/compass");
-    state.records = (Array.isArray(payload.records) ? payload.records : []) as OperationRecord[];
-    state.channel = (payload.channel as AnyRecord | undefined) ?? null;
+    const payload = await request<CompassResponse>("/api/compass");
+    state.records = payload.records;
+    state.channel = payload.channel;
     state.operationDates = new Set(operationFilterItems("date"));
     state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
     state.operationCalendarRangeStart = "";

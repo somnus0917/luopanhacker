@@ -6,6 +6,7 @@ import {
 } from "../format";
 import { isAdmin, state } from "../state";
 import type { AnyRecord } from "../state";
+import type { SettlementDashboard, SettlementUpload } from "../types";
 import { showLogin } from "./account";
 
 function settlementGroupTable(title: string, groups: AnyRecord[]) {
@@ -16,7 +17,7 @@ function settlementGroupTable(title: string, groups: AnyRecord[]) {
   return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
 }
 
-function settlementDates(payload = state.settlement) {
+function settlementDates(payload: { available_dates?: string[] } | null = state.settlement) {
   return [...new Set<string>(payload?.available_dates || state.settlementAvailableDates || [])]
     .filter(Boolean)
     .sort((a, b) => b.localeCompare(a));
@@ -192,7 +193,7 @@ function settlementDetailTable(rows: AnyRecord[]) {
   return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
 }
 
-export function renderSettlement(payload: AnyRecord) {
+export function renderSettlement(payload: SettlementDashboard) {
   state.settlement = payload;
   state.settlementShop = payload.selected_shop || "";
   state.settlementAvailableDates = settlementDates(payload);
@@ -243,12 +244,12 @@ async function uploadSettlement(event: SubmitEvent) {
   state.settlementUploadMessage = "";
   const content = await uploadFile.text();
   try {
-    const payload = await request<AnyRecord>("/api/settlement/uploads", {
+    const payload = await request<SettlementUpload>("/api/settlement/uploads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content }),
     });
-    const uploaded = (payload.upload as AnyRecord | undefined)?.file as AnyRecord | undefined;
+    const uploaded = payload.upload?.file;
     state.settlementShop = String(uploaded?.shop_name ?? state.settlementShop);
     state.settlementUploadMessage = `已导入 ${uploaded?.original_name || uploaded?.name || "结算 CSV"}，解析 ${whole(uploaded?.rows)} 行。`;
     showToast(state.settlementUploadMessage, "success");
@@ -269,7 +270,7 @@ export async function loadSettlement() {
     if (state.settlementShop) query.set("shop", state.settlementShop);
     if (state.settlementStartDate) query.set("start_date", state.settlementStartDate);
     if (state.settlementEndDate) query.set("end_date", state.settlementEndDate);
-    const payload = await request<AnyRecord>(`/api/settlement${query.size ? `?${query}` : ""}`);
+    const payload = await request<SettlementDashboard>(`/api/settlement${query.size ? `?${query}` : ""}`);
     renderSettlement(payload);
   } catch (error) {
     if (isApiRequestError(error) && error.status === 401) return showLogin();
