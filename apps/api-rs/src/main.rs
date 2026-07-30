@@ -46,10 +46,17 @@ use tower_http::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod accounts;
 mod collection;
 mod error;
 mod state;
 
+#[cfg(test)]
+use accounts::{
+    ChangePasswordPayload, CreateUserPayload, change_password, create_user, list_users, remove_user,
+};
+#[cfg(not(test))]
+use accounts::{change_password, create_user, list_users, remove_user};
 #[cfg(test)]
 use collection::{
     CollectionRunPayload, validate_collection_date_at, validate_collection_modules,
@@ -109,19 +116,6 @@ struct MeResponse {
     username: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChangePasswordPayload {
-    current_password: String,
-    new_password: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateUserPayload {
-    username: String,
-    password: String,
-    role: String,
 }
 
 fn default_role() -> String {
@@ -453,162 +447,6 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<Va
     }
 }
 
-async fn change_password(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(payload): Json<ChangePasswordPayload>,
-) -> Result<Json<Value>, ApiError> {
-    let (username, _) = authorized_user(&state.auth_pool, &headers, None).await?;
-    validate_password(&payload.new_password).map_err(ApiError::bad_request)?;
-    let stored_hash: String =
-        sqlx::query_scalar("SELECT password_hash FROM users WHERE username = ?")
-            .bind(&username)
-            .fetch_one(&*state.auth_pool)
-            .await
-            .map_err(|error| ApiError::internal(error.into()))?;
-    if !verify_password(&payload.current_password, &stored_hash) {
-        return Err(ApiError::client(
-            StatusCode::BAD_REQUEST,
-            "INVALID_PASSWORD",
-            "当前密码错误",
-        ));
-    }
-    let new_hash = hash_password(&payload.new_password).map_err(ApiError::internal)?;
-    sqlx::query("UPDATE users SET password_hash = ?, password_changed_at = ? WHERE username = ?")
-        .bind(new_hash)
-        .bind(now_string())
-        .bind(&username)
-        .execute(&*state.auth_pool)
-        .await
-        .map_err(|error| ApiError::internal(error.into()))?;
-
-    if let Some(token) = session_token(&headers) {
-        sqlx::query("DELETE FROM sessions WHERE username = ? AND token_hash != ?")
-            .bind(&username)
-            .bind(token_hash(&token))
-            .execute(&*state.auth_pool)
-            .await
-            .map_err(|error| ApiError::internal(error.into()))?;
-    }
-    Ok(api(json!({ "message": "密码已更新" })))
-}
-
-async fn list_users(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let rows = sqlx::query(
-        "SELECT username, role, created_at, password_changed_at FROM users ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, username",
-    )
-    .fetch_all(&*state.auth_pool)
-    .await
-    .map_err(|error| ApiError::internal(error.into()))?;
-    let users = rows
-        .into_iter()
-        .map(|row| {
-            json!({
-                "username": row.get::<String, _>("username"),
-                "role": row.get::<String, _>("role"),
-                "created_at": row.get::<String, _>("created_at"),
-                "password_changed_at": row.get::<Option<String>, _>("password_changed_at"),
-            })
-        })
-        .collect::<Vec<_>>();
-    Ok(api(json!({ "users": users })))
-}
-
-async fn create_user(
-    State(state): State<AppState>,
-    Json(payload): Json<CreateUserPayload>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let username = validate_username(&payload.username)
-        .map_err(ApiError::bad_request)?
-        .to_string();
-    validate_password(&payload.password).map_err(ApiError::bad_request)?;
-    let role = payload.role.trim();
-    if !matches!(role, "admin" | "viewer") {
-        return Err(ApiError::client(
-            StatusCode::BAD_REQUEST,
-            "INVALID_ROLE",
-            "角色必须为 admin 或 viewer",
-        ));
-    }
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE username = ?)")
-        .bind(&username)
-        .fetch_one(&*state.auth_pool)
-        .await
-        .map_err(|error| ApiError::internal(error.into()))?;
-    if exists {
-        return Err(ApiError::client(
-            StatusCode::CONFLICT,
-            "USER_EXISTS",
-            "用户名已存在",
-        ));
-    }
-    let created_at = now_string();
-    sqlx::query(
-        "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-    )
-    .bind(&username)
-    .bind(hash_password(&payload.password).map_err(ApiError::internal)?)
-    .bind(role)
-    .bind(&created_at)
-    .execute(&*state.auth_pool)
-    .await
-    .map_err(|error| ApiError::internal(error.into()))?;
-    Ok((
-        StatusCode::CREATED,
-        api(json!({ "user": { "username": username, "role": role, "created_at": created_at } })),
-    ))
-}
-
-async fn remove_user(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumPath(username): AxumPath<String>,
-) -> Result<Json<Value>, ApiError> {
-    let (current_username, _) = authorized_user(&state.auth_pool, &headers, Some("admin")).await?;
-    let username = validate_username(&username)
-        .map_err(ApiError::bad_request)?
-        .to_string();
-    if username == current_username {
-        return Err(ApiError::client(
-            StatusCode::BAD_REQUEST,
-            "CANNOT_DELETE_CURRENT_USER",
-            "不能删除当前登录账户",
-        ));
-    }
-    let role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE username = ?")
-        .bind(&username)
-        .fetch_optional(&*state.auth_pool)
-        .await
-        .map_err(|error| ApiError::internal(error.into()))?;
-    let Some(role) = role else {
-        return Err(ApiError::client(
-            StatusCode::NOT_FOUND,
-            "USER_NOT_FOUND",
-            "用户不存在",
-        ));
-    };
-    if role == "admin" {
-        let admin_count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
-                .fetch_one(&*state.auth_pool)
-                .await
-                .map_err(|error| ApiError::internal(error.into()))?;
-        if admin_count <= 1 {
-            return Err(ApiError::client(
-                StatusCode::BAD_REQUEST,
-                "LAST_ADMIN",
-                "必须至少保留一个管理员账户",
-            ));
-        }
-    }
-    sqlx::query("DELETE FROM users WHERE username = ?")
-        .bind(&username)
-        .execute(&*state.auth_pool)
-        .await
-        .map_err(|error| ApiError::internal(error.into()))?;
-    Ok(api(json!({ "deleted": username })))
-}
-
 async fn require_auth(State(state): State<AppState>, request: Request, next: Next) -> Response {
     match authorized_user(&state.auth_pool, request.headers(), None).await {
         Ok(_) => next.run(request).await,
@@ -655,7 +493,7 @@ async fn csrf_protection(State(state): State<AppState>, request: Request, next: 
     next.run(request).await
 }
 
-async fn authorized_user(
+pub(crate) async fn authorized_user(
     pool: &StoragePool,
     headers: &HeaderMap,
     required_role: Option<&str>,
@@ -736,7 +574,7 @@ async fn import_legacy_users(pool: &StoragePool, paths: &RuntimePaths) -> Result
     Ok(())
 }
 
-fn verify_password(password: &str, stored_hash: &str) -> bool {
+pub(crate) fn verify_password(password: &str, stored_hash: &str) -> bool {
     if is_legacy_password_hash(stored_hash) {
         let Some((salt, expected)) = stored_hash.split_once('$') else {
             return false;
@@ -761,7 +599,7 @@ fn is_legacy_password_hash(value: &str) -> bool {
     })
 }
 
-fn hash_password(password: &str) -> Result<String> {
+pub(crate) fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     Ok(Argon2::default()
         .hash_password(password.as_bytes(), &salt)
@@ -777,7 +615,7 @@ fn normalize_role(role: &str) -> &'static str {
     }
 }
 
-fn validate_password(password: &str) -> Result<()> {
+pub(crate) fn validate_password(password: &str) -> Result<()> {
     if password.chars().count() < 12 {
         anyhow::bail!("密码至少需要 12 个字符");
     }
@@ -787,7 +625,7 @@ fn validate_password(password: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_username(username: &str) -> Result<&str> {
+pub(crate) fn validate_username(username: &str) -> Result<&str> {
     let username = username.trim();
     if username.is_empty() || username.chars().count() > 64 {
         anyhow::bail!("用户名长度必须为 1 到 64 个字符");
@@ -851,7 +689,7 @@ async fn authenticated_user(
     Ok(Some((row.get("username"), row.get("role"))))
 }
 
-fn session_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::COOKIE)
         .and_then(|value| value.to_str().ok())
@@ -863,7 +701,7 @@ fn session_token(headers: &HeaderMap) -> Option<String> {
         })
 }
 
-fn token_hash(token: &str) -> String {
+pub(crate) fn token_hash(token: &str) -> String {
     format!("{:x}", Sha256::digest(token.as_bytes()))
 }
 
