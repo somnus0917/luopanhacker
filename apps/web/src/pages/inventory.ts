@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { escapeHtml, money, number, whole } from "../format";
+import { escapeHtml, number, settlementMoney, whole } from "../format";
 import { state } from "../state";
 import type { AnyRecord } from "../state";
 import { showLogin } from "./account";
@@ -18,6 +18,10 @@ function inventoryDays(value) {
 
 function coverageDays(value) {
   return value === null || value === undefined ? "—" : `${Math.ceil(number(value))} 天`;
+}
+
+function costMoney(value) {
+  return value === null || value === undefined ? "—" : settlementMoney(value);
 }
 
 const INVENTORY_HEALTH_ORDER = ["out_of_stock", "urgent", "replenish", "healthy", "high", "overstock", "no_movement", "unavailable"];
@@ -85,6 +89,7 @@ function inventorySummary(rows) {
   const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== undefined && number(row.sales_7d) > 0);
   const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
   const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);
+  const costRows = rows.filter((row) => row.cost_covered);
   return {
     sku_records: rows.length,
     distinct_skus: new Set(rows.map((row) => row.spec_no).filter(Boolean)).size,
@@ -100,6 +105,10 @@ function inventorySummary(rows) {
     replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
     no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
     overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
+    cost_covered_records: costRows.length,
+    cost_coverage_rate: rows.length ? costRows.length / rows.length : null,
+    stock_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.stock_cost_amount), 0) : null,
+    available_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.available_cost_amount), 0) : null,
   };
 }
 
@@ -141,12 +150,12 @@ function inventoryTable(rows, mode = "detail") {
   }));
   const columnConfigs = mode === "replenish"
     ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }]
-    : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
+    : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "成本单价", key: "cost_price" }, { label: "库存成本", key: "stock_cost_amount" }, { label: "可售库存成本", key: "available_cost_amount" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
   const sorted = sortRows(rowsWithTurnover, state.inventorySortKey, state.inventorySortDir);
   const visible = sorted.slice(0, 200);
   const body = visible.map((item) => {
     const shared = [healthPill(item), item.warehouse_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.replenish_qty), whole(item.inbound_30d)];
-    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
+    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), item.cost_covered ? costMoney(item.cost_price) : "—", costMoney(item.stock_cost_amount), costMoney(item.available_cost_amount), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
     return `<tr class="${number(item.available_num) < 0 ? "inventory-alert" : ""}">${cells.map((cell, index) => `<td>${index === 0 ? cell : escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
   const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
@@ -180,8 +189,10 @@ export function renderInventory(payload, view = state.inventoryView) {
   const health = inventoryHealth(rows);
   const salesTrend = inventorySalesTrend(payload);
   $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
+  const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
   const metrics = [
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
+    ["已覆盖库存成本", costMoney(summary.stock_cost_amount), costCoverage, summary.cost_coverage_rate !== 1 ? "attention" : ""],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
     ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
     ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
@@ -189,7 +200,7 @@ export function renderInventory(payload, view = state.inventoryView) {
     ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录", "attention"],
     ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"],
   ];
-  const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
+  const cards = `<div class="metric-grid eight">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
   const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
   const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;

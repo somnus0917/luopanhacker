@@ -14,7 +14,7 @@ use chrono::{Datelike, Local, NaiveDate};
 use fs2::FileExt;
 use luopan_channels::load_channel_dashboard;
 use luopan_inventory::load_inventory_dashboard;
-use luopan_jobs::{progress_log_tail, status_payload, write_task_status};
+use luopan_jobs::{clear_progress_log, progress_log_tail, status_payload, write_task_status};
 use luopan_operations::load_operations_records;
 use luopan_orders::{
     UploadedWorkbook, commit_preview, delete_batch, preview_upload, public_imports,
@@ -230,6 +230,10 @@ async fn main() -> Result<()> {
         )
         .route("/api/scrape", post(scrape))
         .route("/api/collection/run", post(run_collection))
+        .route(
+            "/api/collection/terminal",
+            delete(clear_collection_terminal),
+        )
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/users/{username}", delete(remove_user))
         .layer(DefaultBodyLimit::max(ADMIN_UPLOAD_LIMIT_BYTES))
@@ -1202,6 +1206,17 @@ async fn status_log_tail(State(state): State<AppState>) -> Result<Json<Value>, A
         .map_err(ApiError::internal)?
         .unwrap_or_default();
     Ok(Json(json!({ "path": path, "terminal_output": tail })))
+}
+
+async fn clear_collection_terminal(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    clear_progress_log(&state.paths).map_err(ApiError::internal)?;
+    let status =
+        status_payload(&state.paths, &state.novnc_url, true).map_err(ApiError::internal)?;
+    Ok(Json(json!({
+        "cleared": true,
+        "message": "采集终端数据已清除",
+        "status": status,
+    })))
 }
 
 async fn storage_summary(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

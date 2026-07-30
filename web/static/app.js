@@ -909,6 +909,9 @@ function inventoryDays(value) {
 function coverageDays(value) {
   return value === null || value === void 0 ? "—" : `${Math.ceil(number(value))} 天`;
 }
+function costMoney(value) {
+  return value === null || value === void 0 ? "—" : settlementMoney(value);
+}
 const INVENTORY_HEALTH_ORDER = ["out_of_stock", "urgent", "replenish", "healthy", "high", "overstock", "no_movement", "unavailable"];
 const INVENTORY_HEALTH_NAMES = {
   out_of_stock: "已缺货",
@@ -967,6 +970,7 @@ function inventorySummary(rows) {
   const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== void 0 && number(row.sales_7d) > 0);
   const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
   const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);
+  const costRows = rows.filter((row) => row.cost_covered);
   return {
     sku_records: rows.length,
     distinct_skus: new Set(rows.map((row) => row.spec_no).filter(Boolean)).size,
@@ -981,7 +985,11 @@ function inventorySummary(rows) {
     average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
     replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
     no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
-    overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length
+    overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
+    cost_covered_records: costRows.length,
+    cost_coverage_rate: rows.length ? costRows.length / rows.length : null,
+    stock_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.stock_cost_amount), 0) : null,
+    available_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.available_cost_amount), 0) : null
   };
 }
 function inventorySalesTrend(payload) {
@@ -1015,12 +1023,12 @@ function inventoryTable(rows, mode = "detail") {
     ...item,
     inventory_turnover_days: number(item.sales_7d) ? number(item.stock_num) / (number(item.sales_7d) / 7) : null
   }));
-  const columnConfigs = mode === "replenish" ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }] : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
+  const columnConfigs = mode === "replenish" ? [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "建议补货", key: "replenish_qty" }, { label: "近 30 天入库", key: "inbound_30d" }] : [{ label: "状态", key: "" }, { label: "仓库", key: "" }, { label: "品牌", key: "" }, { label: "货品", key: "" }, { label: "商家编码", key: "" }, { label: "可发库存", key: "available_num" }, { label: "成本单价", key: "cost_price" }, { label: "库存成本", key: "stock_cost_amount" }, { label: "可售库存成本", key: "available_cost_amount" }, { label: "近 7 天出库", key: "sales_7d" }, { label: "预计可售", key: "coverage_days" }, { label: "周转天数", key: "inventory_turnover_days" }, { label: "近 30 天入库", key: "inbound_30d" }, { label: "最后出入库", key: "" }];
   const sorted = sortRows(rowsWithTurnover, state.inventorySortKey, state.inventorySortDir);
   const visible = sorted.slice(0, 200);
   const body = visible.map((item) => {
     const shared = [healthPill(item), item.warehouse_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), whole(item.replenish_qty), whole(item.inbound_30d)];
-    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
+    const cells = mode === "replenish" ? shared : [healthPill(item), item.warehouse_name, item.brand_name, item.goods_name, item.spec_no, whole(item.available_num), item.cost_covered ? costMoney(item.cost_price) : "—", costMoney(item.stock_cost_amount), costMoney(item.available_cost_amount), whole(item.sales_7d), coverageDays(item.coverage_days), inventoryDays(item.inventory_turnover_days), whole(item.inbound_30d), item.last_inout_time || "—"];
     return `<tr class="${number(item.available_num) < 0 ? "inventory-alert" : ""}">${cells.map((cell, index) => `<td>${index === 0 ? cell : escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
   const notice = total > 200 ? `<p class="table-truncate-note">共 ${whole(total)} 条，当前显示前 200 条，可通过筛选缩小范围</p>` : "";
@@ -1050,8 +1058,10 @@ function renderInventory(payload, view = state.inventoryView) {
   const health = inventoryHealth(rows);
   const salesTrend = inventorySalesTrend(payload);
   $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
+  const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
   const metrics = [
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
+    ["已覆盖库存成本", costMoney(summary.stock_cost_amount), costCoverage, summary.cost_coverage_rate !== 1 ? "attention" : ""],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
     ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
     ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
@@ -1059,7 +1069,7 @@ function renderInventory(payload, view = state.inventoryView) {
     ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录", "attention"],
     ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"]
   ];
-  const cards = `<div class="metric-grid seven">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
+  const cards = `<div class="metric-grid eight">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
   const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
   const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
@@ -1335,12 +1345,49 @@ async function loadSettlement() {
   }
 }
 let statusRefreshTimer = null;
+let previousTerminalOutput = "";
+let terminalUnreadLines = 0;
+function terminalOutput(status) {
+  return typeof status.terminal_output === "string" ? status.terminal_output : "";
+}
+function terminalAtBottom(terminal) {
+  return terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 24;
+}
+function terminalViewport() {
+  const terminal = $("[data-collection-terminal]");
+  if (!terminal) return null;
+  return { scrollTop: terminal.scrollTop, atBottom: terminalAtBottom(terminal) };
+}
+function addedTerminalLines(previous, next) {
+  if (!previous || !next || previous === next) return 0;
+  const appended = next.startsWith(previous) ? next.slice(previous.length) : next;
+  return appended.split("\n").filter(Boolean).length;
+}
 function statusTerminal(status, logMessage) {
-  if (typeof status.terminal_output === "string" && status.terminal_output) {
-    const lineCount = status.terminal_output.split("\n").length;
-    return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><small>最近 ${escapeHtml(String(lineCount))} 行</small></div><pre>${escapeHtml(status.terminal_output)}</pre></div>`;
+  const output = terminalOutput(status);
+  if (output) {
+    const lineCount = output.split("\n").length;
+    const follow = terminalUnreadLines ? `<button class="status-log-follow" type="button" data-terminal-follow>有 ${escapeHtml(String(terminalUnreadLines))} 条新输出 · 回到底部</button>` : "";
+    return `<div class="status-log"><div class="status-log-head"><span>采集终端输出</span><div class="status-log-meta"><small>最近 ${escapeHtml(String(lineCount))} 行</small>${follow}</div></div><pre data-collection-terminal>${escapeHtml(output)}</pre></div>`;
   }
   return `<p class="status-log-empty">${escapeHtml(logMessage || "当前还没有采集终端输出。")}</p>`;
+}
+function restoreTerminalViewport(viewport) {
+  const terminal = $("[data-collection-terminal]");
+  if (!terminal) return;
+  if (!viewport || viewport.atBottom) terminal.scrollTop = terminal.scrollHeight;
+  else terminal.scrollTop = Math.min(viewport.scrollTop, Math.max(0, terminal.scrollHeight - terminal.clientHeight));
+  terminal.addEventListener("scroll", () => {
+    if (terminalAtBottom(terminal)) {
+      terminalUnreadLines = 0;
+      $("[data-terminal-follow]")?.remove();
+    }
+  });
+  $("[data-terminal-follow]")?.addEventListener("click", () => {
+    terminalUnreadLines = 0;
+    terminal.scrollTop = terminal.scrollHeight;
+    $("[data-terminal-follow]")?.remove();
+  });
 }
 function collectionModuleCard(name, title, description, status) {
   const result = status.modules?.[name] || {};
@@ -1369,6 +1416,13 @@ function collectionShopOptions() {
 function renderCollectionCenter(status, { logMessage = "" } = {}) {
   const slot = $("#collection-center");
   if (!slot) return;
+  const viewport = terminalViewport();
+  const output = terminalOutput(status);
+  const newLines = addedTerminalLines(previousTerminalOutput, output);
+  if (!output) terminalUnreadLines = 0;
+  else if (!viewport || viewport.atBottom) terminalUnreadLines = 0;
+  else terminalUnreadLines += newLines;
+  previousTerminalOutput = output;
   state.status = status;
   const online = Boolean(status.collector_online);
   const busy = Boolean(status.job_running || status.request_pending) || ["manual_requested", "waiting_random", "running"].includes(status.state);
@@ -1411,7 +1465,9 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
       <p>状态更新时间：${escapeHtml(status.updated_at || "—")} · 请求模块：${escapeHtml((status.requested_modules || []).join("、") || "—")}${status.requested_date ? ` · 补采日期：${escapeHtml(status.requested_date)}` : ""}${status.requested_shops?.length ? ` · 指定店铺：${escapeHtml(status.requested_shops.join("、"))}` : ""}</p>
       ${status.last_error ? `<p class="collection-error">${escapeHtml(status.last_error)}</p>` : ""}
       ${statusTerminal(status, logMessage)}
+      ${isAdmin() ? `<div class="status-actions"><button id="collection-clear-terminal-button" class="button" type="button">清除终端数据</button></div>` : ""}
     </div></details>`;
+  restoreTerminalViewport(viewport);
   $$("[data-collection-module]", slot).forEach((input) => input.addEventListener("change", () => {
     if (input.checked) state.collectionModules.add(input.dataset.collectionModule);
     else state.collectionModules.delete(input.dataset.collectionModule);
@@ -1428,6 +1484,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
   });
   $("#collection-run-button")?.addEventListener("click", startCollection);
   $("#collection-backfill-button")?.addEventListener("click", startHistoricalCollection);
+  $("#collection-clear-terminal-button")?.addEventListener("click", clearCollectionTerminal);
 }
 async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer);
@@ -1483,6 +1540,27 @@ async function startHistoricalCollection() {
   showToast(state.collectionMessage, response.ok ? "success" : "error");
   if (payload.status) renderCollectionCenter(payload.status);
   window.setTimeout(refreshCollectionStatus, 700);
+}
+async function clearCollectionTerminal() {
+  if (!window.confirm("确定清除采集终端数据吗？这不会影响已经采集的数据或任务状态；任务运行中时，后续输出仍会继续写入。")) return;
+  const button = $("#collection-clear-terminal-button");
+  button.disabled = true;
+  button.textContent = "正在清除…";
+  try {
+    const response = await fetch("/api/collection/terminal", { method: "DELETE" });
+    if (response.status === 401) return showLogin();
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "终端数据清除失败");
+    previousTerminalOutput = "";
+    terminalUnreadLines = 0;
+    state.collectionMessage = payload.message || "采集终端数据已清除";
+    showToast(state.collectionMessage, "success");
+    renderCollectionCenter(payload.status || {});
+  } catch (error) {
+    state.collectionMessage = error.message || "终端数据清除失败";
+    showToast(state.collectionMessage, "error");
+    renderCollectionCenter(state.status || {});
+  }
 }
 function stopCollectionStatusRefresh() {
   window.clearTimeout(statusRefreshTimer);
