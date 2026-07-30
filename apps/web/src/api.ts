@@ -6,7 +6,7 @@ export type ApiError = {
 type ApiEnvelope = {
   data: unknown;
   error: ApiError | null;
-  meta: { request_id: string; source?: string; fallback?: boolean; updated_at?: string };
+  meta: { request_id: string; source?: string; fallback?: boolean; updated_at?: string | Record<string, string> };
 };
 
 function isEnvelope(payload: unknown): payload is ApiEnvelope {

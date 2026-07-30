@@ -102,7 +102,7 @@ dashboard_port="${dashboard_port:-8501}"
 dashboard_ready=false
 collector_ready=false
 for _ in $(seq 1 30); do
-  if curl --fail --silent --max-time 2 "http://127.0.0.1:${dashboard_port}/healthz" >/dev/null; then
+  if curl --fail --silent --max-time 2 "http://127.0.0.1:${dashboard_port}/readyz" >/dev/null; then
     dashboard_ready=true
   fi
   if [[ -f "${DATA_DIR}/output/collection/heartbeat.json" ]] && \

@@ -53,16 +53,27 @@ use collection::{
     clear_collection_terminal, collection_shops, run_collection, scrape, status, status_log_tail,
     status_raw,
 };
-use error::{ApiError, api, api_with_meta, request_id as error_request_id};
+use error::{ApiError, api, api_with_meta, generate_request_id};
 use state::{AppState, SecurityConfig};
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
 const SESSION_LIFETIME_SECONDS: i64 = 24 * 60 * 60;
 const SESSION_IDLE_TIMEOUT_SECONDS: i64 = 30 * 60;
+const SESSION_LAST_SEEN_WRITE_INTERVAL_SECONDS: i64 = 5 * 60;
 const LOGIN_FAILURE_LIMIT: i64 = 5;
 const LOGIN_FAILURE_WINDOW_SECONDS: i64 = 15 * 60;
 const LOGIN_LOCKOUT_SECONDS: i64 = 15 * 60;
 const ADMIN_UPLOAD_LIMIT_BYTES: usize = 32 * 1024 * 1024;
+
+tokio::task_local! {
+    static REQUEST_ID: String;
+}
+
+fn current_request_id() -> String {
+    REQUEST_ID
+        .try_with(Clone::clone)
+        .unwrap_or_else(|_| generate_request_id())
+}
 
 #[derive(Debug, Deserialize)]
 struct LoginPayload {
@@ -311,11 +322,13 @@ async fn request_logging(request: Request, next: Next) -> Response {
         .and_then(|value| value.to_str().ok())
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(error_request_id);
+        .unwrap_or_else(generate_request_id);
     let route = request.uri().path().to_string();
     let method = request.method().clone();
     let started = Instant::now();
-    let mut response = next.run(request).await;
+    let mut response = REQUEST_ID
+        .scope(request_id.clone(), next.run(request))
+        .await;
     response
         .headers_mut()
         .entry("x-request-id")
@@ -820,9 +833,10 @@ async fn authenticated_user(
     let Some(row) = row else {
         return Ok(None);
     };
-    sqlx::query("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?")
+    sqlx::query("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ? AND last_seen_at < ?")
         .bind(now)
         .bind(token_hash(&token))
+        .bind(now - SESSION_LAST_SEEN_WRITE_INTERVAL_SECONDS)
         .execute(pool)
         .await?;
     Ok(Some((row.get("username"), row.get("role"))))
@@ -939,6 +953,35 @@ pub(crate) fn now_string() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
+fn payload_updated_at(value: &Value) -> String {
+    let record_timestamp = value
+        .get("records")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|record| record.get("captured_at").and_then(Value::as_str))
+        .max()
+        .map(ToOwned::to_owned);
+    record_timestamp
+        .or_else(|| {
+            ["captured_at", "updated_at", "generated_at"]
+                .into_iter()
+                .filter_map(|key| value.get(key).and_then(Value::as_str))
+                .next()
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(now_string)
+}
+
+fn operations_updated_at(records: &[luopan_operations::OperationRecord]) -> String {
+    records
+        .iter()
+        .map(|record| record.captured_at.as_str())
+        .max()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(now_string)
+}
+
 async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     if let Some(pool) = &state.storage_pool {
         match kv_value_with_updated_at(pool, "inventory_dashboard").await {
@@ -958,12 +1001,15 @@ async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value
     }
 
     match load_inventory_dashboard(&state.paths).map_err(ApiError::internal)? {
-        Some(value) => Ok(api_with_meta(
-            value,
-            "json",
-            state.storage_pool.is_some(),
-            now_string(),
-        )),
+        Some(value) => {
+            let updated_at = payload_updated_at(&value);
+            Ok(api_with_meta(
+                value,
+                "json",
+                state.storage_pool.is_some(),
+                updated_at,
+            ))
+        }
         None => Err(ApiError::client(
             StatusCode::NOT_FOUND,
             "INVENTORY_NOT_FOUND",
@@ -996,11 +1042,13 @@ async fn load_channel_payload(state: &AppState) -> Result<LoadedPayload, ApiErro
             }
         }
     }
+    let value = load_channel_dashboard(&state.paths).map_err(ApiError::internal)?;
+    let updated_at = payload_updated_at(&value);
     Ok(LoadedPayload {
-        value: load_channel_dashboard(&state.paths).map_err(ApiError::internal)?,
+        value,
         source: "json",
         fallback: state.storage_pool.is_some(),
-        updated_at: now_string(),
+        updated_at,
     })
 }
 
@@ -1042,6 +1090,7 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
             false,
         )
     };
+    let records_updated_at = operations_updated_at(&records);
     let channel = load_channel_payload(&state).await?;
     let source = if records_source == channel.source {
         records_source
@@ -1056,7 +1105,11 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
         }),
         source,
         records_fallback || channel.fallback,
-        channel.updated_at,
+        if source == "mixed" {
+            json!({ "operations": records_updated_at, "channel": channel.updated_at })
+        } else {
+            json!(records_updated_at.max(channel.updated_at))
+        },
     ))
 }
 
@@ -1513,6 +1566,29 @@ mod tests {
         assert_eq!(payload["error"]["message"], "服务器内部错误");
         assert!(!payload["error"].to_string().contains("secret"));
         assert!(payload["meta"]["request_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn api_envelopes_and_errors_share_the_request_context_id() {
+        REQUEST_ID
+            .scope("request-id-under-test".to_string(), async {
+                let success = api(json!({ "ok": true }));
+                assert_eq!(success.0["meta"]["request_id"], "request-id-under-test");
+
+                let response =
+                    ApiError::client(StatusCode::BAD_REQUEST, "INVALID_REQUEST", "请求无效")
+                        .into_response();
+                assert_eq!(
+                    response.headers().get("x-request-id").unwrap(),
+                    "request-id-under-test"
+                );
+                let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                let payload: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(payload["meta"]["request_id"], "request-id-under-test");
+            })
+            .await;
     }
 
     #[tokio::test]

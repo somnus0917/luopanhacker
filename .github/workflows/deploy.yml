@@ -15,8 +15,31 @@ permissions:
   contents: read
 
 jobs:
+  verify-main-head:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.verify.outputs.should_deploy }}
+    steps:
+      - id: verify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest_sha="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main | awk '{print $1}')"
+          if [[ "$VALIDATED_SHA" == "$latest_sha" ]]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping stale CI result: validated=$VALIDATED_SHA current_main=$latest_sha"
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    needs: verify-main-head
+    if: needs.verify-main-head.outputs.should_deploy == 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     environment: production
     steps:

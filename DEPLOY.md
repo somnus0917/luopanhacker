@@ -28,7 +28,7 @@ docker compose up -d
 ### 3. 访问服务
 
 - **noVNC 网页远程桌面**: `http://YOUR_SERVER_IP:6080`
-- **数据看板**: `http://YOUR_SERVER_IP:8501`
+- **数据看板**: 生产环境通过 HTTPS 反向代理访问，例如 `https://YOUR_DOMAIN`
 
 Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预先存在的外部 Docker 网络。正式部署脚本会在共享 `proxy` 网络存在时自动把容器接入该网络，供 Caddy 等容器反向代理使用。只有配置了防火墙或额外认证时才应设置 `LUOPAN_HOST_BIND=0.0.0.0`。
 
@@ -60,7 +60,7 @@ docker exec -it douyin-compass-collector bash
 
 ### 3. 查看查看板
 
-打开浏览器访问: `http://YOUR_SERVER_IP:8501`
+打开浏览器访问生产反向代理地址，例如：`https://YOUR_DOMAIN`
 
 ## 定时任务
 
@@ -144,13 +144,11 @@ docker compose up -d
 
 ### 修改抓取店铺
 
-编辑 `apps/scraper_py/scraper.py` 中的 `TARGET_SHOPS` 变量：
+编辑本地店铺配置（不会提交到仓库）：
 
-```python
-TARGET_SHOPS = (
-    "店铺 A",
-    "店铺 B",
-)
+```bash
+cp config/shops.example.json config/shops.local.json
+# 编辑 config/shops.local.json 中的 shops 数组
 ```
 
 ### Rust 迁移开关
@@ -215,7 +213,7 @@ curl -s http://127.0.0.1:8501/api/storage/summary
 
 ```bash
 docker exec -it douyin-compass luopan-worker-rs doctor
-curl -s http://127.0.0.1:8501/api/diagnostics
+curl --fail http://127.0.0.1:8501/readyz
 
 # doctor 默认将经营数据源与 SQLite 超过 36 小时未更新视为过期；
 # 可通过环境变量调整阈值。

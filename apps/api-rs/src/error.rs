@@ -17,7 +17,7 @@ pub(crate) struct ApiError {
 
 impl ApiError {
     pub(crate) fn internal(error: anyhow::Error) -> Self {
-        let request_id = request_id();
+        let request_id = crate::current_request_id();
         tracing::error!(%request_id, error = %error, "internal API error");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -44,7 +44,7 @@ impl ApiError {
             status,
             code,
             message: message.into(),
-            request_id: request_id(),
+            request_id: crate::current_request_id(),
         }
     }
 }
@@ -69,7 +69,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-pub(crate) fn request_id() -> String {
+pub(crate) fn generate_request_id() -> String {
     let mut bytes = [0_u8; 12];
     OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -83,12 +83,12 @@ pub(crate) fn api_with_meta(
     data: impl Serialize,
     source: &str,
     fallback: bool,
-    updated_at: String,
+    updated_at: impl Serialize,
 ) -> Json<Value> {
     Json(json!({
         "data": data,
         "error": Value::Null,
-        "meta": { "request_id": request_id(), "source": source, "fallback": fallback, "updated_at": updated_at },
+        "meta": { "request_id": crate::current_request_id(), "source": source, "fallback": fallback, "updated_at": updated_at },
     }))
 }
 

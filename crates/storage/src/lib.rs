@@ -18,6 +18,17 @@ pub async fn connect(paths: &RuntimePaths) -> Result<SqlitePool> {
     let url = format!("sqlite://{}?mode=rwc", paths.storage_db_path().display());
     SqlitePoolOptions::new()
         .max_connections(5)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("PRAGMA foreign_keys = ON")
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("PRAGMA busy_timeout = 5000")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(&url)
         .await
         .with_context(|| format!("connect {}", paths.storage_db_path().display()))
