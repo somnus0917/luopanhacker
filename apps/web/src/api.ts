@@ -16,10 +16,6 @@ type ApiEnvelope = {
   meta: ApiMeta;
 };
 
-// Compatibility only: legacy pages will be migrated to request<T> incrementally.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type LegacyResponse = { ok: boolean; status: number; json: () => Promise<any> };
-
 export class ApiRequestError extends Error {
   constructor(
     message: string,
@@ -68,25 +64,4 @@ export async function request<T>(input: RequestInfo | URL, init?: RequestInit): 
     );
   }
   return payload.data as T;
-}
-
-/** @deprecated Migrate callers to request<T>; retained only while legacy pages are converted. */
-export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<LegacyResponse> {
-  try {
-    const data = await request<unknown>(input, init);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => data,
-    };
-  } catch (error) {
-    if (isApiRequestError(error)) {
-      return {
-        ok: false,
-        status: error.status,
-        json: async () => ({ error: error.message, error_code: error.code, request_id: error.requestId }),
-      };
-    }
-    throw error;
-  }
 }

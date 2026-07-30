@@ -92,25 +92,6 @@ async function request(input, init) {
   }
   return payload.data;
 }
-async function apiFetch(input, init) {
-  try {
-    const data = await request(input, init);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => data
-    };
-  } catch (error) {
-    if (isApiRequestError(error)) {
-      return {
-        ok: false,
-        status: error.status,
-        json: async () => ({ error: error.message, error_code: error.code, request_id: error.requestId })
-      };
-    }
-    throw error;
-  }
-}
 let toastTimer;
 function showToast(message, tone = "info") {
   const region = $("#toast-region");
@@ -520,9 +501,12 @@ function renderOrderImportPanel() {
   $$("[data-delete-order-import]").forEach((button) => button.addEventListener("click", () => deleteOrderImport(button.dataset.deleteOrderImport)));
 }
 async function loadOrderImports() {
-  const response = await apiFetch("/api/orders/imports");
-  if (response.status === 401) return showLogin();
-  state.orderImports = await response.json();
+  try {
+    state.orderImports = await request("/api/orders/imports");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.orderImportMessage = errorMessage(error, "订单导入记录读取失败。");
+  }
   renderOrderImportPanel();
 }
 async function previewOrderImport(event) {
@@ -533,38 +517,40 @@ async function previewOrderImport(event) {
   button.disabled = true;
   button.textContent = "正在解析…";
   state.orderImportMessage = "";
-  const response = await apiFetch("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.orderImportMessage = payload.error || "文件解析失败，请检查格式后重试。";
-  } else {
-    state.orderPreview = payload;
+  try {
+    state.orderPreview = await request("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget) });
     state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
+    showToast(state.orderImportMessage, "success");
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "文件解析失败，请检查格式后重试。");
+    showToast(state.orderImportMessage, "error");
   }
-  showToast(state.orderImportMessage, response.ok ? "success" : "error");
   renderOrderImportPanel();
 }
 async function commitOrderImport() {
   if (!state.orderPreview?.preview_token) return;
-  const response = await apiFetch("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.orderImportMessage = payload.error || "写入失败，请重新预览。";
+  try {
+    const payload = await request("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
+    state.orderPreview = null;
+    state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
+    showToast(state.orderImportMessage, "success");
+    await Promise.all([loadCompass(), loadOrderImports()]);
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "写入失败，请重新预览。");
     showToast(state.orderImportMessage, "error");
     renderOrderImportPanel();
-    return;
   }
-  state.orderPreview = null;
-  state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
-  showToast(state.orderImportMessage, "success");
-  await Promise.all([loadCompass(), loadOrderImports()]);
 }
 async function deleteOrderImport(batchId) {
   if (!batchId || !window.confirm("撤销后，该批次导入的数据将从经营看板移除。确定继续吗？")) return;
-  const response = await apiFetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
-  const payload = await response.json().catch(() => ({}));
-  state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : payload.error || "撤销失败，请稍后重试。";
-  showToast(state.orderImportMessage, response.ok ? "success" : "error");
+  try {
+    const payload = await request(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+    state.orderImportMessage = `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。`;
+    showToast(state.orderImportMessage, "success");
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "撤销失败，请稍后重试。");
+    showToast(state.orderImportMessage, "error");
+  }
   await Promise.all([loadCompass(), loadOrderImports()]);
 }
 function operatingRatio(value) {
@@ -943,9 +929,13 @@ function renderOperations() {
   if (hoverRecords.length) bindLineChartHover(hoverRecords);
 }
 async function loadChannel() {
-  const response = await apiFetch("/api/channel");
-  if (response.status === 401) return showLogin();
-  state.channel = response.ok ? await response.json().catch(() => ({ records: [] })) : { records: [] };
+  try {
+    state.channel = await request("/api/channel");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.channel = { records: [] };
+    showToast(errorMessage(error, "渠道数据读取失败。"), "error");
+  }
   operationFilterItems("date").forEach((item) => state.operationDates.add(item));
   operationFilterItems("platform").forEach((item) => state.operationPlatforms.add(item));
   operationFilterItems("shop").forEach((item) => state.operationShops.add(item));
@@ -961,20 +951,24 @@ function renderTable(records, content = false) {
   return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
 }
 async function loadCompass() {
-  const response = await apiFetch("/api/compass");
-  if (response.status === 401) return showLogin();
-  const payload = await response.json();
-  state.records = (payload.records || []).map(canonicalOperationRecord);
-  state.channel = payload.channel || null;
-  state.operationDates = new Set(operationFilterItems("date"));
-  state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
-  state.operationCalendarRangeStart = "";
-  state.operationCalendarOpen = false;
-  state.operationPlatforms = new Set(operationFilterItems("platform"));
-  state.operationShops = new Set(operationFilterItems("shop"));
-  state.operationSources = new Set(state.records.map(recordSourceLabel));
-  if (!payload.channel) return loadChannel();
-  renderOperations();
+  try {
+    const payload = await request("/api/compass");
+    state.records = (Array.isArray(payload.records) ? payload.records : []).map((record) => canonicalOperationRecord(record));
+    state.channel = payload.channel ?? null;
+    state.operationDates = new Set(operationFilterItems("date"));
+    state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
+    state.operationCalendarRangeStart = "";
+    state.operationCalendarOpen = false;
+    state.operationPlatforms = new Set(operationFilterItems("platform"));
+    state.operationShops = new Set(operationFilterItems("shop"));
+    state.operationSources = new Set(state.records.map(recordSourceLabel));
+    if (!payload.channel) return loadChannel();
+    renderOperations();
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const target = $("#operations-content");
+    target.innerHTML = `<div class="empty-panel"><strong>经营数据暂不可用</strong><span>${escapeHtml(errorMessage(error, "请检查 API 服务与数据同步状态。"))}</span></div>`;
+  }
 }
 function sortRows(rows, key, dir) {
   if (!key) return rows;
@@ -1390,23 +1384,22 @@ async function uploadSettlement(event) {
   button.textContent = "正在上传…";
   state.settlementUploadMessage = "";
   const content = await uploadFile.text();
-  const response = await apiFetch("/api/settlement/uploads", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content })
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.settlementUploadMessage = response.status === 413 ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。" : payload.error || "结算 CSV 上传失败，请检查文件格式。";
+  try {
+    const payload = await request("/api/settlement/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content })
+    });
+    const uploaded = payload.upload?.file;
+    state.settlementShop = String(uploaded?.shop_name ?? state.settlementShop);
+    state.settlementUploadMessage = `已导入 ${uploaded?.original_name || uploaded?.name || "结算 CSV"}，解析 ${whole(uploaded?.rows)} 行。`;
+    showToast(state.settlementUploadMessage, "success");
+    await loadSettlement();
+  } catch (error) {
+    state.settlementUploadMessage = isApiRequestError(error) && error.status === 413 ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。" : errorMessage(error, "结算 CSV 上传失败，请检查文件格式。");
     showToast(state.settlementUploadMessage, "error");
     if (state.settlement) renderSettlement(state.settlement);
-    return;
   }
-  const uploaded = payload.upload?.file || {};
-  state.settlementShop = uploaded.shop_name || state.settlementShop;
-  state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
-  showToast(state.settlementUploadMessage, "success");
-  await loadSettlement();
 }
 async function loadSettlement() {
   const target = $("#settlement-content");
@@ -1415,13 +1408,11 @@ async function loadSettlement() {
     if (state.settlementShop) query.set("shop", state.settlementShop);
     if (state.settlementStartDate) query.set("start_date", state.settlementStartDate);
     if (state.settlementEndDate) query.set("end_date", state.settlementEndDate);
-    const response = await apiFetch(`/api/settlement${query.size ? `?${query}` : ""}`);
-    if (response.status === 401) return showLogin();
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "结算数据不可用");
+    const payload = await request(`/api/settlement${query.size ? `?${query}` : ""}`);
     renderSettlement(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "请检查 Rust API 与 output/settlement 目录";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const message = errorMessage(error, "请检查 Rust API 与 output/settlement 目录");
     target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }

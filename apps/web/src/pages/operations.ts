@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { apiFetch as fetch } from "../api";
+import { errorMessage, isApiRequestError, request } from "../api";
 import { showToast } from "../feedback";
 import {
   escapeHtml, hasValue, importTime, metricText, money, moneyOrDash, number,
@@ -186,9 +186,12 @@ function renderOrderImportPanel() {
 }
 
 export async function loadOrderImports() {
-  const response = await fetch("/api/orders/imports");
-  if (response.status === 401) return showLogin();
-  state.orderImports = await response.json();
+  try {
+    state.orderImports = await request<typeof state.orderImports>("/api/orders/imports");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.orderImportMessage = errorMessage(error, "订单导入记录读取失败。");
+  }
   renderOrderImportPanel();
 }
 
@@ -200,40 +203,42 @@ async function previewOrderImport(event: SubmitEvent) {
   button.disabled = true;
   button.textContent = "正在解析…";
   state.orderImportMessage = "";
-  const response = await fetch("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.orderImportMessage = payload.error || "文件解析失败，请检查格式后重试。";
-  } else {
-    state.orderPreview = payload;
+  try {
+    state.orderPreview = await request<AnyRecord>("/api/orders/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
     state.orderImportMessage = "预览完成，请核对新增与重复数量后确认写入。";
+    showToast(state.orderImportMessage, "success");
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "文件解析失败，请检查格式后重试。");
+    showToast(state.orderImportMessage, "error");
   }
-  showToast(state.orderImportMessage, response.ok ? "success" : "error");
   renderOrderImportPanel();
 }
 
 async function commitOrderImport() {
   if (!state.orderPreview?.preview_token) return;
-  const response = await fetch("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.orderImportMessage = payload.error || "写入失败，请重新预览。";
+  try {
+    const payload = await request<AnyRecord>("/api/orders/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: state.orderPreview.preview_token }) });
+    state.orderPreview = null;
+    state.orderImportMessage = `已写入 ${whole((payload.batch as AnyRecord | undefined)?.added_orders)} 单订单汇总。`;
+    showToast(state.orderImportMessage, "success");
+    await Promise.all([loadCompass(), loadOrderImports()]);
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "写入失败，请重新预览。");
     showToast(state.orderImportMessage, "error");
     renderOrderImportPanel();
-    return;
   }
-  state.orderPreview = null;
-  state.orderImportMessage = `已写入 ${whole(payload.batch?.added_orders)} 单订单汇总。`;
-  showToast(state.orderImportMessage, "success");
-  await Promise.all([loadCompass(), loadOrderImports()]);
 }
 
 async function deleteOrderImport(batchId: string) {
   if (!batchId || !window.confirm("撤销后，该批次导入的数据将从经营看板移除。确定继续吗？")) return;
-  const response = await fetch(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
-  const payload = await response.json().catch(() => ({}));
-  state.orderImportMessage = response.ok ? `已撤销 ${whole(payload.deleted?.added_orders)} 单导入数据。` : (payload.error || "撤销失败，请稍后重试。");
-  showToast(state.orderImportMessage, response.ok ? "success" : "error");
+  try {
+    const payload = await request<AnyRecord>(`/api/orders/imports/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+    state.orderImportMessage = `已撤销 ${whole((payload.deleted as AnyRecord | undefined)?.added_orders)} 单导入数据。`;
+    showToast(state.orderImportMessage, "success");
+  } catch (error) {
+    state.orderImportMessage = errorMessage(error, "撤销失败，请稍后重试。");
+    showToast(state.orderImportMessage, "error");
+  }
   await Promise.all([loadCompass(), loadOrderImports()]);
 }
 
@@ -654,9 +659,13 @@ export function renderOperations() {
 }
 
 export async function loadChannel() {
-  const response = await fetch("/api/channel");
-  if (response.status === 401) return showLogin();
-  state.channel = response.ok ? await response.json().catch(() => ({ records: [] })) : { records: [] };
+  try {
+    state.channel = await request<AnyRecord>("/api/channel");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.channel = { records: [] };
+    showToast(errorMessage(error, "渠道数据读取失败。"), "error");
+  }
   operationFilterItems("date").forEach((item) => state.operationDates.add(item));
   operationFilterItems("platform").forEach((item) => state.operationPlatforms.add(item));
   operationFilterItems("shop").forEach((item) => state.operationShops.add(item));
@@ -676,18 +685,22 @@ function renderTable(records: OperationRecord[], content = false) {
 }
 
 export async function loadCompass() {
-  const response = await fetch("/api/compass");
-  if (response.status === 401) return showLogin();
-  const payload = await response.json();
-  state.records = (payload.records || []).map(canonicalOperationRecord);
-  state.channel = payload.channel || null;
-  state.operationDates = new Set(operationFilterItems("date"));
-  state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
-  state.operationCalendarRangeStart = "";
-  state.operationCalendarOpen = false;
-  state.operationPlatforms = new Set(operationFilterItems("platform"));
-  state.operationShops = new Set(operationFilterItems("shop"));
-  state.operationSources = new Set(state.records.map(recordSourceLabel));
-  if (!payload.channel) return loadChannel();
-  renderOperations();
+  try {
+    const payload = await request<AnyRecord>("/api/compass");
+    state.records = (Array.isArray(payload.records) ? payload.records : []).map((record) => canonicalOperationRecord(record as OperationRecord));
+    state.channel = (payload.channel as AnyRecord | undefined) ?? null;
+    state.operationDates = new Set(operationFilterItems("date"));
+    state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
+    state.operationCalendarRangeStart = "";
+    state.operationCalendarOpen = false;
+    state.operationPlatforms = new Set(operationFilterItems("platform"));
+    state.operationShops = new Set(operationFilterItems("shop"));
+    state.operationSources = new Set(state.records.map(recordSourceLabel));
+    if (!payload.channel) return loadChannel();
+    renderOperations();
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const target = $("#operations-content");
+    target.innerHTML = `<div class="empty-panel"><strong>经营数据暂不可用</strong><span>${escapeHtml(errorMessage(error, "请检查 API 服务与数据同步状态。"))}</span></div>`;
+  }
 }

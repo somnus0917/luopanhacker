@@ -1,5 +1,5 @@
 import { $, $$ } from "../dom";
-import { apiFetch as fetch } from "../api";
+import { errorMessage, isApiRequestError, request } from "../api";
 import { showToast } from "../feedback";
 import {
   escapeHtml, number, settlementMoney, settlementMoneyOrDash, whole,
@@ -242,25 +242,24 @@ async function uploadSettlement(event: SubmitEvent) {
   button.textContent = "正在上传…";
   state.settlementUploadMessage = "";
   const content = await uploadFile.text();
-  const response = await fetch("/api/settlement/uploads", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    state.settlementUploadMessage = response.status === 413
+  try {
+    const payload = await request<AnyRecord>("/api/settlement/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shop_name: shopName, file_name: uploadFile.name, content }),
+    });
+    const uploaded = (payload.upload as AnyRecord | undefined)?.file as AnyRecord | undefined;
+    state.settlementShop = String(uploaded?.shop_name ?? state.settlementShop);
+    state.settlementUploadMessage = `已导入 ${uploaded?.original_name || uploaded?.name || "结算 CSV"}，解析 ${whole(uploaded?.rows)} 行。`;
+    showToast(state.settlementUploadMessage, "success");
+    await loadSettlement();
+  } catch (error) {
+    state.settlementUploadMessage = isApiRequestError(error) && error.status === 413
       ? "结算 CSV 超过 32MB 上传上限，请拆分文件后重试。"
-      : payload.error || "结算 CSV 上传失败，请检查文件格式。";
+      : errorMessage(error, "结算 CSV 上传失败，请检查文件格式。");
     showToast(state.settlementUploadMessage, "error");
     if (state.settlement) renderSettlement(state.settlement);
-    return;
   }
-  const uploaded = payload.upload?.file || {};
-  state.settlementShop = uploaded.shop_name || state.settlementShop;
-  state.settlementUploadMessage = `已导入 ${uploaded.original_name || uploaded.name || "结算 CSV"}，解析 ${whole(uploaded.rows)} 行。`;
-  showToast(state.settlementUploadMessage, "success");
-  await loadSettlement();
 }
 
 export async function loadSettlement() {
@@ -270,13 +269,11 @@ export async function loadSettlement() {
     if (state.settlementShop) query.set("shop", state.settlementShop);
     if (state.settlementStartDate) query.set("start_date", state.settlementStartDate);
     if (state.settlementEndDate) query.set("end_date", state.settlementEndDate);
-    const response = await fetch(`/api/settlement${query.size ? `?${query}` : ""}`);
-    if (response.status === 401) return showLogin();
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "结算数据不可用");
+    const payload = await request<AnyRecord>(`/api/settlement${query.size ? `?${query}` : ""}`);
     renderSettlement(payload);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "请检查 Rust API 与 output/settlement 目录";
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    const message = errorMessage(error, "请检查 Rust API 与 output/settlement 目录");
     target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
