@@ -45,7 +45,13 @@ jobs:
           pnpm check
           pnpm test
           pnpm build
-          git diff --exit-code -- web/static
+
+          changes="$(git -C ../.. status --porcelain -- web/static)"
+          if [[ -n "$changes" ]]; then
+            echo "Frontend build artifacts are not up to date:"
+            git -C ../.. status --short -- web/static
+            exit 1
+          fi
       - name: Check Python
         run: |
           uv run ruff check apps tests
