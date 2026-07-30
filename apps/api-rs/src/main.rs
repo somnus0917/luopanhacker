@@ -207,8 +207,8 @@ async fn main() -> Result<()> {
         .merge(account)
         .merge(admin_only)
         .merge(static_files)
-        .layer(from_fn(request_logging))
         .layer(from_fn_with_state(state.clone(), csrf_protection))
+        .layer(from_fn(request_logging))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
     let app = if security.production {

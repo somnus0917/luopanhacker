@@ -4,7 +4,9 @@ use std::{
 };
 
 use super::*;
+use axum::{body::Body, http::Request};
 use sqlx::sqlite::SqlitePoolOptions;
+use tower::ServiceExt;
 
 async fn test_pool() -> StoragePool {
     let pool = SqlitePoolOptions::new()
@@ -22,6 +24,164 @@ fn test_security() -> Arc<SecurityConfig> {
         session_cookie_secure: false,
         trusted_origins: vec!["http://127.0.0.1:5173".to_string()],
     })
+}
+
+async fn integration_state() -> AppState {
+    let root = std::env::temp_dir().join(format!(
+        "luopan-request-id-router-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    AppState {
+        paths: Arc::new(RuntimePaths {
+            app_dir: root.clone(),
+            output_dir: root.join("output"),
+            state_dir: root.join("state"),
+            config_dir: root.join("config"),
+            logs_dir: root.join("logs"),
+            session_dir: root.join("session"),
+        }),
+        novnc_url: Arc::new("http://127.0.0.1:6080".to_string()),
+        auth_pool: Arc::new(test_pool().await),
+        storage_pool: None,
+        security: test_security(),
+    }
+}
+
+async fn assert_router_request_id(
+    app: Router,
+    request: Request<Body>,
+    expected_status: StatusCode,
+) {
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), expected_status);
+    let header_id = response
+        .headers()
+        .get("x-request-id")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["meta"]["request_id"], header_id);
+}
+
+#[tokio::test]
+async fn router_middleware_keeps_request_ids_consistent_for_all_api_outcomes() {
+    let state = integration_state().await;
+    sqlx::query(
+        "INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind("request-id-viewer")
+    .bind(hash_password("viewer-password-123").unwrap())
+    .bind("viewer")
+    .bind(now_string())
+    .execute(&*state.auth_pool)
+    .await
+    .unwrap();
+    let viewer_token = create_session(&state.auth_pool, "request-id-viewer")
+        .await
+        .unwrap();
+    let protected = Router::new()
+        .route(
+            "/unauthorized",
+            axum::routing::get(|| async { api(json!({ "ok": true })) }),
+        )
+        .route_layer(from_fn_with_state(state.clone(), require_auth));
+    let admin_only = Router::new()
+        .route(
+            "/forbidden",
+            axum::routing::get(|| async { api(json!({ "ok": true })) }),
+        )
+        .route_layer(from_fn_with_state(state.clone(), require_admin));
+    let app = Router::new()
+        .route(
+            "/ok",
+            axum::routing::get(|| async { api(json!({ "ok": true })) }),
+        )
+        .route(
+            "/error",
+            axum::routing::get(|| async { ApiError::internal(anyhow::anyhow!("test failure")) }),
+        )
+        .route(
+            "/mutate",
+            axum::routing::post(|| async { api(json!({ "ok": true })) }),
+        )
+        .merge(protected)
+        .merge(admin_only)
+        .layer(from_fn_with_state(state.clone(), csrf_protection))
+        .layer(from_fn(request_logging))
+        .with_state(state);
+
+    assert_router_request_id(
+        app.clone(),
+        Request::builder().uri("/ok").body(Body::empty()).unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert_router_request_id(
+        app.clone(),
+        Request::builder()
+            .uri("/unauthorized")
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::UNAUTHORIZED,
+    )
+    .await;
+    assert_router_request_id(
+        app.clone(),
+        Request::builder()
+            .uri("/forbidden")
+            .header(
+                header::COOKIE,
+                format!("{SESSION_COOKIE_NAME}={viewer_token}"),
+            )
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+    assert_router_request_id(
+        app.clone(),
+        Request::builder()
+            .uri("/error")
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+    assert_router_request_id(
+        app.clone(),
+        Request::builder()
+            .method("POST")
+            .uri("/mutate")
+            .body(Body::empty())
+            .unwrap(),
+        StatusCode::FORBIDDEN,
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/ok")
+                .header("x-request-id", "client-request-id")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.headers()["x-request-id"], "client-request-id");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["meta"]["request_id"], "client-request-id");
 }
 
 #[test]
