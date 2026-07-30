@@ -12,12 +12,13 @@ use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_ha
 use axum::extract::Path as AxumPath;
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Query, Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
     middleware::{Next, from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{delete, get, get_service, post},
 };
+#[cfg(test)]
 use chrono::NaiveDate;
 use luopan_channels::load_channel_dashboard;
 use luopan_jobs::status_payload;
@@ -26,9 +27,6 @@ use luopan_orders::public_imports;
 use luopan_runtime::RuntimePaths;
 #[cfg(test)]
 use luopan_runtime::read_json_file;
-use luopan_settlement::{
-    load_settlement_dashboard_filtered, load_settlement_dashboard_for_shop, save_settlement_upload,
-};
 use luopan_storage::{
     StoragePool, kv_value_with_updated_at, load_operations_records_from_db, summary,
 };
@@ -52,6 +50,7 @@ mod error;
 mod health;
 mod inventory;
 mod orders;
+mod settlement;
 mod state;
 
 #[cfg(test)]
@@ -73,6 +72,9 @@ use error::{ApiError, api, api_with_meta, generate_request_id};
 use health::{healthz, readyz};
 use inventory::{inventory_dashboard, inventory_raw};
 use orders::{commit_order_import, order_imports, preview_order_import, remove_order_import};
+#[cfg(test)]
+use settlement::validate_settlement_date_range;
+use settlement::{settlement_dashboard, upload_settlement};
 use state::{AppState, SecurityConfig};
 
 const SESSION_COOKIE_NAME: &str = "compass_session";
@@ -132,20 +134,6 @@ fn default_role() -> String {
 struct StatusQuery {
     #[serde(default = "default_terminal_output")]
     terminal_output: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct SettlementQuery {
-    shop: Option<String>,
-    start_date: Option<String>,
-    end_date: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SettlementUploadPayload {
-    shop_name: String,
-    file_name: String,
-    content: String,
 }
 
 fn default_terminal_output() -> bool {
@@ -923,72 +911,6 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
         } else {
             json!(records_updated_at.max(channel.updated_at))
         },
-    ))
-}
-
-async fn settlement_dashboard(
-    State(state): State<AppState>,
-    Query(query): Query<SettlementQuery>,
-) -> Result<Json<Value>, ApiError> {
-    let (start_date, end_date) = validate_settlement_date_range(query.start_date, query.end_date)
-        .map_err(ApiError::bad_request)?;
-    Ok(api(load_settlement_dashboard_filtered(
-        &state.paths,
-        query.shop.as_deref(),
-        start_date.as_deref(),
-        end_date.as_deref(),
-    )
-    .map_err(ApiError::internal)?))
-}
-
-fn validate_settlement_date_range(
-    start_date: Option<String>,
-    end_date: Option<String>,
-) -> Result<(Option<String>, Option<String>)> {
-    let parse = |value: Option<String>, label: &str| -> Result<Option<String>> {
-        let Some(value) = value else {
-            return Ok(None);
-        };
-        let value = value.trim();
-        if value.is_empty() {
-            return Ok(None);
-        }
-        NaiveDate::parse_from_str(value, "%Y-%m-%d")
-            .with_context(|| format!("{label}必须是 YYYY-MM-DD 格式"))?;
-        Ok(Some(value.to_string()))
-    };
-    let start_date = parse(start_date, "开始日期")?;
-    let end_date = parse(end_date, "结束日期")?;
-    if start_date
-        .as_ref()
-        .zip(end_date.as_ref())
-        .is_some_and(|(start, end)| start > end)
-    {
-        anyhow::bail!("开始日期不能晚于结束日期");
-    }
-    Ok((start_date, end_date))
-}
-
-async fn upload_settlement(
-    State(state): State<AppState>,
-    Json(payload): Json<SettlementUploadPayload>,
-) -> Result<(StatusCode, Json<Value>), ApiError> {
-    let upload = save_settlement_upload(
-        &state.paths,
-        &payload.file_name,
-        &payload.shop_name,
-        payload.content.as_bytes(),
-    )
-    .map_err(ApiError::bad_request)?;
-    let dashboard = load_settlement_dashboard_for_shop(&state.paths, Some(&payload.shop_name))
-        .map_err(ApiError::internal)?;
-
-    Ok((
-        StatusCode::CREATED,
-        api(json!({
-            "upload": upload,
-            "dashboard": dashboard,
-        })),
     ))
 }
 
