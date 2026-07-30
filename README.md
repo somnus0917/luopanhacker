@@ -1,6 +1,21 @@
-# Douyin Compass Daily Runner
+# 罗盘经营看板
 
-这个目录用于低频获取抖音电商罗盘店铺页的"近1天"可见数据。
+面向抖音电商罗盘的低频采集与经营看板：Rust 提供登录、API 和生产看板，Python 负责 Playwright 采集，前端展示经营、库存、结算和采集状态。
+
+## 常用命令
+
+先运行 `make help` 查看全部入口；日常开发通常只需以下命令：
+
+| 目的 | 命令 |
+| --- | --- |
+| 完整检查（Rust、前端、Python） | `make check` |
+| 构建生产静态文件 | `make build` |
+| 启动本地看板 API | `make dashboard` |
+| 启动前端开发服务器 | `make web` |
+| 执行一次日常采集 | `make daily` |
+| 启停 Docker 服务 | `make docker-up` / `make docker-down` |
+
+前端的 HTML、TypeScript 和 CSS 只在 `apps/web/` 中维护；`web/static/` 是构建结果，不直接编辑。完整目录职责见 [docs/architecture.md](./docs/architecture.md)。
 
 ## 快速部署（Docker）
 
@@ -18,6 +33,12 @@ ADMIN_PASSWORD="请替换为强密码"
 ```bash
 docker compose build
 docker compose up -d
+```
+
+也可以使用统一入口：
+
+```bash
+make docker-up
 ```
 
 容器会拒绝空密码、`admin123` 和少于 12 位的密码。
@@ -58,6 +79,7 @@ Compose 会启动 `compass-dashboard` 与 `compass-collector` 两个容器。前
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv sync --locked
 uv run python -m playwright install chromium
+pnpm -C apps/web install
 ```
 
 项目的 Python 依赖由 `pyproject.toml` 和提交到 Git 的 `uv.lock` 统一管理。不要再使用 `pip install -r requirements.txt`；新增或升级依赖时运行 `uv add <包名>` 或 `uv lock`，并一并提交更新后的锁文件。
@@ -65,7 +87,7 @@ uv run python -m playwright install chromium
 ### 每日运行
 
 ```bash
-./scripts/run_daily.sh
+make daily
 ```
 
 脚本会打开有头浏览器。如果出现登录页，请手动扫码登录；登录态会保存在 `session/`，后续通常可以复用。
@@ -103,7 +125,7 @@ output/daily/2026-06-11/compass_daily_2026-06-11_143000.csv
 脚本完成后可以启动数据看板：
 
 ```bash
-./scripts/run_dashboard.sh
+make dashboard
 ```
 
 看板默认地址：
@@ -118,9 +140,7 @@ http://127.0.0.1:8501
 
 登录后可以在“账户设置”修改密码；管理员还可以添加或删除用户。
 
-当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。前端 HTML、TypeScript 与 CSS 的唯一源码都位于 `apps/web/`；运行时静态产物由构建命令生成到 `web/static/`，不直接编辑。
-
-项目各目录的生产、归档和运行时边界见 [docs/architecture.md](./docs/architecture.md)。常用入口可通过 `make help` 查看。
+当前生产看板由 Rust API 直接提供登录、静态文件和业务 API，并优先读取 SQLite；Rust worker 采集成功后会同步 SQLite，新跑出的每日数据会自动进入看板。
 
 “采集中心”是独立入口：管理员可单独采集经营模块或渠道模块，查看采集服务在线状态、队列、各模块最近结果与终端日志。业务看板刷新只读取本地 SQLite/JSON，不会触发浏览器采集。
 
@@ -130,13 +150,15 @@ http://127.0.0.1:8501
 docker exec -it douyin-compass luopan-worker-rs doctor
 ```
 
-前端本地开发可以启动 Rust API 和 Vite：
+前端本地开发时，在两个终端分别启动 Rust API 和 Vite：
 
 ```bash
-cd apps/web
-pnpm install
-pnpm dev
+make dashboard
+# 新开一个终端
+make web
 ```
+
+然后打开 `http://127.0.0.1:5173`；Vite 会将 `/api` 请求代理到本地 Rust API。
 
 ## 订单数据
 
