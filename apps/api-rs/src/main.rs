@@ -1,4 +1,10 @@
-use std::{env, fs, net::SocketAddr, sync::Arc, time::Instant};
+use std::{
+    env, fs,
+    net::SocketAddr,
+    path::Path,
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 
 use anyhow::{Context, Result};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
@@ -953,7 +959,29 @@ pub(crate) fn now_string() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
-fn payload_updated_at(value: &Value) -> String {
+fn format_system_time(time: SystemTime) -> String {
+    chrono::DateTime::<chrono::Local>::from(time)
+        .format("%Y-%m-%dT%H:%M:%S")
+        .to_string()
+}
+
+fn latest_json_modified_at(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok();
+    if metadata.as_ref().is_some_and(|metadata| metadata.is_file()) {
+        return path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            .then(|| metadata?.modified().ok().map(format_system_time))
+            .flatten();
+    }
+    fs::read_dir(path)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| latest_json_modified_at(&entry.path()))
+        .max()
+}
+
+fn payload_updated_at(value: &Value, fallback_path: &Path) -> String {
     let record_timestamp = value
         .get("records")
         .and_then(Value::as_array)
@@ -970,15 +998,21 @@ fn payload_updated_at(value: &Value) -> String {
                 .next()
                 .map(ToOwned::to_owned)
         })
+        .or_else(|| latest_json_modified_at(fallback_path))
         .unwrap_or_else(now_string)
 }
 
-fn operations_updated_at(records: &[luopan_operations::OperationRecord]) -> String {
+fn operations_updated_at(
+    records: &[luopan_operations::OperationRecord],
+    paths: &RuntimePaths,
+) -> String {
     records
         .iter()
         .map(|record| record.captured_at.as_str())
         .max()
         .map(ToOwned::to_owned)
+        .or_else(|| latest_json_modified_at(&paths.output_dir.join("daily")))
+        .or_else(|| latest_json_modified_at(&paths.output_dir.join("external_orders")))
         .unwrap_or_else(now_string)
 }
 
@@ -1002,7 +1036,7 @@ async fn inventory_dashboard(State(state): State<AppState>) -> Result<Json<Value
 
     match load_inventory_dashboard(&state.paths).map_err(ApiError::internal)? {
         Some(value) => {
-            let updated_at = payload_updated_at(&value);
+            let updated_at = payload_updated_at(&value, &state.paths.inventory_snapshot_path());
             Ok(api_with_meta(
                 value,
                 "json",
@@ -1043,7 +1077,7 @@ async fn load_channel_payload(state: &AppState) -> Result<LoadedPayload, ApiErro
         }
     }
     let value = load_channel_dashboard(&state.paths).map_err(ApiError::internal)?;
-    let updated_at = payload_updated_at(&value);
+    let updated_at = payload_updated_at(&value, &state.paths.output_dir.join("channel"));
     Ok(LoadedPayload {
         value,
         source: "json",
@@ -1090,7 +1124,7 @@ async fn compass_dashboard(State(state): State<AppState>) -> Result<Json<Value>,
             false,
         )
     };
-    let records_updated_at = operations_updated_at(&records);
+    let records_updated_at = operations_updated_at(&records, &state.paths);
     let channel = load_channel_payload(&state).await?;
     let source = if records_source == channel.source {
         records_source
