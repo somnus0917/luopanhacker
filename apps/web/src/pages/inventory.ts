@@ -26,6 +26,21 @@ function costMoney(value: unknown) {
   return value === null || value === undefined ? "—" : settlementMoney(value);
 }
 
+function summaryCostMoney(value: unknown) {
+  if (value === null || value === undefined) return "—";
+
+  const amount = number(value);
+
+  if (Math.abs(amount) >= 10_000) {
+    return `¥${(amount / 10_000).toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })} 万`;
+  }
+
+  return settlementMoney(amount);
+}
+
 const INVENTORY_HEALTH_ORDER = ["out_of_stock", "urgent", "replenish", "healthy", "high", "overstock", "no_movement", "unavailable"];
 
 const INVENTORY_HEALTH_NAMES: Record<string, string> = {
@@ -195,7 +210,7 @@ export function renderInventory(payload: AnyRecord | null, view: InventoryView =
   const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
   const metrics = [
     ["可发库存", whole(summary.available_num), `可售 SKU：${whole(summary.salable_skus)}`],
-    ["已覆盖库存成本", costMoney(summary.stock_cost_amount), costCoverage, summary.cost_coverage_rate !== 1 ? "attention" : ""],
+    ["已覆盖库存成本", summaryCostMoney(summary.stock_cost_amount), costCoverage, summary.cost_coverage_rate !== 1 ? "attention" : ""],
     ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
     ["预计可售天数", inventoryDays(summary.turnover_days), "整体可发库存 ÷ 日均出库"],
     ["库存周转天数", inventoryDays(summary.inventory_turnover_days), "总库存 ÷ 近 7 天日均出库"],
