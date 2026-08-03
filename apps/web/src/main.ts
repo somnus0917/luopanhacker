@@ -24,7 +24,7 @@ function buildPlaceholders() {
 window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
-window.addEventListener("luopan-jd-imported", () => { loadInventory(); });
+window.addEventListener("luopan-jd-imported", () => { loadCompass(); loadInventory(); });
 
 function activatePage(name: PageName) {
   state.page = name;
