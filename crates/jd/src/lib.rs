@@ -30,11 +30,7 @@ fn text(v: &Data) -> String {
     v.to_string().trim().to_string()
 }
 fn num(v: &Data) -> f64 {
-    text(v)
-        .replace(',', "")
-        .replace('%', "")
-        .parse()
-        .unwrap_or(0.)
+    text(v).replace([',', '%'], "").parse().unwrap_or(0.)
 }
 fn date(v: &Data) -> String {
     v.as_datetime()
@@ -154,7 +150,7 @@ pub fn commit_preview(paths: &RuntimePaths, t: &str) -> Result<Value> {
     }
     write(ledger_path(paths), &ledger)?;
     let _ = fs::remove_file(path);
-    Ok(dashboard(paths)?)
+    dashboard(paths)
 }
 pub fn dashboard(paths: &RuntimePaths) -> Result<Value> {
     let ledger = read_json_file(&ledger_path(paths))?.unwrap_or_else(|| json!({"batches":[]}));

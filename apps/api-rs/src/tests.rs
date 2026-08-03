@@ -5,6 +5,7 @@ use std::{
 
 use super::*;
 use axum::{body::Body, http::Request};
+use chrono::{Duration, Local};
 use sqlx::sqlite::SqlitePoolOptions;
 use tower::ServiceExt;
 
@@ -683,6 +684,9 @@ async fn collection_request_is_atomically_queued_for_online_service() {
 
 #[tokio::test]
 async fn historical_collection_request_includes_date_and_shops() {
+    let requested_date = (Local::now().date_naive() - Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
     let root = std::env::temp_dir().join(format!(
         "luopan-api-collection-backfill-test-{}",
         SystemTime::now()
@@ -712,7 +716,7 @@ async fn historical_collection_request_includes_date_and_shops() {
         State(state),
         Json(CollectionRunPayload {
             modules: vec!["operations".to_string()],
-            date: Some("2026-07-25".to_string()),
+            date: Some(requested_date.clone()),
             shops: vec!["店铺 A".to_string()],
         }),
     )
@@ -720,11 +724,11 @@ async fn historical_collection_request_includes_date_and_shops() {
     .unwrap();
 
     assert_eq!(status, StatusCode::ACCEPTED);
-    assert_eq!(payload.0["data"]["date"], json!("2026-07-25"));
+    assert_eq!(payload.0["data"]["date"], json!(requested_date));
     let request = read_json_file(&paths.collection_request_path())
         .unwrap()
         .unwrap();
-    assert_eq!(request["date"], json!("2026-07-25"));
+    assert_eq!(request["date"], json!(requested_date));
     assert_eq!(request["shops"], json!(["店铺 A"]));
     let _ = fs::remove_dir_all(root);
 }

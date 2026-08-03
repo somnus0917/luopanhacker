@@ -458,7 +458,10 @@ def save_run(result, output_dir=None):
     return outputs
 
 
-def parse_args(argv=None):
+def parse_args(argv=None, *, today=None):
+    def parse_requested_date(value):
+        return parse_data_day(value, today=today)
+
     parser = argparse.ArgumentParser(
         description="罗盘独立采集服务：共享登录会话，采集昨日或指定历史日期数据"
     )
@@ -473,7 +476,7 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--date",
-        type=parse_data_day,
+        type=parse_requested_date,
         help="指定本月历史日期，格式 YYYY-MM-DD；暂仅支持经营模块",
     )
     parser.add_argument(

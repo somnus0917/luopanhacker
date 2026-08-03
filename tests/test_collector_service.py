@@ -145,7 +145,10 @@ class CollectorServiceTest(unittest.TestCase):
         self.assertIsNone(compass.date_range_from_fields({}))
 
     def test_parse_args_accepts_historical_date(self) -> None:
-        args = compass.parse_args(["--module", "operations", "--date", "2026-07-25"])
+        args = compass.parse_args(
+            ["--module", "operations", "--date", "2026-07-25"],
+            today=date(2026, 7, 27),
+        )
         self.assertEqual(args.date.isoformat(), "2026-07-25")
         self.assertEqual(
             compass.expected_data_range(args.date), ("2026/07/25", "2026/07/25")
@@ -160,7 +163,7 @@ class CollectorServiceTest(unittest.TestCase):
             compass.parse_args(["--module", "operations", "--date", "9999-12-31"])
 
     def test_custom_date_prototype_rejects_channel_before_browser_launch(self) -> None:
-        args = compass.parse_args(["--date", "2026-07-25"])
+        args = compass.parse_args(["--date", "2026-07-25"], today=date(2026, 7, 27))
         with self.assertRaisesRegex(ValueError, "暂仅支持 --module operations"):
             asyncio.run(compass.run(args))
 
