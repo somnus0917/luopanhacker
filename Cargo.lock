@@ -985,6 +985,7 @@ dependencies = [
  "fs2",
  "luopan-channels",
  "luopan-inventory",
+ "luopan-jd",
  "luopan-jobs",
  "luopan-operations",
  "luopan-orders",
@@ -1023,6 +1024,19 @@ dependencies = [
  "luopan-runtime",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "luopan-jd"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "calamine",
+ "chrono",
+ "luopan-runtime",
+ "rand_core",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]

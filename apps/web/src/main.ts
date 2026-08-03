@@ -10,6 +10,7 @@ import {
   loadCompass, loadOrderImports,
 } from "./pages/operations";
 import { loadInventory, renderInventory } from "./pages/inventory";
+import { loadJd } from "./pages/jd";
 import { loadSettlement } from "./pages/settlement";
 import {
   loadCollectionShops, refreshCollectionStatus, stopCollectionStatusRefresh,
@@ -81,6 +82,7 @@ async function initialise() {
       loadCompass();
       loadOrderImports();
       loadInventory();
+      loadJd();
       loadSettlement();
       loadCollectionShops().then(refreshCollectionStatus);
     } catch (error) {
@@ -89,7 +91,7 @@ async function initialise() {
   });
   try {
     const me = await request<{ authenticated: boolean; username?: string; role?: "admin" | "viewer" }>("/api/me");
-    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadJd(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
   } catch {
     showLogin();
   }

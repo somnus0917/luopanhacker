@@ -5,6 +5,7 @@ members = [
   "crates/channels",
   "crates/jobs",
   "crates/inventory",
+  "crates/jd",
   "crates/operations",
   "crates/orders",
   "crates/settlement",

@@ -11,6 +11,7 @@ argon2.workspace = true
 axum = { workspace = true, features = ["multipart"] }
 luopan-channels = { path = "../../crates/channels" }
 luopan-inventory = { path = "../../crates/inventory" }
+luopan-jd = { path = "../../crates/jd" }
 luopan-jobs = { path = "../../crates/jobs" }
 luopan-operations = { path = "../../crates/operations" }
 luopan-orders = { path = "../../crates/orders" }

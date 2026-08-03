@@ -53,6 +53,7 @@ mod collection;
 mod error;
 mod health;
 mod inventory;
+mod jd;
 mod operations;
 mod orders;
 mod settlement;
@@ -77,6 +78,7 @@ use collection::{
 use error::{ApiError, api, api_with_meta, generate_request_id};
 use health::{healthz, readyz};
 use inventory::{inventory_dashboard, inventory_raw};
+use jd::{commit_jd_import, jd_dashboard, preview_jd_import};
 use operations::{channel_dashboard, compass_dashboard};
 use orders::{commit_order_import, order_imports, preview_order_import, remove_order_import};
 #[cfg(test)]
@@ -147,6 +149,7 @@ async fn main() -> Result<()> {
         .route("/api/inventory", get(inventory_dashboard))
         .route("/api/channel", get(channel_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
+        .route("/api/jd", get(jd_dashboard))
         .route("/api/settlement", get(settlement_dashboard))
         .route("/api/orders/imports", get(order_imports))
         .route("/api/storage/summary", get(storage_summary))
@@ -164,6 +167,8 @@ async fn main() -> Result<()> {
     let admin_only = Router::new()
         .route("/api/settlement/uploads", post(upload_settlement))
         .route("/api/orders/preview", post(preview_order_import))
+        .route("/api/jd/imports/preview", post(preview_jd_import))
+        .route("/api/jd/imports", post(commit_jd_import))
         .route("/api/orders/imports", post(commit_order_import))
         .route(
             "/api/orders/imports/{batch_id}",
