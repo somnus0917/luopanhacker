@@ -7,6 +7,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::NaiveDate;
+use luopan_jd::inventory_snapshot as jd_inventory_snapshot;
 use luopan_runtime::{RuntimePaths, read_json_file};
 use serde_json::{Map, Value, json};
 
@@ -26,7 +27,11 @@ const HEALTH_ORDER: [&str; 8] = [
 
 pub fn load_inventory_dashboard(paths: &RuntimePaths) -> Result<Option<Value>> {
     let snapshot_path = paths.inventory_snapshot_path();
-    let Some(snapshot) = read_json_file(&snapshot_path)? else {
+    let snapshot = merge_jd_snapshot(
+        read_json_file(&snapshot_path)?,
+        jd_inventory_snapshot(paths)?,
+    );
+    let Some(snapshot) = snapshot else {
         return Ok(None);
     };
     let history_dir = snapshot_path
@@ -37,16 +42,57 @@ pub fn load_inventory_dashboard(paths: &RuntimePaths) -> Result<Option<Value>> {
     Ok(Some(build_dashboard(&snapshot, &history_dir)?))
 }
 
+fn merge_jd_snapshot(existing: Option<Value>, jd: Option<Value>) -> Option<Value> {
+    match (existing, jd) {
+        (None, None) => None,
+        (Some(snapshot), None) | (None, Some(snapshot)) => Some(snapshot),
+        (Some(mut snapshot), Some(jd)) => {
+            for key in ["inventory", "sales_7d", "inbound_30d"] {
+                let source = jd[key].as_array().cloned().unwrap_or_default();
+                if let Some(target) = snapshot
+                    .as_object_mut()
+                    .map(|value| value.entry(key.to_string()).or_insert_with(|| json!([])))
+                    .and_then(Value::as_array_mut)
+                {
+                    target.extend(source);
+                }
+            }
+            if let Some(target) = snapshot.as_object_mut() {
+                let previous = target
+                    .get("captured_at")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if jd["captured_at"].as_str().unwrap_or_default() >= previous {
+                    target.insert("captured_at".to_string(), jd["captured_at"].clone());
+                }
+                target.insert(
+                    "source".to_string(),
+                    json!({"inventory_sync": true, "jd_rdc": true}),
+                );
+            }
+            Some(snapshot)
+        }
+    }
+}
+
 pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
-    let sales_rows = value_array(snapshot, "sales_7d");
-    let inbound_rows = value_array(snapshot, "inbound_30d");
+    let sales_rows: Vec<Value> = value_array(snapshot, "sales_7d")
+        .iter()
+        .filter(|row| !is_rollup(row))
+        .cloned()
+        .collect();
+    let inbound_rows: Vec<Value> = value_array(snapshot, "inbound_30d")
+        .iter()
+        .filter(|row| !is_rollup(row))
+        .cloned()
+        .collect();
     let mut sales: HashMap<(String, String), f64> = HashMap::new();
     let mut inbound: HashMap<(String, String), f64> = HashMap::new();
 
-    for row in sales_rows {
+    for row in &sales_rows {
         *sales.entry(inventory_key(row)).or_default() += number(row.get("quantity"));
     }
-    for row in inbound_rows {
+    for row in &inbound_rows {
         *inbound.entry(inventory_key(row)).or_default() += number(row.get("quantity"));
     }
 
@@ -110,7 +156,8 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         })
         .collect();
 
-    let total_available: f64 = rows
+    let analysis_rows: Vec<Value> = rows.iter().filter(|row| !is_rollup(row)).cloned().collect();
+    let total_available: f64 = analysis_rows
         .iter()
         .map(|row| number(row.get("available_num")))
         .sum();
@@ -118,7 +165,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         .iter()
         .map(|row| number(row.get("quantity")))
         .sum();
-    let coverage_rows: Vec<f64> = rows
+    let coverage_rows: Vec<f64> = analysis_rows
         .iter()
         .filter_map(|row| {
             let coverage = row.get("coverage_days").and_then(Value::as_f64);
@@ -129,7 +176,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
             }
         })
         .collect();
-    let cost_covered_records = rows
+    let cost_covered_records = analysis_rows
         .iter()
         .filter(|row| {
             row.get("cost_covered")
@@ -137,7 +184,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
                 .unwrap_or(false)
         })
         .count();
-    let stock_cost_amount: f64 = rows
+    let stock_cost_amount: f64 = analysis_rows
         .iter()
         .filter(|row| {
             row.get("cost_covered")
@@ -146,7 +193,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         })
         .map(|row| number(row.get("stock_cost_amount")))
         .sum();
-    let available_cost_amount: f64 = rows
+    let available_cost_amount: f64 = analysis_rows
         .iter()
         .filter(|row| {
             row.get("cost_covered")
@@ -158,21 +205,21 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
 
     let history = historical_turnover(history_dir)?;
     let mut summary = json!({
-        "sku_records": rows.len(),
-        "distinct_skus": distinct_count(&rows, "spec_no", |_| true),
-        "salable_skus": distinct_count(&rows, "spec_no", |row| number(row.get("available_num")) > 0.0),
-        "stock_num": rounded(sum_rows(&rows, "stock_num")),
+        "sku_records": analysis_rows.len(),
+        "distinct_skus": distinct_count(&analysis_rows, "spec_no", |_| true),
+        "salable_skus": distinct_count(&analysis_rows, "spec_no", |row| number(row.get("available_num")) > 0.0),
+        "stock_num": rounded(sum_rows(&analysis_rows, "stock_num")),
         "available_num": rounded(total_available),
         "sales_7d": rounded(total_sales_7d),
         "inbound_30d": rounded(inbound_rows.iter().map(|row| number(row.get("quantity"))).sum()),
-        "negative_available": rows.iter().filter(|row| number(row.get("available_num")) < 0.0).count(),
+        "negative_available": analysis_rows.iter().filter(|row| number(row.get("available_num")) < 0.0).count(),
         "turnover_days": if total_sales_7d > 0.0 { json!(rounded(total_available / (total_sales_7d / 7.0))) } else { Value::Null },
         "average_coverage_days": if coverage_rows.is_empty() { Value::Null } else { json!(rounded(coverage_rows.iter().sum::<f64>() / coverage_rows.len() as f64)) },
-        "replenishment_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "out_of_stock" | "urgent" | "replenish")).count(),
-        "no_movement_records": rows.iter().filter(|row| text(row.get("health_key")) == "no_movement").count(),
-        "overstock_records": rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "overstock" | "high")).count(),
+        "replenishment_records": analysis_rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "out_of_stock" | "urgent" | "replenish")).count(),
+        "no_movement_records": analysis_rows.iter().filter(|row| text(row.get("health_key")) == "no_movement").count(),
+        "overstock_records": analysis_rows.iter().filter(|row| matches!(text(row.get("health_key")).as_str(), "overstock" | "high")).count(),
         "cost_covered_records": cost_covered_records,
-        "cost_coverage_rate": if rows.is_empty() { Value::Null } else { json!(rounded(cost_covered_records as f64 / rows.len() as f64)) },
+        "cost_coverage_rate": if analysis_rows.is_empty() { Value::Null } else { json!(rounded(cost_covered_records as f64 / analysis_rows.len() as f64)) },
         "stock_cost_amount": if cost_covered_records == 0 { Value::Null } else { json!(rounded(stock_cost_amount)) },
         "available_cost_amount": if cost_covered_records == 0 { Value::Null } else { json!(rounded(available_cost_amount)) },
     });
@@ -191,7 +238,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
     }
 
     rows.sort_by(compare_inventory_rows);
-    let sales_trends = build_sales_trend(sales_rows, &warehouse_names, &brand_names);
+    let sales_trends = build_sales_trend(&sales_rows, &warehouse_names, &brand_names);
 
     Ok(json!({
         "captured_at": snapshot.get("captured_at").cloned().unwrap_or(Value::Null),
@@ -199,7 +246,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
         "summary": summary,
         "warehouses": build_group(&rows, "warehouse_name"),
         "brands": build_group(&rows, "brand_name"),
-        "health": build_health(&rows),
+        "health": build_health(&analysis_rows),
         "sales_trend_7d": sales_trends.total,
         "sales_trend_7d_by_warehouse": sales_trends.by_warehouse,
         "sales_trend_7d_by_brand": sales_trends.by_brand,
@@ -216,6 +263,12 @@ fn value_array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
         .and_then(Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or(&[])
+}
+
+fn is_rollup(row: &Value) -> bool {
+    row.get("is_rollup")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn inventory_key(row: &Value) -> (String, String) {

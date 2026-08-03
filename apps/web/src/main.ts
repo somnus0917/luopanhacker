@@ -10,7 +10,6 @@ import {
   loadCompass, loadOrderImports,
 } from "./pages/operations";
 import { loadInventory, renderInventory } from "./pages/inventory";
-import { loadJd } from "./pages/jd";
 import { loadSettlement } from "./pages/settlement";
 import {
   loadCollectionShops, refreshCollectionStatus, stopCollectionStatusRefresh,
@@ -25,6 +24,7 @@ function buildPlaceholders() {
 window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
+window.addEventListener("luopan-jd-imported", () => { loadInventory(); });
 
 function activatePage(name: PageName) {
   state.page = name;
@@ -82,7 +82,6 @@ async function initialise() {
       loadCompass();
       loadOrderImports();
       loadInventory();
-      loadJd();
       loadSettlement();
       loadCollectionShops().then(refreshCollectionStatus);
     } catch (error) {
@@ -91,7 +90,7 @@ async function initialise() {
   });
   try {
     const me = await request<{ authenticated: boolean; username?: string; role?: "admin" | "viewer" }>("/api/me");
-    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadJd(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
   } catch {
     showLogin();
   }

@@ -202,9 +202,10 @@ export function renderInventory(payload: AnyRecord | null, view: InventoryView =
   state.inventory = payload;
   state.inventoryView = view;
   const rows = inventoryFilteredRows(payload);
-  const summary = inventorySummary(rows);
+  const analysisRows = state.inventoryWarehouse ? rows : rows.filter((item) => !item.is_rollup);
+  const summary = inventorySummary(analysisRows);
   const warehouses = inventoryGroup(rows, "warehouse_name");
-  const health = inventoryHealth(rows);
+  const health = inventoryHealth(analysisRows);
   const salesTrend = inventorySalesTrend(payload);
   $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
   const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
@@ -219,8 +220,8 @@ export function renderInventory(payload: AnyRecord | null, view: InventoryView =
     ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"],
   ];
   const cards = `<div class="metric-grid eight">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
-  const replenishment = rows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
-  const overstock = rows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
+  const replenishment = analysisRows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
+  const overstock = analysisRows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
   const content = view === "replenish"
     ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}`

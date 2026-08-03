@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::{Context, Result};
+use luopan_jd::{SHOP_ID as JD_SHOP_ID, SHOP_NAME as JD_SHOP_NAME, imported_batches};
 use luopan_runtime::{RuntimePaths, read_json_file};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Number, Value};
@@ -27,6 +28,7 @@ pub fn load_operations_records(paths: &RuntimePaths) -> Result<Vec<OperationReco
     Ok(merge_records(vec![
         load_daily_records(paths, &aliases)?,
         load_external_order_records(paths, &aliases)?,
+        load_jd_product_records(paths)?,
     ]))
 }
 
@@ -200,6 +202,66 @@ fn load_external_order_records(
     Ok(records)
 }
 
+fn load_jd_product_records(paths: &RuntimePaths) -> Result<Vec<OperationRecord>> {
+    let mut records = Vec::new();
+    for batch in imported_batches(paths)? {
+        if batch["kind"] != "product_performance" {
+            continue;
+        }
+        let date = string_value(batch.get("date")).unwrap_or_default();
+        if parse_daily_date(Some(&date)).is_none() {
+            continue;
+        }
+        let rows = batch["rows"].as_array().cloned().unwrap_or_default();
+        if rows.is_empty() {
+            continue;
+        }
+        let mut metrics = Map::new();
+        for (source, target, multiplier) in [
+            ("成交金额", "income_amt", 100.0),
+            ("成交金额", "pay_amt", 100.0),
+            ("成交单量", "pay_cnt", 1.0),
+            ("成交商品件数", "pay_item_cnt", 1.0),
+            ("成交客户数", "pay_ucnt", 1.0),
+            ("访客数", "product_show_ucnt", 1.0),
+        ] {
+            let value = rows
+                .iter()
+                .map(|row| parse_json_number(row.get(source)))
+                .sum::<f64>();
+            metrics.insert(target.to_string(), json_number(value * multiplier));
+        }
+        let pay_ucnt = metrics
+            .get("pay_ucnt")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let pay_amt = metrics
+            .get("pay_amt")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        if pay_ucnt > 0.0 {
+            metrics.insert(
+                "per_usr_pay_amt".to_string(),
+                json_number(pay_amt / pay_ucnt),
+            );
+        }
+        records.push(OperationRecord {
+            shop_id: JD_SHOP_ID.to_string(),
+            shop_name: JD_SHOP_NAME.to_string(),
+            date,
+            captured_at: string_value(batch.get("imported_at")).unwrap_or_default(),
+            metrics,
+            content: Map::new(),
+            trend: Map::new(),
+            source: "jd_product_performance".to_string(),
+            source_key: Some("jd_product_performance".to_string()),
+            source_label: Some("京东商品经营导入".to_string()),
+            source_file: string_value(batch.get("file_name")).unwrap_or_default(),
+        });
+    }
+    Ok(records)
+}
+
 fn canonical_external_shop_name(aliases: &BTreeMap<String, String>, shop_name: &str) -> String {
     aliases
         .get(shop_name)
@@ -336,6 +398,14 @@ fn parse_number(value: &str) -> Option<f64> {
         return None;
     }
     cleaned.parse::<f64>().ok().map(|value| value * multiplier)
+}
+
+fn parse_json_number(value: Option<&Value>) -> f64 {
+    match value {
+        Some(Value::Number(value)) => value.as_f64().unwrap_or(0.0),
+        Some(Value::String(value)) => parse_number(value).unwrap_or(0.0),
+        _ => 0.0,
+    }
 }
 
 fn extract_daily_content(raw_text: Option<&str>) -> Map<String, Value> {

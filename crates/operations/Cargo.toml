@@ -8,5 +8,6 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 luopan-runtime = { path = "../runtime" }
+luopan-jd = { path = "../jd" }
 serde.workspace = true
 serde_json.workspace = true

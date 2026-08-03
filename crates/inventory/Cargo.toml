@@ -9,6 +9,6 @@ publish.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 luopan-runtime = { path = "../runtime" }
+luopan-jd = { path = "../jd" }
 serde.workspace = true
 serde_json.workspace = true
-

@@ -1,19 +1,16 @@
-use crate::{ApiError, AppState, api};
+use crate::{ApiError, AppState, api, sync_storage_best_effort};
 use axum::{
     Json,
     extract::{Multipart, State},
     http::StatusCode,
 };
-use luopan_jd::{UploadedWorkbook, commit_preview, dashboard, preview_upload};
+use luopan_jd::{UploadedWorkbook, commit_preview, preview_upload};
 use serde::Deserialize;
 use serde_json::Value;
 
 #[derive(Deserialize)]
 pub(crate) struct CommitPayload {
     pub(crate) preview_token: String,
-}
-pub(crate) async fn jd_dashboard(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    Ok(api(dashboard(&state.paths).map_err(ApiError::internal)?))
 }
 pub(crate) async fn preview_jd_import(
     State(state): State<AppState>,
@@ -48,8 +45,8 @@ pub(crate) async fn commit_jd_import(
     if payload.preview_token.trim().is_empty() {
         return Err(ApiError::bad_request(anyhow::anyhow!("缺少预览凭据")));
     };
-    Ok((
-        StatusCode::CREATED,
-        api(commit_preview(&state.paths, &payload.preview_token).map_err(ApiError::bad_request)?),
-    ))
+    let result =
+        commit_preview(&state.paths, &payload.preview_token).map_err(ApiError::bad_request)?;
+    sync_storage_best_effort(&state).await;
+    Ok((StatusCode::CREATED, api(result)))
 }

@@ -309,11 +309,11 @@ function bindLineChartHover(records) {
       const index = Math.max(0, Math.min(dates.length - 1, Math.round((x - leftPadding) / step)));
       const date = dates[index];
       const chartX = leftPadding + index * step;
-      const rows2 = shops.map((shop) => {
+      const rows = shops.map((shop) => {
         const record = records.find((item) => item.date === date && item.shop_name === shop);
         return `<div><i style="background:${seriesColor(shop)}"></i><span>${escapeHtml(shop)}</span><strong>${metricText(metricKey, record?.metrics?.[metricKey])}</strong></div>`;
       }).join("");
-      tooltip.innerHTML = `<b>${date}</b>${rows2}`;
+      tooltip.innerHTML = `<b>${date}</b>${rows}`;
       tooltip.classList.remove("hidden");
       const panelBounds = panel.getBoundingClientRect();
       const desiredLeft = event.clientX - panelBounds.left + 14;
@@ -341,6 +341,7 @@ function recordSourceLabel(item) {
 function recordPlatform(item) {
   const explicit = item.platform || item.channel || item.content?.platform;
   if (explicit) return String(explicit);
+  if (item.source === "jd_product_performance") return "京东";
   if (item.source !== "external_orders") return "抖音";
   const source = `${item.source_key || ""} ${item.source_label || ""} ${item.shop_name || ""}`.toLowerCase();
   if (/(jingdong|\bjd\b|京东)/.test(source)) return "京东";
@@ -473,18 +474,26 @@ function bindOperationsFilterEvents() {
 function importDateRange(value) {
   return Array.isArray(value) && value.length === 2 ? `${value[0]} 至 ${value[1]}` : "—";
 }
+let jdPreview = null;
+let jdImportMessage = "";
+function jdImportMarkup() {
+  if (!isAdmin()) return "";
+  const files = jdPreview?.files || [];
+  const preview = jdPreview ? `<div class="import-preview"><div class="import-preview-head"><strong>京东导入预览</strong><span>店铺：GNC 京东自营</span></div><ul class="import-file-list">${files.map((file) => `<li><span>${escapeHtml(String(file.file_name || ""))}</span><small>${escapeHtml(String(file.kind === "inventory" ? "RDC 库存" : "商品经营"))} · ${whole(file.rows)} 行${file.known_file ? " · 已导入" : ""}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-jd-import ${jdPreview?.summary?.new_files ? "" : "disabled"}>确认写入现有看板</button><button class="button" type="button" data-cancel-jd-preview>取消</button></div><p class="import-help">商品经营会写入经营看板的京东店铺记录；RDC 会写入库存看板的 8 个实体仓和全国汇总（不重复计入总库存）。</p></div>` : "";
+  return `<details class="panel order-import-panel"><summary><span>京东数据导入</span><small>商品经营 + RDC 库存 → 现有看板</small></summary><div class="order-import-body"><form id="jd-upload-form" class="order-upload-form"><label class="file-picker"><span>选择商品经营 / RDC Excel（.xlsx，可同时上传）</span><input id="jd-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${jdImportMessage ? `<p class="order-import-message">${escapeHtml(jdImportMessage)}</p>` : ""}${preview}</div></details>`;
+}
 function renderOrderImportPanel() {
   const target = $("#order-import-panel");
   if (!target) return;
   target.classList.toggle("hidden", state.operationSection !== "sales");
-  const preview2 = state.orderPreview;
+  const preview = state.orderPreview;
   const batches = state.orderImports?.batches || [];
   const summary = state.orderImports?.summary || {};
   const message = state.orderImportMessage ? `<p class="order-import-message">${escapeHtml(state.orderImportMessage)}</p>` : "";
-  const previewBlock = isAdmin() && preview2 ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview2.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview2.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview2.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview2.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview2.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview2.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview2.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
+  const previewBlock = isAdmin() && preview ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
   const history2 = batches.length ? `<div class="import-history"><div class="import-history-head"><strong>导入历史</strong><span>累计 ${whole(summary.orders)} 单 · ${money(summary.pay_amt)}</span></div>${batches.map((batch) => `<div class="import-history-row"><div><strong>${escapeHtml((batch.source_labels || []).join("、"))}</strong><span>${escapeHtml(importTime(batch.created_at))} · ${escapeHtml(importDateRange(batch.date_range))} · 新增 ${whole(batch.added_orders)} 单</span></div>${isAdmin() ? `<button class="text-button import-delete" type="button" data-delete-order-import="${escapeHtml(batch.id)}">撤销</button>` : ""}</div>`).join("")}</div>` : `<p class="import-help">暂无线上导入批次。${isAdmin() ? "可上传喵速达、天猫订单明细；" : ""}抖店罗盘继续由现有采集任务更新。</p>`;
   const uploadForm = isAdmin() ? `<form id="order-upload-form" class="order-upload-form"><label class="file-picker"><span>选择订单明细（.xlsx，可多选）</span><input id="order-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>` : `<p class="import-help">当前为只读账户，可查看导入历史，不能上传或撤销订单数据。</p>`;
-  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>${isAdmin() ? "上传 Excel → 预览去重 → 确认写入" : "导入历史（只读）"}</small></summary><div class="order-import-body">${uploadForm}${message}${previewBlock}${history2}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>`;
+  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>${isAdmin() ? "上传 Excel → 预览去重 → 确认写入" : "导入历史（只读）"}</small></summary><div class="order-import-body">${uploadForm}${message}${previewBlock}${history2}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>${jdImportMarkup()}`;
   $("#order-upload-form")?.addEventListener("submit", previewOrderImport);
   $("[data-commit-order-import]")?.addEventListener("click", commitOrderImport);
   $("[data-cancel-order-preview]")?.addEventListener("click", () => {
@@ -493,6 +502,42 @@ function renderOrderImportPanel() {
     renderOrderImportPanel();
   });
   $$("[data-delete-order-import]").forEach((button) => button.addEventListener("click", () => deleteOrderImport(button.dataset.deleteOrderImport)));
+  $("#jd-upload-form")?.addEventListener("submit", previewJdImport);
+  $("[data-commit-jd-import]")?.addEventListener("click", commitJdImport);
+  $("[data-cancel-jd-preview]")?.addEventListener("click", () => {
+    jdPreview = null;
+    jdImportMessage = "已取消本次京东导入预览。";
+    renderOrderImportPanel();
+  });
+}
+async function previewJdImport(event) {
+  event.preventDefault();
+  if (!$("#jd-upload-files")?.files?.length) return;
+  jdPreview = null;
+  jdImportMessage = "";
+  try {
+    jdPreview = await request("/api/jd/imports/preview", { method: "POST", body: new FormData(event.currentTarget) });
+    jdImportMessage = "预览完成，请确认后写入经营和库存看板。";
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "京东文件解析失败，请检查模板。");
+    showToast(jdImportMessage, "error");
+  }
+  renderOrderImportPanel();
+}
+async function commitJdImport() {
+  if (!jdPreview?.preview_token) return;
+  try {
+    await request("/api/jd/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: jdPreview.preview_token }) });
+    jdPreview = null;
+    jdImportMessage = "已写入 GNC 京东自营的经营记录与 RDC 库存。";
+    showToast(jdImportMessage, "success");
+    await loadCompass();
+    window.dispatchEvent(new Event("luopan-jd-imported"));
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "写入失败，请重新预览。");
+    showToast(jdImportMessage, "error");
+  }
+  renderOrderImportPanel();
 }
 async function loadOrderImports() {
   try {
@@ -702,8 +747,8 @@ function channelGroup(records, key) {
   });
   return { value: available ? value : null, ratio: weight ? weightedRatio / weight : null };
 }
-function simpleTable(headers, rows2, empty = "暂无数据") {
-  const body = rows2.length ? rows2.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
+function simpleTable(headers, rows, empty = "暂无数据") {
+  const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
   return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function channelTrendRecords(records) {
@@ -809,12 +854,12 @@ function platformMatrixMarkup(records, channelRecords) {
     shops.add(record.shop_name);
     groups.set("抖音", shops);
   });
-  const rows2 = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "zh-CN")).map(([platform, shops]) => [
+  const rows = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "zh-CN")).map(([platform, shops]) => [
     `<span class="platform-pill">${escapeHtml(platform)}</span>`,
     whole(shops.size),
     escapeHtml([...shops].sort((a, b) => a.localeCompare(b, "zh-CN")).join("、"))
   ]);
-  return `<section class="panel"><div class="panel-head"><div><h3>店铺矩阵</h3><span>平台 → 店铺的经营范围</span></div></div>${simpleTable(["平台", "店铺数", "已接入店铺"], rows2, "当前范围没有店铺")}</section>`;
+  return `<section class="panel"><div class="panel-head"><div><h3>店铺矩阵</h3><span>平台 → 店铺的经营范围</span></div></div>${simpleTable(["平台", "店铺数", "已接入店铺"], rows, "当前范围没有店铺")}</section>`;
 }
 function overviewSectionMarkup(records, channelRecords) {
   const totals = aggregate(records);
@@ -939,12 +984,12 @@ async function loadChannel() {
 }
 function renderTable(records, content = false) {
   const headers = content ? ["日期", "店铺", "来源", "直播", "商品卡", "图文/短视频", "短视频", "其他内容"] : ["日期", "店铺", "来源", "成交金额", "支付金额", "结算金额", "成交订单", "成交人数", "客单价", "曝光人数", "点击人数", "点击支付率", "退款率"];
-  const rows2 = [...records].sort((a, b) => `${b.date}${b.shop_name}`.localeCompare(`${a.date}${a.shop_name}`, "zh-CN")).map((item) => {
+  const rows = [...records].sort((a, b) => `${b.date}${b.shop_name}`.localeCompare(`${a.date}${a.shop_name}`, "zh-CN")).map((item) => {
     const metrics = item.metrics || {}, source = item.content || {};
     const cells = content ? [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(source.live), moneyOrDash(source.product_card), moneyOrDash(source.artc_video), moneyOrDash(source.video), moneyOrDash(source.other_content)] : [item.date, item.shop_name, recordSourceLabel(item), moneyOrDash(metrics.income_amt), moneyOrDash(metrics.pay_amt), moneyOrDash(metrics.settlement_amt_pay_time), wholeOrDash(metrics.pay_cnt), wholeOrDash(metrics.pay_ucnt), moneyOrDash(metrics.per_usr_pay_amt), wholeOrDash(metrics.product_show_ucnt), wholeOrDash(metrics.product_click_ucnt), ratioOrDash(metrics.product_click_pay_ucnt_ratio), ratioOrDash(metrics.refund_amt_rate)];
     return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
-  return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows2 || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
+  return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}">暂无数据</td></tr>`}</tbody></table></div>`;
 }
 async function loadCompass() {
   try {
@@ -966,9 +1011,9 @@ async function loadCompass() {
     target.innerHTML = `<div class="empty-panel"><strong>经营数据暂不可用</strong><span>${escapeHtml(errorMessage(error, "请检查 API 服务与数据同步状态。"))}</span></div>`;
   }
 }
-function sortRows(rows2, key, dir) {
-  if (!key) return rows2;
-  return [...rows2].sort((a, b) => {
+function sortRows(rows, key, dir) {
+  if (!key) return rows;
+  return [...rows].sort((a, b) => {
     const av = number(a[key]), bv = number(b[key]);
     return dir === "asc" ? av - bv : bv - av;
   });
@@ -1021,9 +1066,9 @@ function inventoryFilteredRows(payload) {
     return warehouseMatch && brandMatch;
   });
 }
-function inventoryGroup(rows2, keyName) {
+function inventoryGroup(rows, keyName) {
   const groups = /* @__PURE__ */ new Map();
-  rows2.forEach((row) => {
+  rows.forEach((row) => {
     const name = row[keyName] || "未归类";
     const group = groups.get(name) || { name, sku_records: 0, stock_num: 0, available_num: 0, sales_7d: 0, inbound_30d: 0, negative_available: 0 };
     group.sku_records += 1;
@@ -1036,9 +1081,9 @@ function inventoryGroup(rows2, keyName) {
     turnover_days: group.sales_7d ? group.available_num / (group.sales_7d / 7) : null
   })).sort((a, b) => number(b.available_num) - number(a.available_num));
 }
-function inventoryHealth(rows2) {
+function inventoryHealth(rows) {
   return INVENTORY_HEALTH_ORDER.map((key) => {
-    const members = rows2.filter((row) => row.health_key === key);
+    const members = rows.filter((row) => row.health_key === key);
     return {
       key,
       name: INVENTORY_HEALTH_NAMES[key],
@@ -1047,28 +1092,28 @@ function inventoryHealth(rows2) {
     };
   });
 }
-function inventorySummary(rows2) {
-  const coverageRows = rows2.filter((row) => row.coverage_days !== null && row.coverage_days !== void 0 && number(row.sales_7d) > 0);
-  const available = rows2.reduce((sum, row) => sum + number(row.available_num), 0);
-  const sales7d = rows2.reduce((sum, row) => sum + number(row.sales_7d), 0);
-  const costRows = rows2.filter((row) => row.cost_covered);
+function inventorySummary(rows) {
+  const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== void 0 && number(row.sales_7d) > 0);
+  const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
+  const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);
+  const costRows = rows.filter((row) => row.cost_covered);
   return {
-    sku_records: rows2.length,
-    distinct_skus: new Set(rows2.map((row) => row.spec_no).filter(Boolean)).size,
-    salable_skus: new Set(rows2.filter((row) => number(row.available_num) > 0).map((row) => row.spec_no).filter(Boolean)).size,
-    stock_num: rows2.reduce((sum, row) => sum + number(row.stock_num), 0),
+    sku_records: rows.length,
+    distinct_skus: new Set(rows.map((row) => row.spec_no).filter(Boolean)).size,
+    salable_skus: new Set(rows.filter((row) => number(row.available_num) > 0).map((row) => row.spec_no).filter(Boolean)).size,
+    stock_num: rows.reduce((sum, row) => sum + number(row.stock_num), 0),
     available_num: available,
     sales_7d: sales7d,
-    inbound_30d: rows2.reduce((sum, row) => sum + number(row.inbound_30d), 0),
-    negative_available: rows2.filter((row) => number(row.available_num) < 0).length,
+    inbound_30d: rows.reduce((sum, row) => sum + number(row.inbound_30d), 0),
+    negative_available: rows.filter((row) => number(row.available_num) < 0).length,
     turnover_days: sales7d ? available / (sales7d / 7) : null,
-    inventory_turnover_days: sales7d ? rows2.reduce((sum, row) => sum + number(row.stock_num), 0) / (sales7d / 7) : null,
+    inventory_turnover_days: sales7d ? rows.reduce((sum, row) => sum + number(row.stock_num), 0) / (sales7d / 7) : null,
     average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
-    replenishment_records: rows2.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
-    no_movement_records: rows2.filter((row) => row.health_key === "no_movement").length,
-    overstock_records: rows2.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
+    replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
+    no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
+    overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
     cost_covered_records: costRows.length,
-    cost_coverage_rate: rows2.length ? costRows.length / rows2.length : null,
+    cost_coverage_rate: rows.length ? costRows.length / rows.length : null,
     stock_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.stock_cost_amount), 0) : null,
     available_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.available_cost_amount), 0) : null
   };
@@ -1098,9 +1143,9 @@ function inventoryBarPanel(items, title, key, formatter = whole) {
 function healthPill(item) {
   return `<span class="health-pill ${escapeHtml(item.health_key || item.key)}">${escapeHtml(item.health_name || item.name)}</span>`;
 }
-function inventoryTable(rows2, mode = "detail") {
-  const total = rows2.length;
-  const rowsWithTurnover = rows2.map((item) => ({
+function inventoryTable(rows, mode = "detail") {
+  const total = rows.length;
+  const rowsWithTurnover = rows.map((item) => ({
     ...item,
     inventory_turnover_days: number(item.sales_7d) ? number(item.stock_num) / (number(item.sales_7d) / 7) : null
   }));
@@ -1134,10 +1179,11 @@ function renderInventory(payload, view = state.inventoryView) {
   if (!payload) return;
   state.inventory = payload;
   state.inventoryView = view;
-  const rows2 = inventoryFilteredRows(payload);
-  const summary = inventorySummary(rows2);
-  const warehouses = inventoryGroup(rows2, "warehouse_name");
-  const health = inventoryHealth(rows2);
+  const rows = inventoryFilteredRows(payload);
+  const analysisRows = state.inventoryWarehouse ? rows : rows.filter((item) => !item.is_rollup);
+  const summary = inventorySummary(analysisRows);
+  const warehouses = inventoryGroup(rows, "warehouse_name");
+  const health = inventoryHealth(analysisRows);
   const salesTrend = inventorySalesTrend(payload);
   $("#inventory-freshness").textContent = payload.captured_at ? `快照 · ${payload.captured_at}` : "本地快照";
   const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
@@ -1152,10 +1198,10 @@ function renderInventory(payload, view = state.inventoryView) {
     ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"]
   ];
   const cards = `<div class="metric-grid eight">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
-  const replenishment = rows2.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
-  const overstock = rows2.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
+  const replenishment = analysisRows.filter((item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key));
+  const overstock = analysisRows.filter((item) => ["high", "overstock", "no_movement"].includes(item.health_key));
   const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
-  const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">单品维度<small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows2)}` : overview;
+  const content = view === "replenish" ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}` : view === "overstock" ? `<h3 class="section-title inventory-first-title">积压 / 未动销清单 <small>“未动销”仅基于近 7 天销售出库</small></h3>${inventoryTable(overstock)}` : view === "detail" ? `<h3 class="section-title inventory-first-title">单品维度<small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}` : overview;
   $("#inventory-content").innerHTML = `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
   $('[data-inventory-filter="warehouse"]')?.addEventListener("change", (event) => {
     state.inventoryWarehouse = event.currentTarget.value;
@@ -1183,40 +1229,9 @@ async function loadInventory() {
     target.innerHTML = `<div class="empty-panel"><strong>库存快照暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
-let previewToken = "";
-function rows(items, inventory = false) {
-  return items.slice(0, 12).map((row) => `<tr><td>${escapeHtml(String(row["商品名称"] || row["商品名称"] || "—"))}</td><td>${escapeHtml(String(row.product_id || "—"))}</td><td>${inventory ? whole(row["全国可用库存"]) : money(row["成交金额"])}</td><td>${inventory ? `${Number(row["全国预计可售天数"] || 0).toFixed(1)} 天` : whole(row["访客数"])}</td></tr>`).join("");
-}
-async function loadJd() {
-  const target = $("#jd-content");
-  if (!target) return;
-  try {
-    const data = await request("/api/jd");
-    const s = data.summary || {};
-    target.innerHTML = `<section class="panel"><div class="panel-head"><div><h3>京东商品经营</h3><span>手动导入的商品经营与 RDC 库存快照</span></div></div><div class="metric-grid"><article class="metric-card"><div class="metric-label">商品行</div><div class="metric-value">${whole(s.product_rows)}</div></article><article class="metric-card"><div class="metric-label">成交金额</div><div class="metric-value">${money(s.revenue)}</div></article><article class="metric-card"><div class="metric-label">访客数</div><div class="metric-value">${whole(s.visitors)}</div></article><article class="metric-card"><div class="metric-label">库存风险</div><div class="metric-value">${whole((data.inventory_risks || []).length)}</div></article></div>${isAdmin() ? `<form id="jd-upload-form" class="order-upload-form"><label class="file-picker"><span>选择京东 RDC / 商品经营 Excel</span><input type="file" name="files" accept=".xlsx" multiple required /></label><button class="button">导入预览</button></form><div id="jd-preview"></div>` : ""}<h3 class="section-title">库存风险</h3><div class="table-wrap"><table><thead><tr><th>商品</th><th>ID</th><th>全国可用库存</th><th>预计可售天数</th></tr></thead><tbody>${rows(data.inventory_risks || [], true) || "<tr><td colspan=4>暂无风险数据</td></tr>"}</tbody></table></div><h3 class="section-title">商品经营明细</h3><div class="table-wrap"><table><thead><tr><th>商品</th><th>ID</th><th>成交金额</th><th>访客数</th></tr></thead><tbody>${rows(data.products || []) || "<tr><td colspan=4>暂无经营数据</td></tr>"}</tbody></table></div></section>`;
-    $("#jd-upload-form")?.addEventListener("submit", preview);
-  } catch (e) {
-    target.innerHTML = `<div class="empty-panel"><strong>京东数据暂不可用</strong><span>${escapeHtml(errorMessage(e, "读取失败"))}</span></div>`;
-  }
-}
-async function preview(event) {
-  event.preventDefault();
-  const data = await request("/api/jd/imports/preview", { method: "POST", body: new FormData(event.currentTarget) });
-  previewToken = String(data.preview_token || "");
-  const files = (data.files || []).map((f) => `${f.file_name} · ${f.kind} · ${whole(f.rows)} 行${f.known_file ? "（已导入）" : ""}`).join("<br>");
-  const target = $("#jd-preview");
-  if (target) target.innerHTML = `<p class="order-import-message">${files}</p><button id="jd-commit" class="button button-primary">确认写入京东看板</button>`;
-  $("#jd-commit")?.addEventListener("click", commit);
-}
-async function commit() {
-  if (!previewToken) return;
-  await request("/api/jd/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: previewToken }) });
-  previewToken = "";
-  await loadJd();
-}
 function settlementGroupTable(title, groups) {
-  const rows2 = [...groups || []].sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount)).map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`).join("");
-  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows2 || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
+  const rows = [...groups || []].sort((a, b) => number(b.settlement_amount) - number(a.settlement_amount)).map((item) => `<tr><td>${escapeHtml(item.name || "未标注")}</td><td>${settlementMoney(item.settlement_amount)}</td><td>${settlementMoney(item.income_total)}</td><td>${settlementMoney(item.expense_total)}</td><td>${whole(item.order_count)}</td><td>${whole(item.row_count)}</td></tr>`).join("");
+  return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按结算金额排序</span></div></div><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>维度</th><th>结算金额</th><th>收入合计</th><th>支出合计</th><th>订单数</th><th>明细行</th></tr></thead><tbody>${rows || `<tr><td colspan="6">暂无结算数据</td></tr>`}</tbody></table></div></section>`;
 }
 function settlementDates(payload = state.settlement) {
   return [...new Set(payload?.available_dates || state.settlementAvailableDates || [])].filter(Boolean).sort((a, b) => b.localeCompare(a));
@@ -1357,8 +1372,8 @@ function settlementUploadPanel() {
   const defaultShop = state.settlementShop || "";
   return `<details class="panel order-import-panel"><summary><span>结算 CSV 导入</span><small>填写店铺 → 上传 CSV → 自动刷新</small></summary><div class="order-import-body"><form id="settlement-upload-form" class="order-upload-form"><label>店铺名称<input name="shop_name" value="${escapeHtml(defaultShop)}" required /></label><label class="file-picker"><span>选择结算 CSV</span><input id="settlement-upload-file" type="file" name="file" accept=".csv,text/csv" required /></label><button class="button" type="submit">上传并解析</button></form>${message}<p class="import-help">上传后文件保存在服务器 <code>output/settlement/</code>，店铺名会保存为本地映射，用于后续筛选与汇总。</p></div></details>`;
 }
-function settlementDetailTable(rows2) {
-  const body = [...rows2 || []].map((item) => {
+function settlementDetailTable(rows) {
+  const body = [...rows || []].map((item) => {
     const governmentSubsidy = number(item.government_merchant) + number(item.government_platform);
     const cells = [
       item.shop_name,
@@ -1375,7 +1390,7 @@ function settlementDetailTable(rows2) {
     ];
     return `<tr>${cells.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`;
   }).join("");
-  return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows2?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
+  return `<details class="detail-table-disclosure" open><summary><span>结算明细</span><small>最多显示前 ${whole(rows?.length || 0)} 条</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>店铺</th><th>结算时间</th><th>订单号</th><th>商品</th><th>业务类型</th><th>结算金额</th><th>用户实付</th><th>收入合计</th><th>支出合计</th><th>平台服务费</th><th>政府补贴</th></tr></thead><tbody>${body || `<tr><td colspan="11">暂无结算明细</td></tr>`}</tbody></table></div></div></details>`;
 }
 function renderSettlement(payload) {
   state.settlement = payload;
@@ -1693,6 +1708,9 @@ function buildPlaceholders() {
 window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
+window.addEventListener("luopan-jd-imported", () => {
+  loadInventory();
+});
 function activatePage(name) {
   state.page = name;
   $$(".dashboard-page").forEach((page) => page.classList.toggle("active", page.dataset.page === name));
@@ -1747,7 +1765,6 @@ async function initialise() {
       loadCompass();
       loadOrderImports();
       loadInventory();
-      loadJd();
       loadSettlement();
       loadCollectionShops().then(refreshCollectionStatus);
     } catch (error) {
@@ -1761,7 +1778,6 @@ async function initialise() {
       loadCompass();
       loadOrderImports();
       loadInventory();
-      loadJd();
       loadSettlement();
       loadCollectionShops().then(refreshCollectionStatus);
     } else showLogin();
