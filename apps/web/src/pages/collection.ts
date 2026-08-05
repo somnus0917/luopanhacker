@@ -129,6 +129,7 @@ export function renderCollectionCenter(status: CollectionStatus, { logMessage = 
         <div class="collection-modules">
           ${collectionModuleCard("operations", "经营数据", "成交、退款、客单价及转化等近 1 天指标", status)}
           ${collectionModuleCard("channel", "渠道数据", "看流量、看商品和看搜索的渠道洞察", status)}
+          ${collectionModuleCard("douyin", "抖音面板", "直播、短视频和商品卡，逐项验证昨日范围", status)}
         </div>
         <div class="status-actions">
           ${isAdmin() ? `<button id="collection-run-button" class="button button-primary" ${busy || !online ? "disabled" : ""}>${busy ? "采集任务进行中" : online ? "开始日常采集" : "采集服务离线"}</button>` : ""}

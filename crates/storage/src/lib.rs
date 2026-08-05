@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Local;
-use luopan_channels::load_channel_dashboard;
+use luopan_channels::{load_channel_dashboard, load_douyin_dashboard};
 use luopan_inventory::load_inventory_dashboard;
 use luopan_jobs::status_payload;
 use luopan_operations::{OperationRecord, load_operations_records};
@@ -205,6 +205,9 @@ pub async fn sync_all(paths: &RuntimePaths, pool: &SqlitePool) -> Result<Storage
     let channels = load_channel_dashboard(paths)?;
     sync_channels(pool, &channels).await?;
     upsert_kv(pool, "channel_dashboard", &channels).await?;
+
+    let douyin = load_douyin_dashboard(paths)?;
+    upsert_kv(pool, "douyin_dashboard", &douyin).await?;
 
     let order_imports = public_imports(paths)?;
     sync_order_imports(pool, &order_imports).await?;

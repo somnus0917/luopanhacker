@@ -72,6 +72,101 @@ pub fn load_channel_dashboard(paths: &RuntimePaths) -> Result<Value> {
     }))
 }
 
+/// Load the latest sanitized Compass snapshots for the live, video and
+/// product-card panels. Response bodies deliberately remain on disk; the API
+/// exposes only panel metadata until each metric has an explicit data contract.
+pub fn load_douyin_dashboard(paths: &RuntimePaths) -> Result<Value> {
+    let root = paths.output_dir.join("douyin");
+    let mut payload_paths = Vec::new();
+    if root.exists() {
+        collect_named_payload_paths(&root, "compass_douyin_", &mut payload_paths)?;
+    }
+    payload_paths.sort();
+
+    let mut records: BTreeMap<(String, String), Value> = BTreeMap::new();
+    for path in payload_paths {
+        let Some(payload) = read_json_file(&path)? else {
+            continue;
+        };
+        let captured_at = string_at(&payload, &["captured_at"]).unwrap_or_default();
+        for result in payload
+            .get("results")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(shop_name) = string_at(result, &["shop_name"]) else {
+                continue;
+            };
+            let Some(date) = result
+                .get("panels")
+                .and_then(Value::as_array)
+                .and_then(|panels| {
+                    panels
+                        .iter()
+                        .filter_map(|panel| string_at(panel, &["data_end"]))
+                        .max()
+                })
+                .map(|value| normalize_date(&value))
+            else {
+                continue;
+            };
+            let panels = result
+                .get("panels")
+                .and_then(Value::as_array)
+                .map(|panels| panels.iter().map(douyin_panel_summary).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let record = json!({
+                "shop_id": shop_name,
+                "shop_name": shop_name,
+                "date": date,
+                "captured_at": captured_at,
+                "panels": panels,
+                "errors": result.get("errors").cloned().unwrap_or_else(|| json!([])),
+            });
+            let key = (shop_name, date);
+            let replace = records
+                .get(&key)
+                .and_then(|previous| string_at(previous, &["captured_at"]))
+                .is_none_or(|previous| previous <= captured_at);
+            if replace {
+                records.insert(key, record);
+            }
+        }
+    }
+    let records = records.into_values().collect::<Vec<_>>();
+    let shops = records
+        .iter()
+        .filter_map(|record| string_at(record, &["shop_name"]))
+        .collect::<std::collections::BTreeSet<_>>();
+    let dates = records
+        .iter()
+        .filter_map(|record| string_at(record, &["date"]))
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(json!({
+        "generated_at": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+        "records": records,
+        "summary": { "record_count": records.len(), "shops": shops, "dates": dates }
+    }))
+}
+
+fn douyin_panel_summary(panel: &Value) -> Value {
+    let responses = panel.get("responses").and_then(Value::as_array);
+    let endpoints = responses
+        .into_iter()
+        .flatten()
+        .filter_map(|response| string_at(response, &["endpoint"]))
+        .collect::<std::collections::BTreeSet<_>>();
+    json!({
+        "panel": string_at(panel, &["panel"]),
+        "label": string_at(panel, &["label"]),
+        "data_start": string_at(panel, &["data_start"]),
+        "data_end": string_at(panel, &["data_end"]),
+        "response_count": responses.map_or(0, Vec::len),
+        "endpoints": endpoints,
+    })
+}
+
 fn collect_payload_paths(root: &Path, paths: &mut Vec<std::path::PathBuf>) -> Result<()> {
     for entry in fs::read_dir(root).with_context(|| format!("read {}", root.display()))? {
         let entry = entry?;
@@ -82,6 +177,27 @@ fn collect_payload_paths(root: &Path, paths: &mut Vec<std::path::PathBuf>) -> Re
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.starts_with("compass_channel_") && name.ends_with(".json"))
+        {
+            paths.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_named_payload_paths(
+    root: &Path,
+    prefix: &str,
+    paths: &mut Vec<std::path::PathBuf>,
+) -> Result<()> {
+    for entry in fs::read_dir(root).with_context(|| format!("read {}", root.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_named_payload_paths(&path, prefix, paths)?;
+        } else if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(prefix) && name.ends_with(".json"))
         {
             paths.push(path);
         }

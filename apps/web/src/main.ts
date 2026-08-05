@@ -11,7 +11,7 @@ import {
 } from "./pages/operations";
 import { loadInventory, renderInventory } from "./pages/inventory";
 import { loadSettlement } from "./pages/settlement";
-import { renderDouyin } from "./pages/douyin";
+import { loadDouyin, renderDouyin } from "./pages/douyin";
 import {
   loadCollectionShops, refreshCollectionStatus, stopCollectionStatusRefresh,
 } from "./pages/collection";
@@ -25,7 +25,7 @@ function buildPlaceholders() {
 window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
-window.addEventListener("luopan-jd-imported", () => { loadCompass(); loadInventory(); });
+window.addEventListener("luopan-jd-imported", () => { loadCompass(); loadDouyin(); loadInventory(); });
 
 function activatePage(name: PageName) {
   state.page = name;
@@ -81,7 +81,8 @@ async function initialise() {
       const user = await request<{ username: string; role: "admin" | "viewer" }>("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
       $("#login-error").textContent = "";
       showApp(user);
-      loadCompass().then(renderDouyin);
+      loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();
@@ -92,7 +93,7 @@ async function initialise() {
   });
   try {
     const me = await request<{ authenticated: boolean; username?: string; role?: "admin" | "viewer" }>("/api/me");
-    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass().then(renderDouyin); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadDouyin(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
   } catch {
     showLogin();
   }

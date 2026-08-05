@@ -74,7 +74,11 @@ pub(crate) async fn scrape(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     enqueue_collection(
         &state,
-        vec!["operations".to_string(), "channel".to_string()],
+        vec![
+            "operations".to_string(),
+            "channel".to_string(),
+            "douyin".to_string(),
+        ],
         None,
         Vec::new(),
     )
@@ -161,13 +165,17 @@ async fn enqueue_collection(
 
 pub(crate) fn validate_collection_modules(modules: Vec<String>) -> Result<Vec<String>> {
     let requested = if modules.is_empty() {
-        vec!["operations".to_string(), "channel".to_string()]
+        vec![
+            "operations".to_string(),
+            "channel".to_string(),
+            "douyin".to_string(),
+        ]
     } else {
         modules
     };
     let mut result = Vec::new();
     for module in requested {
-        if !matches!(module.as_str(), "operations" | "channel") {
+        if !matches!(module.as_str(), "operations" | "channel" | "douyin") {
             anyhow::bail!("不支持的采集模块: {module}");
         }
         if !result.contains(&module) {

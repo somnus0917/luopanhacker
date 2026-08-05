@@ -122,7 +122,7 @@ const previousLocalDate = () => {
 };
 const latestBackfillDate = () => previousLocalDate() >= currentLocalMonthStart() ? previousLocalDate() : "";
 const backfillDateAllowed = (value) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
-const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
+const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
 const isAdmin = () => state.currentUser?.role === "admin";
 function renderAccount() {
   const target = $("#account-content");
@@ -1511,14 +1511,46 @@ function productCardSection(records) {
     ["点击至成交", ratio(clicks ? buyers / clicks : 0), "成交人数 ÷ 商品点击人数"]
   ])}<section class="panel"><div class="panel-head"><div><h3>商品卡表现</h3><span>商品卡接口已入库时展示明细</span></div><span class="chart-semantic">转化链路</span></div>${compactTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率"], productRows, "暂未采集到商品卡明细；下次渠道采集完成后会在此展示。")}</section>`;
 }
+function collectedPanelSection() {
+  const all = state.douyin?.records || [];
+  const date = [...new Set(all.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "";
+  const panels = all.filter((record) => record.date === date).flatMap((record) => (record.panels || []).map((panel) => ({ ...panel, shop_name: record.shop_name })));
+  const selected = panels.filter((panel) => panel.panel === state.douyinSection);
+  const label = SECTIONS.find(([key]) => key === state.douyinSection)?.[1] || "抖音";
+  const endpointRows = selected.flatMap((panel) => (panel.endpoints || []).map((endpoint) => [
+    escapeHtml(String(panel.shop_name || "当前店铺")),
+    escapeHtml(endpoint.split("/").at(-1) || endpoint),
+    whole(panel.response_count)
+  ]));
+  if (!selected.length) {
+    return `${snapshotBanner(date, label, "暂无该板块的有效昨日快照")}<div class="empty-panel"><strong>等待 ${escapeHtml(label)} 数据</strong><span>采集会在页面中点击“近 1 天”，并在直播页先进入“数据概览”。</span></div>`;
+  }
+  const responseCount = selected.reduce((total, panel) => total + number(panel.response_count), 0);
+  return `${snapshotBanner(date, label, state.douyinSection === "live" ? "已验证：数据概览 → 近 1 天" : "已验证：近 1 天")}${metricCards([
+    ["已采集店铺", whole(new Set(selected.map((panel) => panel.shop_name)).size), "昨日有效快照"],
+    ["可信接口响应", whole(responseCount), "仅保留 Compass JSON"],
+    ["数据范围", escapeHtml(date || "—"), "接口日期已核验"],
+    ["板块状态", "已入库", "SQLite 与 API 同步"]
+  ])}<section class="panel"><div class="panel-head"><div><h3>${escapeHtml(label)}接口快照</h3><span>原始响应已受控保存，指标解析将按接口口径逐步开放。</span></div><span class="chart-semantic">已验证</span></div>${compactTable(["店铺", "接口", "响应数"], endpointRows, "该板块没有可展示的接口元数据")}</section>`;
+}
+async function loadDouyin() {
+  try {
+    state.douyin = await request("/api/douyin");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.douyin = { records: [] };
+    showToast(errorMessage(error, "抖音面板数据读取失败。"), "error");
+  }
+  renderDouyin();
+}
 function renderDouyin() {
   const target = $("#douyin-content");
   const freshness = $("#douyin-freshness");
   if (!target || !freshness) return;
   const records = douyinRecords();
-  const date = latestDate(records);
+  const date = state.douyin?.records?.length ? [...new Set(state.douyin.records.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "" : latestDate(records);
   freshness.textContent = date ? `${date === yesterdayDate() ? "昨日" : "最近"}快照 · ${date}` : "暂无抖音日快照";
-  const content = !records.length ? `<div class="empty-panel"><strong>等待首个抖音日快照</strong><span>采集器会先在罗盘选择“近 1 天”，验证为昨天后才写入面板。</span></div>` : state.douyinSection === "product_card" ? productCardSection(records) : contentSection(records, state.douyinSection, state.douyinSection === "live" ? "直播" : "短视频");
+  const content = state.douyin?.records?.length ? collectedPanelSection() : !records.length ? `<div class="empty-panel"><strong>等待首个抖音日快照</strong><span>采集器会先在罗盘选择“近 1 天”，验证为昨天后才写入面板。</span></div>` : state.douyinSection === "product_card" ? productCardSection(records) : contentSection(records, state.douyinSection, state.douyinSection === "live" ? "直播" : "短视频");
   target.innerHTML = `${sectionTabs()}${content}`;
   document.querySelectorAll("#douyin-content [data-douyin-section]").forEach((button) => button.addEventListener("click", () => {
     state.douyinSection = button.dataset.douyinSection;
@@ -1631,6 +1663,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
         <div class="collection-modules">
           ${collectionModuleCard("operations", "经营数据", "成交、退款、客单价及转化等近 1 天指标", status)}
           ${collectionModuleCard("channel", "渠道数据", "看流量、看商品和看搜索的渠道洞察", status)}
+          ${collectionModuleCard("douyin", "抖音面板", "直播、短视频和商品卡，逐项验证昨日范围", status)}
         </div>
         <div class="status-actions">
           ${isAdmin() ? `<button id="collection-run-button" class="button button-primary" ${busy || !online ? "disabled" : ""}>${busy ? "采集任务进行中" : online ? "开始日常采集" : "采集服务离线"}</button>` : ""}
@@ -1810,6 +1843,7 @@ window.addEventListener("luopan-api-fallback", () => {
 });
 window.addEventListener("luopan-jd-imported", () => {
   loadCompass();
+  loadDouyin();
   loadInventory();
 });
 function activatePage(name) {
@@ -1864,7 +1898,8 @@ async function initialise() {
       const user = await request("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(form)) });
       $("#login-error").textContent = "";
       showApp(user);
-      loadCompass().then(renderDouyin);
+      loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();
@@ -1877,7 +1912,8 @@ async function initialise() {
     const me = await request("/api/me");
     if (me.authenticated && me.username && me.role) {
       showApp({ username: me.username, role: me.role });
-      loadCompass().then(renderDouyin);
+      loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();

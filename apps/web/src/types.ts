@@ -29,6 +29,10 @@ export type ChannelDashboard = JsonObject & {
   records: JsonObject[];
 };
 
+export type DouyinDashboard = JsonObject & {
+  records: JsonObject[];
+};
+
 export type CompassResponse = {
   records: OperationRecord[];
   channel: ChannelDashboard | null;

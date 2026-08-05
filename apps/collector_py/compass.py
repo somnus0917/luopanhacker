@@ -4,7 +4,7 @@ import json
 import os
 import socket
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -14,7 +14,7 @@ APP_DIR = Path(__file__).resolve().parents[2]
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from apps.collector_py import channel, operations
+from apps.collector_py import channel, douyin, operations
 from apps.collector_py.status import LOGIN_SCREENSHOT, write_status
 from apps.scraper_py.scraper import (
     SESSION_DIR,
@@ -26,7 +26,7 @@ from apps.scraper_py.scraper import (
     wait_network_quiet,
 )
 
-AVAILABLE_MODULES = ("operations", "channel")
+AVAILABLE_MODULES = ("operations", "channel", "douyin")
 CHROMIUM_SINGLETON_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
 
@@ -277,7 +277,9 @@ async def choose_data_day(page, data_day=None):
     date_ranges = set()
     core_urls = set()
     label = "近1天" if data_day is None else f"自定义日期 {data_day.isoformat()}"
-    expected = None if data_day is None else expected_data_range(data_day)
+    expected = expected_data_range(
+        date.today() - timedelta(days=1) if data_day is None else data_day
+    )
     required_date_type = "20" if data_day is None else "999"
 
     def capture(response):
@@ -332,13 +334,16 @@ async def run(args):
     shops = args.shop or list(TARGET_SHOPS)
     requested = tuple(dict.fromkeys(args.module or AVAILABLE_MODULES))
     data_day = getattr(args, "date", None)
-    if data_day is not None and "channel" in requested:
+    if data_day is not None and any(
+        name in requested for name in ("channel", "douyin")
+    ):
         raise ValueError(
             "指定日期补采原型暂仅支持 --module operations；渠道子模块仍需独立日期选择验证"
         )
     result = {
         "operations": [],
         "channel": [],
+        "douyin": [],
         "modules": module_state(requested),
         "requested_modules": list(requested),
     }
@@ -377,7 +382,8 @@ async def run(args):
                 data_range = None
                 try:
                     await switch_shop(page, shop_name)
-                    data_range = await choose_data_day(page, data_day)
+                    if "operations" in requested or "channel" in requested:
+                        data_range = await choose_data_day(page, data_day)
                 except Exception as exc:
                     for name in requested:
                         result["modules"][name]["error_count"] += 1
@@ -433,6 +439,25 @@ async def run(args):
                     print(
                         f"{shop_name} 渠道接口已捕获: {len(responses)} 条", flush=True
                     )
+
+                if "douyin" in requested:
+                    try:
+                        item = await douyin.collect(page, shop_name)
+                        result["douyin"].append(item)
+                        result["modules"]["douyin"]["success_count"] += 1
+                        panel_count = len(item["panels"])
+                        print(
+                            f"{shop_name} 抖音面板已读取: {panel_count}/3", flush=True
+                        )
+                    except Exception as exc:
+                        result["modules"]["douyin"]["error_count"] += 1
+                        result["modules"]["douyin"]["errors"].append(
+                            {"shop_name": shop_name, "error": repr(exc)}
+                        )
+                        print(
+                            f"{shop_name} 抖音面板失败，继续其他店铺: {exc!r}",
+                            flush=True,
+                        )
                 await human_pause(8.0, 14.0)
 
             if args.keep_open:
@@ -455,6 +480,8 @@ def save_run(result, output_dir=None):
         outputs["operations"] = {"json": str(json_path), "csv": str(csv_path)}
     if result["channel"]:
         outputs["channel"] = {"json": str(channel.save(result["channel"], captured_at))}
+    if result["douyin"]:
+        outputs["douyin"] = {"json": str(douyin.save(result["douyin"], captured_at))}
     return outputs
 
 
