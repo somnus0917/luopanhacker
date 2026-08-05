@@ -134,21 +134,55 @@ function collectedPanelSection() {
   const panels = all.filter((record) => record.date === date).flatMap((record) => (record.panels || []).map((panel: AnyRecord) => ({ ...panel, shop_name: record.shop_name })));
   const selected = panels.filter((panel) => panel.panel === state.douyinSection);
   const label = SECTIONS.find(([key]) => key === state.douyinSection)?.[1] || "抖音";
+  const panelMetric = (panel: AnyRecord, key: string) => number(panel.metrics?.[key]);
+  const panelMetricTotal = (key: string) => selected.reduce((total, panel) => total + panelMetric(panel, key), 0);
   const endpointRows = selected.flatMap((panel) => (panel.endpoints || []).map((endpoint: string) => [
     escapeHtml(String(panel.shop_name || "当前店铺")),
     escapeHtml(endpoint.split("/").at(-1) || endpoint),
     whole(panel.response_count),
   ]));
+  const verification = `<details class="douyin-verification"><summary>查看采集校验详情</summary><p>已通过“近 1 天”日期核验；以下仅用于追溯采集来源，不作为业务指标。</p>${compactTable(["店铺", "接口", "响应数"], endpointRows, "该板块没有可展示的接口元数据")}</details>`;
   if (!selected.length) {
     return `${snapshotBanner(date, label, "暂无该板块的有效昨日快照")}<div class="empty-panel"><strong>等待 ${escapeHtml(label)} 数据</strong><span>采集会在页面中点击“近 1 天”，并在直播页先进入“数据概览”。</span></div>`;
   }
-  const responseCount = selected.reduce((total, panel) => total + number(panel.response_count), 0);
-  return `${snapshotBanner(date, label, state.douyinSection === "live" ? "已验证：数据概览 → 近 1 天" : "已验证：近 1 天")}${metricCards([
-    ["已采集店铺", whole(new Set(selected.map((panel) => panel.shop_name)).size), "昨日有效快照"],
-    ["可信接口响应", whole(responseCount), "仅保留 Compass JSON"],
-    ["数据范围", escapeHtml(date || "—"), "接口日期已核验"],
-    ["板块状态", "已入库", "SQLite 与 API 同步"],
-  ])}<section class="panel"><div class="panel-head"><div><h3>${escapeHtml(label)}接口快照</h3><span>原始响应已受控保存，指标解析将按接口口径逐步开放。</span></div><span class="chart-semantic">已验证</span></div>${compactTable(["店铺", "接口", "响应数"], endpointRows, "该板块没有可展示的接口元数据")}</section>`;
+  if (state.douyinSection === "product_card") {
+    const products = selected.flatMap((panel) => (panel.products || []).map((product: AnyRecord) => ({ ...product, shop_name: panel.shop_name })));
+    const pay = products.reduce((total, product) => total + number(product.pay_amt), 0);
+    const exposure = products.reduce((total, product) => total + number(product.show_ucnt), 0);
+    const clicks = products.reduce((total, product) => total + number(product.click_ucnt), 0);
+    const buyers = products.reduce((total, product) => total + number(product.pay_ucnt), 0);
+    const rows = products.sort((left, right) => number(right.pay_amt) - number(left.pay_amt)).slice(0, 30).map((product) => [
+      escapeHtml(String(product.shop_name || "当前店铺")),
+      escapeHtml(String(product.product_name || product.product_id || "—")),
+      moneyOrDash(product.pay_amt),
+      wholeOrDash(product.show_ucnt),
+      wholeOrDash(product.click_ucnt),
+      product.click_rate === null || product.click_rate === undefined ? "—" : ratio(product.click_rate),
+      product.click_pay_rate === null || product.click_pay_rate === undefined ? "—" : ratio(product.click_pay_rate),
+    ]);
+    return `${snapshotBanner(date, "商品卡", "已验证：近 1 天 → 商品卡列表")}${metricCards([
+      ["商品卡成交金额", money(pay), "商品卡列表汇总"],
+      ["商品曝光人数", whole(exposure), "商品卡明细汇总"],
+      ["商品点击人数", whole(clicks), `点击率 ${ratio(exposure ? clicks / exposure : 0)}`],
+      ["点击至成交", ratio(clicks ? buyers / clicks : 0), "成交人数 ÷ 商品点击人数"],
+    ])}<section class="panel"><div class="panel-head"><div><h3>商品卡表现</h3><span>按支付金额排序 · 最多展示 30 个商品</span></div><span class="chart-semantic">商品转化</span></div>${compactTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率"], rows, "该日期未返回商品卡明细")}</section>${verification}`;
+  }
+
+  const isLive = state.douyinSection === "live";
+  const metricSpec = isLive
+    ? [["直播成交金额", "pay_amt", "money", "直播数据概览"], ["成交订单", "pay_cnt", "whole", "直播间支付订单"], ["观看人数", "watch_cnt", "whole", "直播间累计观看"], ["开播场次", "room_cnt", "whole", "昨日开播直播间"]]
+    : [["短视频成交金额", "pay_amt", "money", "短视频数据概览"], ["成交订单", "pay_cnt", "whole", "短视频支付订单"], ["商品曝光次数", "product_show_cnt", "whole", "短视频带货商品曝光"], ["引流店铺成交", "lead_shop_pay_amt", "money", "短视频引流店铺页"]];
+  const typedMetricSpec = metricSpec as Array<[string, string, "money" | "whole", string]>;
+  const metricValue = (key: string, kind: "money" | "whole") => kind === "money" ? money(panelMetricTotal(key)) : whole(panelMetricTotal(key));
+  const rows = selected.sort((left, right) => panelMetric(right, "pay_amt") - panelMetric(left, "pay_amt")).map((panel) => [
+    escapeHtml(String(panel.shop_name || "当前店铺")),
+    moneyOrDash(panel.metrics?.pay_amt),
+    wholeOrDash(panel.metrics?.pay_cnt),
+    isLive ? wholeOrDash(panel.metrics?.watch_cnt) : wholeOrDash(panel.metrics?.product_show_cnt),
+    isLive ? wholeOrDash(panel.metrics?.room_cnt) : moneyOrDash(panel.metrics?.lead_shop_pay_amt),
+  ]);
+  const headers = isLive ? ["店铺", "直播成交", "成交订单", "观看人数", "开播场次"] : ["店铺", "短视频成交", "成交订单", "商品曝光", "引流店铺成交"];
+  return `${snapshotBanner(date, label, isLive ? "已验证：数据概览 → 近 1 天" : "已验证：近 1 天")}${metricCards(typedMetricSpec.map(([name, key, kind, note]) => [name, metricValue(key, kind), note]))}<section class="panel"><div class="panel-head"><div><h3>${isLive ? "直播" : "短视频"}店铺表现</h3><span>按${isLive ? "直播" : "短视频"}成交金额排序</span></div><span class="chart-semantic">业务数据</span></div>${compactTable(headers, rows, "该日期未返回可解析的业务指标")}</section>${verification}`;
 }
 
 export async function loadDouyin() {

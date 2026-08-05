@@ -15,6 +15,8 @@ const SEARCH_SHOP_RANK: &str = "/compass_api/shop/common/homepage/search_shop_ra
 const SEARCH_INDUSTRY_RANK: &str = "/compass_api/shop/common/homepage/search_industry_rank";
 const SEARCH_WEEKLY_SUMMARY: &str =
     "/compass_api/shop/mall/dd_search/search_analysis/weekly_report_summary";
+const DOUYIN_LIVE_CORE_INDEX: &str = "/compass_api/shop/live/live_overview/core_index";
+const DOUYIN_VIDEO_CORE_INDEX: &str = "/compass_api/shop/video/account_analysis/core_index";
 
 pub fn load_channel_dashboard(paths: &RuntimePaths) -> Result<Value> {
     let root = paths.output_dir.join("channel");
@@ -73,8 +75,8 @@ pub fn load_channel_dashboard(paths: &RuntimePaths) -> Result<Value> {
 }
 
 /// Load the latest sanitized Compass snapshots for the live, video and
-/// product-card panels. Response bodies deliberately remain on disk; the API
-/// exposes only panel metadata until each metric has an explicit data contract.
+/// product-card panels.  The response bodies stay on disk, while the stable
+/// business metrics and product-card rows are parsed into the API payload.
 pub fn load_douyin_dashboard(paths: &RuntimePaths) -> Result<Value> {
     let root = paths.output_dir.join("douyin");
     let mut payload_paths = Vec::new();
@@ -157,14 +159,73 @@ fn douyin_panel_summary(panel: &Value) -> Value {
         .flatten()
         .filter_map(|response| string_at(response, &["endpoint"]))
         .collect::<std::collections::BTreeSet<_>>();
+    let panel_name = string_at(panel, &["panel"]).unwrap_or_default();
+    let metrics = match panel_name.as_str() {
+        "live" => responses
+            .and_then(|items| response_body(items, DOUYIN_LIVE_CORE_INDEX, None))
+            .map(|body| parse_douyin_core_metrics(body, "code_index"))
+            .unwrap_or_default(),
+        "video" => responses
+            .and_then(|items| response_body(items, DOUYIN_VIDEO_CORE_INDEX, None))
+            .map(|body| parse_douyin_core_metrics(body, "core_data_0"))
+            .unwrap_or_default(),
+        _ => Map::new(),
+    };
+    let products = if panel_name == "product_card" {
+        responses
+            .and_then(|items| response_body(items, PRODUCT_LIST, None))
+            .map(parse_products)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     json!({
-        "panel": string_at(panel, &["panel"]),
+        "panel": panel_name,
         "label": string_at(panel, &["label"]),
         "data_start": string_at(panel, &["data_start"]),
         "data_end": string_at(panel, &["data_end"]),
         "response_count": responses.map_or(0, Vec::len),
         "endpoints": endpoints,
+        "metrics": metrics,
+        "products": products,
     })
+}
+
+fn parse_douyin_core_metrics(body: &Value, module_name: &str) -> Map<String, Value> {
+    let Some(row) = value_at(
+        body,
+        &[
+            "data",
+            "module_data",
+            module_name,
+            "compass_general_multi_index_card_value",
+            "data",
+            "0",
+        ],
+    )
+    .and_then(Value::as_object) else {
+        return Map::new();
+    };
+
+    let mut metrics = Map::new();
+    for (name, cell) in row {
+        let Some(index_value) = cell.get("index_value") else {
+            continue;
+        };
+        if let Some(value) = value_at(index_value, &["value", "value"]).cloned() {
+            metrics.insert(name.clone(), value);
+        }
+        if let Some(value) = value_at(index_value, &["last_period_change", "value"]).cloned() {
+            metrics.insert(format!("{name}_change"), value);
+        }
+        if let Some(value) = value_at(index_value, &["out_period_ratio", "value"]).cloned() {
+            metrics.insert(format!("{name}_change"), value);
+        }
+        if let Some(value) = value_at(index_value, &["benchmark", "value"]).cloned() {
+            metrics.insert(format!("{name}_benchmark"), value);
+        }
+    }
+    metrics
 }
 
 fn collect_payload_paths(root: &Path, paths: &mut Vec<std::path::PathBuf>) -> Result<()> {
@@ -688,5 +749,28 @@ mod tests {
         assert_eq!(products[0]["pay_amt"], json!(648770.0));
         assert_eq!(products[0]["show_ucnt"], json!(205.0));
         assert!(products[0]["click_ucnt"].is_null());
+    }
+
+    #[test]
+    fn parses_douyin_core_index_metrics() {
+        let live = json!({"data": {"module_data": {"code_index": {
+            "compass_general_multi_index_card_value": {"data": [{
+                "pay_amt": {"index_value": {"value": {"value": 879900}, "last_period_change": {"value": 0.12}}},
+                "watch_cnt": {"index_value": {"value": {"value": 1234}}}
+            }]}
+        }}}});
+        let video = json!({"data": {"module_data": {"core_data_0": {
+            "compass_general_multi_index_card_value": {"data": [{
+                "pay_amt": {"index_value": {"value": {"value": 648770}}},
+                "product_show_cnt": {"index_value": {"value": {"value": 205}}}
+            }]}
+        }}}});
+        let live_metrics = parse_douyin_core_metrics(&live, "code_index");
+        let video_metrics = parse_douyin_core_metrics(&video, "core_data_0");
+        assert_eq!(live_metrics["pay_amt"], json!(879900));
+        assert_eq!(live_metrics["pay_amt_change"], json!(0.12));
+        assert_eq!(live_metrics["watch_cnt"], json!(1234));
+        assert_eq!(video_metrics["pay_amt"], json!(648770));
+        assert_eq!(video_metrics["product_show_cnt"], json!(205));
     }
 }
