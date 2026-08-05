@@ -55,5 +55,22 @@ jobs:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf '%s\n' "${REGISTRY_TOKEN}" | \
-            ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy-image ${DEPLOY_SHA}"
+          deploy_image() {
+            printf '%s\n' "${REGISTRY_TOKEN}" | \
+              ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy-image ${DEPLOY_SHA}"
+          }
+          set +e
+          deploy_image
+          image_status=$?
+          set -e
+          if [[ "$image_status" -eq 0 ]]; then
+            exit 0
+          fi
+          if [[ "$image_status" -ne 126 ]]; then
+            exit "$image_status"
+          fi
+          echo "Bootstrapping legacy deployment gateway once."
+          for _ in 1 2; do
+            ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${DEPLOY_SHA}"
+          done
+          deploy_image

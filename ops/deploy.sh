@@ -79,6 +79,15 @@ if [[ -n "${DEPLOY_REF}" ]]; then
     --exclude='state/' \
     "${RELEASE_DIR}/" "${APP_DIR}/"
   printf '%s\n' "${DEPLOY_REF}" > "${APP_DIR}/.deploy-revision"
+
+  # Bootstrap the deployment key gateway from the immutable source archive.
+  # The first image rollout on older hosts still enters through `deploy <SHA>`;
+  # installing this tightly scoped wrapper lets every later rollout use
+  # `deploy-image <SHA>` without granting a shell to the deployment key.
+  if [[ "${DEPLOY_IMAGE}" = "false" && -x "${APP_DIR}/ops/ssh-deploy-wrapper.sh" && -d "${DATA_DIR}/bin" ]]; then
+    install -o "$(id -un)" -g "$(id -gn)" -m 755 \
+      "${APP_DIR}/ops/ssh-deploy-wrapper.sh" "${DATA_DIR}/bin/github-deploy"
+  fi
 else
   fetch_main
   git reset --hard origin/main
