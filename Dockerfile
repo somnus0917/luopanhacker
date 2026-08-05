@@ -50,7 +50,11 @@ RUN if [ -n "${DEBIAN_MIRROR}" ]; then \
     fi
 
 # 安装系统依赖
-RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y \
+# The production host can resolve IPv6 while its container network cannot
+# establish an IPv6 connection to Debian mirrors. Bound retries and force IPv4
+# so a rebuild fails fast instead of blocking a deployment indefinitely.
+RUN apt-get -o Acquire::Retries=3 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 update && \
+    apt-get -o Acquire::Retries=3 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 install -y \
     curl \
     wget \
     gnupg \
@@ -66,7 +70,8 @@ RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 instal
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Chromium 依赖
-RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y \
+RUN apt-get -o Acquire::Retries=3 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 update && \
+    apt-get -o Acquire::Retries=3 -o Acquire::ForceIPv4=true -o Acquire::http::Timeout=30 install -y \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
