@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from apps.collector_py import channel, compass, douyin, scheduler, service, status
 from apps.scraper_py import douyin_panel_probe
@@ -197,6 +197,23 @@ class CollectorServiceTest(unittest.TestCase):
             douyin.expected_yesterday(date(2026, 8, 5)), ("2026/08/04", "2026/08/04")
         )
         self.assertEqual(set(douyin.PANEL_SPECS), {"live", "video", "product_card"})
+
+    def test_douyin_collector_uses_the_target_shop_for_each_panel(self) -> None:
+        async def collect_all_panels():
+            with (
+                patch.object(
+                    douyin,
+                    "collect_panel",
+                    new=AsyncMock(return_value={"panel": "live"}),
+                ) as collect_panel,
+                patch.object(douyin, "human_pause", new=AsyncMock()),
+            ):
+                await douyin.collect(object(), "店铺 A")
+            return collect_panel.await_args_list
+
+        calls = asyncio.run(collect_all_panels())
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call.args[2] == "店铺 A" for call in calls))
 
     def test_worker_command_forwards_selected_modules(self) -> None:
         with (

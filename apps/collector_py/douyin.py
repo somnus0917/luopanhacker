@@ -19,7 +19,13 @@ from apps.collector_py.channel import (
     sanitized_post_data,
     sanitized_url,
 )
-from apps.scraper_py.scraper import click_with_pacing, human_pause, wait_network_quiet
+from apps.scraper_py.scraper import (
+    click_with_pacing,
+    extract_shop_name,
+    human_pause,
+    switch_shop,
+    wait_network_quiet,
+)
 
 APP_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = APP_DIR / "output" / "douyin"
@@ -165,11 +171,39 @@ class PanelCapture:
         )
 
 
-async def collect_panel(page, panel, *, today=None):
+async def ensure_panel_shop_view(page, shop_name):
+    """Keep direct panel URLs on the same store perspective as Compass.
+
+    The persistent Compass session normally keeps the selected store across
+    routes. We still verify it after every direct navigation; if the route
+    resets it, reuse the established right-top "切换数据视角" workflow.
+    """
+    current_shop = await extract_shop_name(page)
+    if current_shop == shop_name:
+        print(f"抖音面板已确认店铺视角: {shop_name}", flush=True)
+        return
+    if current_shop:
+        print(
+            f"抖音面板店铺视角不一致: 当前 {current_shop}，目标 {shop_name}；重新切换",
+            flush=True,
+        )
+    else:
+        print(f"未识别当前店铺视角，重新切换到: {shop_name}", flush=True)
+    await switch_shop(page, shop_name)
+    confirmed_shop = await extract_shop_name(page)
+    if confirmed_shop != shop_name:
+        raise RuntimeError(
+            f"店铺视角切换后无法确认目标店铺: 目标 {shop_name}，实际 {confirmed_shop or '未知'}"
+        )
+    print(f"抖音面板已切换并确认店铺视角: {shop_name}", flush=True)
+
+
+async def collect_panel(page, panel, shop_name, *, today=None):
     spec = PANEL_SPECS[panel]
     await page.goto(spec["url"], wait_until="domcontentloaded", timeout=90000)
     await wait_network_quiet(page, timeout=PAGE_SETTLE_TIMEOUT_MS)
     await human_pause(5.0, 10.0, reason=f"等待{spec['label']}页面稳定")
+    await ensure_panel_shop_view(page, shop_name)
     if spec["before_near_day"]:
         await click_with_pacing(
             page.get_by_text(spec["before_near_day"], exact=True),
@@ -210,7 +244,7 @@ async def collect(page, shop_name, *, today=None):
     errors = []
     for panel in PANEL_SPECS:
         try:
-            panels.append(await collect_panel(page, panel, today=today))
+            panels.append(await collect_panel(page, panel, shop_name, today=today))
         except Exception as exc:
             errors.append({"panel": panel, "error": repr(exc)})
             print(
