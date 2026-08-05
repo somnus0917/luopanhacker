@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from apps.collector_py import channel, compass, scheduler, service, status
+from apps.scraper_py import douyin_panel_probe
 
 
 class CollectorServiceTest(unittest.TestCase):
@@ -172,6 +173,24 @@ class CollectorServiceTest(unittest.TestCase):
             '{"query":"laptop","token":"secret","nested":{"verify_code":"hidden","page":2}}'
         )
         self.assertEqual(value, '{"query":"laptop","nested":{"page":2}}')
+
+    def test_douyin_probe_requires_exactly_yesterday(self) -> None:
+        expected = ("2026/08/04", "2026/08/04")
+        self.assertEqual(
+            douyin_panel_probe.assert_yesterday({expected}, today=date(2026, 8, 5)),
+            expected,
+        )
+        with self.assertRaisesRegex(RuntimeError, "与昨天不一致"):
+            douyin_panel_probe.assert_yesterday(
+                {("2026/08/03", "2026/08/03")}, today=date(2026, 8, 5)
+            )
+
+    def test_douyin_probe_accepts_selected_panel_arguments(self) -> None:
+        args = douyin_panel_probe.parse_args(["--panel", "live", "--panel", "video"])
+        self.assertEqual(args.panel, ["live", "video"])
+
+    def test_douyin_probe_uses_bounded_network_settle_window(self) -> None:
+        self.assertEqual(douyin_panel_probe.PAGE_SETTLE_TIMEOUT_MS, 15000)
 
     def test_worker_command_forwards_selected_modules(self) -> None:
         with (

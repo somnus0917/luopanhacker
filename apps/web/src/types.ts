@@ -1,5 +1,5 @@
 export type Scalar = string | number | boolean | null | undefined;
-export type PageName = "operations" | "inventory" | "settlement" | "collection" | "account";
+export type PageName = "operations" | "douyin" | "inventory" | "settlement" | "collection" | "account";
 export type InventoryView = "overview" | "replenish" | "overstock" | "detail";
 /** Dynamic properties supplied by dashboard data files and API responses. */
 // The view layer narrows fields before business calculations; this index keeps
