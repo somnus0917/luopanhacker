@@ -7,18 +7,10 @@ DATA_DIR="${LUOPAN_DATA_DIR:-/home/ubuntu/luopan-data}"
 ENV_FILE="${LUOPAN_DEPLOY_ENV:-${DATA_DIR}/deploy.env}"
 LOCK_FILE="${DATA_DIR}/deploy.lock"
 DEPLOY_REF="${1:-}"
-DEPLOY_IMAGE=false
 RELEASE_DIR=""
-REGISTRY_CONFIG_DIR=""
-
-if [[ "${DEPLOY_REF}" == "--image" ]]; then
-  DEPLOY_IMAGE=true
-  DEPLOY_REF="${2:-}"
-fi
 
 cleanup() {
   [[ -z "${RELEASE_DIR}" ]] || rm -rf "${RELEASE_DIR}"
-  [[ -z "${REGISTRY_CONFIG_DIR}" ]] || rm -rf "${REGISTRY_CONFIG_DIR}"
 }
 trap cleanup EXIT
 
@@ -80,14 +72,6 @@ if [[ -n "${DEPLOY_REF}" ]]; then
     "${RELEASE_DIR}/" "${APP_DIR}/"
   printf '%s\n' "${DEPLOY_REF}" > "${APP_DIR}/.deploy-revision"
 
-  # Bootstrap the deployment key gateway from the immutable source archive.
-  # The first image rollout on older hosts still enters through `deploy <SHA>`;
-  # installing this tightly scoped wrapper lets every later rollout use
-  # `deploy-image <SHA>` without granting a shell to the deployment key.
-  if [[ "${DEPLOY_IMAGE}" = "false" && -x "${APP_DIR}/ops/ssh-deploy-wrapper.sh" && -d "${DATA_DIR}/bin" ]]; then
-    install -o "$(id -un)" -g "$(id -gn)" -m 755 \
-      "${APP_DIR}/ops/ssh-deploy-wrapper.sh" "${DATA_DIR}/bin/github-deploy"
-  fi
 else
   fetch_main
   git reset --hard origin/main
@@ -107,36 +91,12 @@ if [[ -z "${admin_password}" ]]; then
 fi
 unset admin_password
 
-if [[ "${DEPLOY_IMAGE}" = "true" ]]; then
-  # The workflow sends its short-lived GitHub token on stdin. Keep Docker's
-  # registry credentials in a temporary directory so the production host never
-  # stores that token; the already-pulled immutable image remains local.
-  IFS= read -r -t 30 registry_token || {
-    echo "Missing short-lived registry token for image deployment." >&2
-    exit 2
-  }
-  [[ -n "${registry_token}" ]] || {
-    echo "Registry token is empty." >&2
-    exit 2
-  }
-  image_repository="${LUOPAN_IMAGE_REPOSITORY:-ghcr.io/somnus0917/luopanhacker}"
-  registry_username="${LUOPAN_REGISTRY_USERNAME:-somnus0917}"
-  release_image="${image_repository}:${DEPLOY_REF}"
-  REGISTRY_CONFIG_DIR="$(mktemp -d "${DATA_DIR}/docker-config.XXXXXX")"
-  printf '%s\n' "${registry_token}" | docker --config "${REGISTRY_CONFIG_DIR}" login \
-    "${image_repository%%/*}" --username "${registry_username}" --password-stdin
-  unset registry_token
-  docker --config "${REGISTRY_CONFIG_DIR}" pull "${release_image}"
-  LUOPAN_IMAGE="${release_image}" \
-    LUOPAN_DATA_DIR="${DATA_DIR}" \
-    docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --no-build --remove-orphans
-else
-  # Local/manual deployments retain the source-build workflow. Production CI/CD
-  # uses the immutable image path above and therefore never rebuilds here.
-  DEBIAN_MIRROR="${DEBIAN_MIRROR:-}" \
-    LUOPAN_DATA_DIR="${DATA_DIR}" \
-    docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
-fi
+# The production host keeps Docker's layer cache. With unchanged lockfiles and
+# system packages, a code-only release reuses the Chromium, Python, and Node
+# dependency layers; only affected application layers rebuild.
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-}" \
+  LUOPAN_DATA_DIR="${DATA_DIR}" \
+  docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
 
 for container_name in douyin-compass douyin-compass-collector; do
   if [[ "$(docker inspect --format '{{.State.Running}}' "${container_name}" 2>/dev/null || true)" != "true" ]]; then
