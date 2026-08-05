@@ -88,7 +88,7 @@ async def main():
             else random.randint(0, 3600)
         )
         args = parse_args(remaining)
-        requested = args.module or ["operations", "channel"]
+        requested = args.module or ["operations", "channel", "douyin"]
         requested_date = args.date.isoformat() if args.date else None
         requested_shops = args.shop or []
         write_status(

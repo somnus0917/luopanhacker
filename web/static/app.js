@@ -122,7 +122,7 @@ const previousLocalDate = () => {
 };
 const latestBackfillDate = () => previousLocalDate() >= currentLocalMonthStart() ? previousLocalDate() : "";
 const backfillDateAllowed = (value) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
-const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null };
+const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
 const isAdmin = () => state.currentUser?.role === "admin";
 function renderAccount() {
   const target = $("#account-content");
@@ -259,7 +259,7 @@ function lineChart(records, metricKey, title) {
     const value = records.find((item) => item.date === date && item.shop_name === shop)?.metrics?.[metricKey];
     return metricKey === "ad_roi" && (value === null || value === void 0) ? null : number(value);
   }));
-  const totals = dates.map((date, index) => values.reduce((sum, series2) => sum + number(series2[index]), 0));
+  const totals = dates.map((date, index) => values.reduce((sum2, series2) => sum2 + number(series2[index]), 0));
   const max = Math.max(...totals, ...values.flat().filter((value) => value !== null).map(number), 1) * 1.08;
   const width = 760, height = 252, pad = { l: 68, r: 16, t: 15, b: 38 };
   const point = (value, index) => [pad.l + index * ((width - pad.l - pad.r) / Math.max(dates.length - 1, 1)), height - pad.b - value / max * (height - pad.t - pad.b)];
@@ -352,9 +352,9 @@ function recordPlatform(item) {
 function aggregate(records) {
   const totals = {};
   const sumKeys = ["income_amt", "pay_amt", "settlement_amt_pay_time", "pay_cnt", "pay_ucnt", "refund_amt", "refund_order_cnt", "refund_order_cnt_pay_time", "platform_subsidy_amt", "talent_subsidy_amt", "pay_item_cnt", "product_show_ucnt", "product_click_ucnt", "product_show_cnt", "product_click_cnt", "expense_amt", "ad_cost_amt"];
-  sumKeys.forEach((key) => totals[key] = records.reduce((sum, item) => sum + number(item.metrics?.[key]), 0));
+  sumKeys.forEach((key) => totals[key] = records.reduce((sum2, item) => sum2 + number(item.metrics?.[key]), 0));
   totals.per_usr_pay_amt = totals.pay_ucnt ? totals.pay_amt / totals.pay_ucnt : 0;
-  const weightedRefundRate = records.reduce((sum, item) => sum + number(item.metrics?.income_amt) * number(item.metrics?.refund_amt_rate), 0);
+  const weightedRefundRate = records.reduce((sum2, item) => sum2 + number(item.metrics?.income_amt) * number(item.metrics?.refund_amt_rate), 0);
   totals.refund_amt_rate = totals.refund_amt && totals.income_amt ? totals.refund_amt / totals.income_amt : totals.income_amt ? weightedRefundRate / totals.income_amt : 0;
   totals.product_click_pay_ucnt_ratio = totals.product_click_ucnt ? totals.pay_ucnt / totals.product_click_ucnt : 0;
   return totals;
@@ -474,14 +474,6 @@ function bindOperationsFilterEvents() {
 function importDateRange(value) {
   return Array.isArray(value) && value.length === 2 ? `${value[0]} 至 ${value[1]}` : "—";
 }
-let jdPreview = null;
-let jdImportMessage = "";
-function jdImportMarkup() {
-  if (!isAdmin()) return "";
-  const files = jdPreview?.files || [];
-  const preview = jdPreview ? `<div class="import-preview"><div class="import-preview-head"><strong>京东导入预览</strong><span>店铺：GNC 京东自营</span></div><ul class="import-file-list">${files.map((file) => `<li><span>${escapeHtml(String(file.file_name || ""))}</span><small>${escapeHtml(String(file.kind === "inventory" ? "RDC 库存" : "商品经营"))} · ${whole(file.rows)} 行${file.known_file ? " · 已导入" : ""}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-jd-import ${jdPreview?.summary?.new_files ? "" : "disabled"}>确认写入现有看板</button><button class="button" type="button" data-cancel-jd-preview>取消</button></div><p class="import-help">商品经营会写入经营看板的京东店铺记录；RDC 会写入库存看板的 8 个实体仓和全国汇总（不重复计入总库存）。</p></div>` : "";
-  return `<details class="panel order-import-panel"><summary><span>京东数据导入</span><small>商品经营 + RDC 库存 → 现有看板</small></summary><div class="order-import-body"><form id="jd-upload-form" class="order-upload-form"><label class="file-picker"><span>选择商品经营 / RDC Excel（.xlsx，可同时上传）</span><input id="jd-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${jdImportMessage ? `<p class="order-import-message">${escapeHtml(jdImportMessage)}</p>` : ""}${preview}</div></details>`;
-}
 function renderOrderImportPanel() {
   const target = $("#order-import-panel");
   if (!target) return;
@@ -493,7 +485,7 @@ function renderOrderImportPanel() {
   const previewBlock = isAdmin() && preview ? `<div class="import-preview"><div class="import-preview-head"><strong>导入预览</strong><span>${escapeHtml(importDateRange(preview.summary?.date_range))}</span></div><div class="import-preview-metrics"><span>将新增 <b>${whole(preview.summary?.added_orders)}</b> 单</span><span>跳过重复 <b>${whole(preview.summary?.duplicate_orders)}</b> 单</span><span>支付金额 <b>${money(preview.summary?.pay_amt)}</b></span><span>商品件数 <b>${whole(preview.summary?.pay_item_cnt)}</b></span></div><ul class="import-file-list">${(preview.files || []).map((file) => `<li><span>${escapeHtml(file.source_label)} · ${escapeHtml(file.file_name)}</span><small>${file.known_file ? "文件已导入" : `新增 ${whole(file.added_orders)} 单，跳过 ${whole(file.duplicate_orders)} 单`}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-order-import ${preview.summary?.added_orders ? "" : "disabled"}>确认写入看板</button><button class="button" type="button" data-cancel-order-preview>取消</button></div><p class="import-help">确认后只保存日汇总与不可逆订单指纹，用于防止重复导入；上传的 Excel 会立即删除。</p></div>` : "";
   const history2 = batches.length ? `<div class="import-history"><div class="import-history-head"><strong>导入历史</strong><span>累计 ${whole(summary.orders)} 单 · ${money(summary.pay_amt)}</span></div>${batches.map((batch) => `<div class="import-history-row"><div><strong>${escapeHtml((batch.source_labels || []).join("、"))}</strong><span>${escapeHtml(importTime(batch.created_at))} · ${escapeHtml(importDateRange(batch.date_range))} · 新增 ${whole(batch.added_orders)} 单</span></div>${isAdmin() ? `<button class="text-button import-delete" type="button" data-delete-order-import="${escapeHtml(batch.id)}">撤销</button>` : ""}</div>`).join("")}</div>` : `<p class="import-help">暂无线上导入批次。${isAdmin() ? "可上传喵速达、天猫订单明细；" : ""}抖店罗盘继续由现有采集任务更新。</p>`;
   const uploadForm = isAdmin() ? `<form id="order-upload-form" class="order-upload-form"><label class="file-picker"><span>选择订单明细（.xlsx，可多选）</span><input id="order-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>` : `<p class="import-help">当前为只读账户，可查看导入历史，不能上传或撤销订单数据。</p>`;
-  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>${isAdmin() ? "上传 Excel → 预览去重 → 确认写入" : "导入历史（只读）"}</small></summary><div class="order-import-body">${uploadForm}${message}${previewBlock}${history2}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>${jdImportMarkup()}`;
+  target.innerHTML = `<details class="panel order-import-panel"><summary><span>订单数据导入</span><small>${isAdmin() ? "上传 Excel → 预览去重 → 确认写入" : "导入历史（只读）"}</small></summary><div class="order-import-body">${uploadForm}${message}${previewBlock}${history2}<p class="import-help">同一文件按指纹跳过；可匹配的相同订单按不可逆指纹跳过。订单号、买家、地址与原始文件不会保存。</p></div></details>`;
   $("#order-upload-form")?.addEventListener("submit", previewOrderImport);
   $("[data-commit-order-import]")?.addEventListener("click", commitOrderImport);
   $("[data-cancel-order-preview]")?.addEventListener("click", () => {
@@ -502,42 +494,6 @@ function renderOrderImportPanel() {
     renderOrderImportPanel();
   });
   $$("[data-delete-order-import]").forEach((button) => button.addEventListener("click", () => deleteOrderImport(button.dataset.deleteOrderImport)));
-  $("#jd-upload-form")?.addEventListener("submit", previewJdImport);
-  $("[data-commit-jd-import]")?.addEventListener("click", commitJdImport);
-  $("[data-cancel-jd-preview]")?.addEventListener("click", () => {
-    jdPreview = null;
-    jdImportMessage = "已取消本次京东导入预览。";
-    renderOrderImportPanel();
-  });
-}
-async function previewJdImport(event) {
-  event.preventDefault();
-  if (!$("#jd-upload-files")?.files?.length) return;
-  jdPreview = null;
-  jdImportMessage = "";
-  try {
-    jdPreview = await request("/api/jd/imports/preview", { method: "POST", body: new FormData(event.currentTarget) });
-    jdImportMessage = "预览完成，请确认后写入经营和库存看板。";
-  } catch (error) {
-    jdImportMessage = errorMessage(error, "京东文件解析失败，请检查模板。");
-    showToast(jdImportMessage, "error");
-  }
-  renderOrderImportPanel();
-}
-async function commitJdImport() {
-  if (!jdPreview?.preview_token) return;
-  try {
-    await request("/api/jd/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: jdPreview.preview_token }) });
-    jdPreview = null;
-    jdImportMessage = "已写入 GNC 京东自营的经营记录与 RDC 库存。";
-    showToast(jdImportMessage, "success");
-    await loadCompass();
-    window.dispatchEvent(new Event("luopan-jd-imported"));
-  } catch (error) {
-    jdImportMessage = errorMessage(error, "写入失败，请重新预览。");
-    showToast(jdImportMessage, "error");
-  }
-  renderOrderImportPanel();
 }
 async function loadOrderImports() {
   try {
@@ -647,8 +603,8 @@ function operationCalendarMarkup() {
   const dates = operationFilterItems("date");
   if (!dates.length) return `<div class="date-filter-field"><span>业务日期</span><button class="date-picker-trigger" type="button" disabled>暂无日期</button></div>`;
   const availableDates = new Set(dates);
-  const latestDate = dates[0];
-  const cursor = state.operationCalendarCursor || `${latestDate.slice(0, 7)}-01`;
+  const latestDate2 = dates[0];
+  const cursor = state.operationCalendarCursor || `${latestDate2.slice(0, 7)}-01`;
   const selected = selectedDateBounds();
   const rangeStart = state.operationCalendarRangeStart || selected.start;
   const rangeEnd = state.operationCalendarRangeStart ? state.operationCalendarRangeStart : selected.end;
@@ -766,8 +722,8 @@ function channelInsightsMarkup(records) {
   const organic = channelGroup(records, "organic_search");
   const recommendation = channelGroup(records, "recommendation");
   const paid = channelGroup(records, "paid");
-  const shortVideoViews = records.reduce((sum, record) => sum + number(record.traffic?.carriers?.short_video?.watch_ucnt || record.traffic?.groups?.short_video?.value), 0);
-  const shortVideoPay = records.reduce((sum, record) => sum + number(record.traffic?.carriers?.short_video?.pay_amt), 0);
+  const shortVideoViews = records.reduce((sum2, record) => sum2 + number(record.traffic?.carriers?.short_video?.watch_ucnt || record.traffic?.groups?.short_video?.value), 0);
+  const shortVideoPay = records.reduce((sum2, record) => sum2 + number(record.traffic?.carriers?.short_video?.pay_amt), 0);
   const cards = [
     ["自然搜索曝光", wholeOrDash(organic.value), `商品卡来源占比 ${ratioOrDash(organic.ratio)}`],
     ["推荐流量曝光", wholeOrDash(recommendation.value), `猜你喜欢/推荐页占比 ${ratioOrDash(recommendation.ratio)}`],
@@ -801,7 +757,7 @@ function channelInsightsMarkup(records) {
   const details = `<div class="detail-table-stack"><details class="detail-table-disclosure" open><summary><span>商品表现</span><small>商品卡TOP商品 · ${whole(productRows.length)} 条</small></summary><div class="detail-table-content">${simpleTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率", "曝光变化"], productRows)}</div></details><details class="detail-table-disclosure"><summary><span>搜索渠道</span><small>商品卡、直播、短视频与图文搜索</small></summary><div class="detail-table-content">${simpleTable(["店铺", "搜索渠道", "曝光人数", "环比", "支付金额", "同行基准"], searchSourceRows)}</div></details><details class="detail-table-disclosure"><summary><span>本店搜索词</span><small>罗盘搜索周报TOP词</small></summary><div class="detail-table-content">${simpleTable(["店铺", "排名", "搜索词", "曝光人数", "环比", "支付金额"], searchTermRows)}</div></details></div>`;
   return `${context}${cardHtml}${charts}${details}`;
 }
-function metricCards(metrics, columns = "six") {
+function metricCards$1(metrics, columns = "six") {
   return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => {
     const status = trend === "up" ? "positive" : trend === "down" ? "negative" : "";
     const statusText = trend === "up" ? "环比上升" : trend === "down" ? "环比下降" : "";
@@ -812,8 +768,8 @@ function attributedAdMetrics(records) {
   const platforms = new Set(records.filter((record) => number(record.metrics?.ad_cost_amt) > 0).map(recordPlatform));
   const scoped = records.filter((record) => platforms.has(recordPlatform(record)));
   return {
-    spend: scoped.reduce((sum, record) => sum + number(record.metrics?.ad_cost_amt), 0),
-    pay: scoped.reduce((sum, record) => sum + number(record.metrics?.pay_amt), 0),
+    spend: scoped.reduce((sum2, record) => sum2 + number(record.metrics?.ad_cost_amt), 0),
+    pay: scoped.reduce((sum2, record) => sum2 + number(record.metrics?.pay_amt), 0),
     platforms
   };
 }
@@ -883,7 +839,7 @@ function overviewSectionMarkup(records, channelRecords) {
     ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"]
   ];
   const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}</div></div>` : platformMatrixMarkup(records, channelRecords);
-  return `${metricCards(metrics)}${charts}`;
+  return `${metricCards$1(metrics)}${charts}`;
 }
 function salesSectionMarkup(records) {
   if (!records.length) return `<div class="empty-panel compact-empty"><strong>当前范围没有销售数据</strong><span>请调整平台、日期、店铺或数据来源。</span></div>`;
@@ -903,7 +859,7 @@ function salesSectionMarkup(records) {
   ];
   const count = whole(records.length);
   const details = `<div class="detail-table-stack"><details class="detail-table-disclosure"><summary><span>店铺销售明细</span><small>按日期与店铺 · ${count} 条</small></summary><div class="detail-table-content">${renderTable(records)}</div></details><details class="detail-table-disclosure"><summary><span>内容成交来源</span><small>直播、商品卡与内容贡献 · ${count} 条</small></summary><div class="detail-table-content">${renderTable(records, true)}</div></details></div>`;
-  return `${metricCards(metrics, "four")}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}</div></div>${details}`;
+  return `${metricCards$1(metrics, "four")}<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${barPanel(records, "pay_amt", "店铺支付金额对比")}</div></div>${details}`;
 }
 function trafficSectionMarkup(records, channelRecords) {
   const totals = aggregate(records);
@@ -917,7 +873,7 @@ function trafficSectionMarkup(records, channelRecords) {
     ["点击-成交转化率", ratio(totals.product_click_ucnt ? totals.pay_ucnt / totals.product_click_ucnt : 0), "成交人数 ÷ 点击人数"],
     ["自然 / 推荐曝光", `${wholeOrDash(organic.value)} / ${wholeOrDash(recommendation.value)}`, "抖音渠道下钻"]
   ];
-  return `${metricCards(metrics)}${channelInsightsMarkup(channelRecords)}`;
+  return `${metricCards$1(metrics)}${channelInsightsMarkup(channelRecords)}`;
 }
 function adsSectionMarkup(records, channelRecords) {
   const totals = aggregate(records);
@@ -934,7 +890,7 @@ function adsSectionMarkup(records, channelRecords) {
     ["经营支出金额", totals.expense_amt ? money(totals.expense_amt) : "—", "仅作参照，不等同投放金额"]
   ];
   const charts = trendRecords.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(trendRecords, "ad_cost_amt", "投放消耗趋势")}${lineChart(trendRecords, "pay_amt", "支付金额趋势")}</div><div class="chart-stack">${lineChart(trendRecords, "ad_roi", "投放 ROI 趋势")}${barPanel(trendRecords, "ad_cost_amt", "店铺投放消耗对比")}</div></div>` : "";
-  return `${metricCards(metrics)}${charts}`;
+  return `${metricCards$1(metrics)}${charts}`;
 }
 function renderOperations() {
   const records = operationFilteredRecords();
@@ -1088,34 +1044,34 @@ function inventoryHealth(rows) {
       key,
       name: INVENTORY_HEALTH_NAMES[key],
       sku_records: members.length,
-      available_num: members.reduce((sum, row) => sum + number(row.available_num), 0)
+      available_num: members.reduce((sum2, row) => sum2 + number(row.available_num), 0)
     };
   });
 }
 function inventorySummary(rows) {
   const coverageRows = rows.filter((row) => row.coverage_days !== null && row.coverage_days !== void 0 && number(row.sales_7d) > 0);
-  const available = rows.reduce((sum, row) => sum + number(row.available_num), 0);
-  const sales7d = rows.reduce((sum, row) => sum + number(row.sales_7d), 0);
+  const available = rows.reduce((sum2, row) => sum2 + number(row.available_num), 0);
+  const sales7d = rows.reduce((sum2, row) => sum2 + number(row.sales_7d), 0);
   const costRows = rows.filter((row) => row.cost_covered);
   return {
     sku_records: rows.length,
     distinct_skus: new Set(rows.map((row) => row.spec_no).filter(Boolean)).size,
     salable_skus: new Set(rows.filter((row) => number(row.available_num) > 0).map((row) => row.spec_no).filter(Boolean)).size,
-    stock_num: rows.reduce((sum, row) => sum + number(row.stock_num), 0),
+    stock_num: rows.reduce((sum2, row) => sum2 + number(row.stock_num), 0),
     available_num: available,
     sales_7d: sales7d,
-    inbound_30d: rows.reduce((sum, row) => sum + number(row.inbound_30d), 0),
+    inbound_30d: rows.reduce((sum2, row) => sum2 + number(row.inbound_30d), 0),
     negative_available: rows.filter((row) => number(row.available_num) < 0).length,
     turnover_days: sales7d ? available / (sales7d / 7) : null,
-    inventory_turnover_days: sales7d ? rows.reduce((sum, row) => sum + number(row.stock_num), 0) / (sales7d / 7) : null,
-    average_coverage_days: coverageRows.length ? coverageRows.reduce((sum, row) => sum + number(row.coverage_days), 0) / coverageRows.length : null,
+    inventory_turnover_days: sales7d ? rows.reduce((sum2, row) => sum2 + number(row.stock_num), 0) / (sales7d / 7) : null,
+    average_coverage_days: coverageRows.length ? coverageRows.reduce((sum2, row) => sum2 + number(row.coverage_days), 0) / coverageRows.length : null,
     replenishment_records: rows.filter((row) => ["out_of_stock", "urgent", "replenish"].includes(row.health_key)).length,
     no_movement_records: rows.filter((row) => row.health_key === "no_movement").length,
     overstock_records: rows.filter((row) => ["overstock", "high"].includes(row.health_key)).length,
     cost_covered_records: costRows.length,
     cost_coverage_rate: rows.length ? costRows.length / rows.length : null,
-    stock_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.stock_cost_amount), 0) : null,
-    available_cost_amount: costRows.length ? costRows.reduce((sum, row) => sum + number(row.available_cost_amount), 0) : null
+    stock_cost_amount: costRows.length ? costRows.reduce((sum2, row) => sum2 + number(row.stock_cost_amount), 0) : null,
+    available_cost_amount: costRows.length ? costRows.reduce((sum2, row) => sum2 + number(row.available_cost_amount), 0) : null
   };
 }
 function inventorySalesTrend(payload) {
@@ -1469,9 +1425,143 @@ async function loadSettlement() {
     target.innerHTML = `<div class="empty-panel"><strong>结算数据暂不可用</strong><span>${escapeHtml(message)}</span></div>`;
   }
 }
+const SECTIONS = [
+  ["live", "直播", "全局概览与开播表现"],
+  ["video", "短视频", "内容成交与引流价值"],
+  ["product_card", "商品卡", "商品流量与转化"]
+];
+function isDouyinRecord(record) {
+  const explicit = record.platform || record.channel || record.content?.platform;
+  if (explicit) return String(explicit) === "抖音";
+  return record.source !== "external_orders" && record.source !== "jd_product_performance";
+}
+function douyinRecords() {
+  return state.records.filter(isDouyinRecord);
+}
+function latestDate(records) {
+  return [...new Set(records.map((record) => record.date))].sort().at(-1) ?? "";
+}
+function yesterdayDate() {
+  const value = /* @__PURE__ */ new Date();
+  value.setDate(value.getDate() - 1);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+function sum(records, path, key) {
+  return records.reduce((total, record) => total + number(record[path]?.[key]), 0);
+}
+function compactTable(headers, rows, empty) {
+  const body = rows.length ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
+  return `<div class="table-wrap douyin-table"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function sectionTabs() {
+  return `<div class="douyin-tabs" role="tablist" aria-label="抖音业务板块">${SECTIONS.map(([key, label, note]) => `<button class="douyin-tab ${state.douyinSection === key ? "active" : ""}" type="button" role="tab" aria-selected="${state.douyinSection === key}" data-douyin-section="${key}"><span>${label}</span><small>${note}</small></button>`).join("")}</div>`;
+}
+function snapshotBanner(date, label, detail) {
+  const snapshotLabel = date === yesterdayDate() ? "昨日快照" : "最近快照";
+  return `<section class="douyin-snapshot"><div><span class="douyin-snapshot-dot" aria-hidden="true"></span><div><strong>${escapeHtml(label)} · ${snapshotLabel}</strong><small>${escapeHtml(detail)}</small></div></div><span class="douyin-date-chip">${escapeHtml(date || "等待数据")}</span></section>`;
+}
+function metricCards(items) {
+  return `<div class="metric-grid four douyin-metrics">${items.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${value}</div><div class="metric-delta">${escapeHtml(note)}</div></article>`).join("")}</div>`;
+}
+function contentSection(records, key, label) {
+  const date = latestDate(records);
+  const scoped = records.filter((record) => record.date === date);
+  const contentAmount = sum(scoped, "content", key);
+  const income = sum(scoped, "metrics", "income_amt");
+  sum(scoped, "metrics", "pay_amt");
+  const orders = sum(scoped, "metrics", "pay_cnt");
+  const sectionLabel = key === "live" ? "直播" : "短视频";
+  const rows = scoped.sort((a, b) => number(b.content?.[key]) - number(a.content?.[key])).map((record) => [
+    escapeHtml(record.shop_name),
+    moneyOrDash(record.content?.[key]),
+    moneyOrDash(record.metrics?.income_amt),
+    wholeOrDash(record.metrics?.pay_cnt),
+    ratio(record.metrics?.income_amt ? number(record.content?.[key]) / number(record.metrics?.income_amt) : 0)
+  ]);
+  const metrics = [
+    [`${sectionLabel}成交金额`, money(contentAmount), "经营快照载体分布"],
+    ["全店成交金额", money(income), "用于计算内容贡献"],
+    [`${sectionLabel}成交贡献`, ratio(income ? contentAmount / income : 0), "内容成交 ÷ 全店成交"],
+    ["全店成交订单", whole(orders), "昨日经营快照参照"]
+  ];
+  const dedicatedNotice = key === "live" ? "直播间观看、开播时长与账号排行将在直播概览原始接口入库后展示。" : "播放、引流直播、看后搜与投放专属指标将在短视频原始接口入库后展示。";
+  return `${snapshotBanner(date, label, key === "live" ? "已验证：数据概览 → 近 1 天" : "已验证：近 1 天")}${metricCards(metrics)}<section class="panel douyin-callout"><div><strong>已同步经营日快照</strong><span>${dedicatedNotice}</span></div><span>数据范围：${escapeHtml(date || "—")}</span></section><section class="panel"><div class="panel-head"><div><h3>${sectionLabel}店铺贡献</h3><span>按昨日已入库经营快照</span></div><span class="chart-semantic">内容归因</span></div>${compactTable(["店铺", `${sectionLabel}成交`, "全店成交", "成交订单", "内容贡献"], rows, "暂未采集到店铺日快照")}</section>`;
+}
+function productCardSection(records) {
+  const date = latestDate(records);
+  const scoped = records.filter((record) => record.date === date);
+  const channelRecords = (state.channel?.records || []).filter((record) => record.date === date);
+  const pay = sum(scoped, "content", "product_card");
+  const exposure = sum(scoped, "metrics", "product_show_ucnt");
+  const clicks = sum(scoped, "metrics", "product_click_ucnt");
+  const buyers = sum(scoped, "metrics", "pay_ucnt");
+  const productRows = channelRecords.flatMap((record) => (record.products || []).map((product) => [
+    escapeHtml(String(record.shop_name || "当前店铺")),
+    escapeHtml(String(product.product_name || product.product_id || "—")),
+    moneyOrDash(product.pay_amt),
+    wholeOrDash(product.show_ucnt),
+    wholeOrDash(product.click_ucnt),
+    product.click_rate === null || product.click_rate === void 0 ? "—" : ratio(product.click_rate),
+    product.click_pay_rate === null || product.click_pay_rate === void 0 ? "—" : ratio(product.click_pay_rate)
+  ]));
+  return `${snapshotBanner(date, "商品卡", "已验证：近 1 天 → 商品卡列表")}${metricCards([
+    ["商品卡成交金额", money(pay), "经营快照载体分布"],
+    ["商品曝光人数", whole(exposure), "昨日全店商品流量"],
+    ["商品点击人数", whole(clicks), `点击率 ${ratio(exposure ? clicks / exposure : 0)}`],
+    ["点击至成交", ratio(clicks ? buyers / clicks : 0), "成交人数 ÷ 商品点击人数"]
+  ])}<section class="panel"><div class="panel-head"><div><h3>商品卡表现</h3><span>商品卡接口已入库时展示明细</span></div><span class="chart-semantic">转化链路</span></div>${compactTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率"], productRows, "暂未采集到商品卡明细；下次渠道采集完成后会在此展示。")}</section>`;
+}
+function collectedPanelSection() {
+  const all = state.douyin?.records || [];
+  const date = [...new Set(all.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "";
+  const panels = all.filter((record) => record.date === date).flatMap((record) => (record.panels || []).map((panel) => ({ ...panel, shop_name: record.shop_name })));
+  const selected = panels.filter((panel) => panel.panel === state.douyinSection);
+  const label = SECTIONS.find(([key]) => key === state.douyinSection)?.[1] || "抖音";
+  const endpointRows = selected.flatMap((panel) => (panel.endpoints || []).map((endpoint) => [
+    escapeHtml(String(panel.shop_name || "当前店铺")),
+    escapeHtml(endpoint.split("/").at(-1) || endpoint),
+    whole(panel.response_count)
+  ]));
+  if (!selected.length) {
+    return `${snapshotBanner(date, label, "暂无该板块的有效昨日快照")}<div class="empty-panel"><strong>等待 ${escapeHtml(label)} 数据</strong><span>采集会在页面中点击“近 1 天”，并在直播页先进入“数据概览”。</span></div>`;
+  }
+  const responseCount = selected.reduce((total, panel) => total + number(panel.response_count), 0);
+  return `${snapshotBanner(date, label, state.douyinSection === "live" ? "已验证：数据概览 → 近 1 天" : "已验证：近 1 天")}${metricCards([
+    ["已采集店铺", whole(new Set(selected.map((panel) => panel.shop_name)).size), "昨日有效快照"],
+    ["可信接口响应", whole(responseCount), "仅保留 Compass JSON"],
+    ["数据范围", escapeHtml(date || "—"), "接口日期已核验"],
+    ["板块状态", "已入库", "SQLite 与 API 同步"]
+  ])}<section class="panel"><div class="panel-head"><div><h3>${escapeHtml(label)}接口快照</h3><span>原始响应已受控保存，指标解析将按接口口径逐步开放。</span></div><span class="chart-semantic">已验证</span></div>${compactTable(["店铺", "接口", "响应数"], endpointRows, "该板块没有可展示的接口元数据")}</section>`;
+}
+async function loadDouyin() {
+  try {
+    state.douyin = await request("/api/douyin");
+  } catch (error) {
+    if (isApiRequestError(error) && error.status === 401) return showLogin();
+    state.douyin = { records: [] };
+    showToast(errorMessage(error, "抖音面板数据读取失败。"), "error");
+  }
+  renderDouyin();
+}
+function renderDouyin() {
+  const target = $("#douyin-content");
+  const freshness = $("#douyin-freshness");
+  if (!target || !freshness) return;
+  const records = douyinRecords();
+  const date = state.douyin?.records?.length ? [...new Set(state.douyin.records.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "" : latestDate(records);
+  freshness.textContent = date ? `${date === yesterdayDate() ? "昨日" : "最近"}快照 · ${date}` : "暂无抖音日快照";
+  const content = state.douyin?.records?.length ? collectedPanelSection() : !records.length ? `<div class="empty-panel"><strong>等待首个抖音日快照</strong><span>采集器会先在罗盘选择“近 1 天”，验证为昨天后才写入面板。</span></div>` : state.douyinSection === "product_card" ? productCardSection(records) : contentSection(records, state.douyinSection, state.douyinSection === "live" ? "直播" : "短视频");
+  target.innerHTML = `${sectionTabs()}${content}`;
+  document.querySelectorAll("#douyin-content [data-douyin-section]").forEach((button) => button.addEventListener("click", () => {
+    state.douyinSection = button.dataset.douyinSection;
+    renderDouyin();
+  }));
+}
 let statusRefreshTimer = null;
 let previousTerminalOutput = "";
 let terminalUnreadLines = 0;
+let jdPreview = null;
+let jdImportMessage = "";
 function terminalOutput(status) {
   return typeof status?.terminal_output === "string" ? status.terminal_output : "";
 }
@@ -1538,6 +1628,12 @@ function collectionShopOptions() {
     </label>`;
   }).join("");
 }
+function jdImportPanel() {
+  if (!isAdmin()) return "";
+  const files = jdPreview?.files || [];
+  const preview = jdPreview ? `<div class="import-preview"><div class="import-preview-head"><strong>京东导入预览</strong><span>店铺：GNC 京东自营</span></div><ul class="import-file-list">${files.map((file) => `<li><span>${escapeHtml(String(file.file_name || ""))}</span><small>${escapeHtml(String(file.kind === "inventory" ? "RDC 库存" : "商品经营"))} · ${whole(file.rows)} 行${file.known_file ? " · 已导入" : ""}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-jd-import ${jdPreview?.summary?.new_files ? "" : "disabled"}>确认写入现有看板</button><button class="button" type="button" data-cancel-jd-preview>取消</button></div><p class="import-help">商品经营会写入经营看板的京东店铺记录；RDC 会写入库存看板。实体仓有数据时，全国汇总不重复计入总库存。</p></div>` : "";
+  return `<details class="panel collection-control collection-jd-import"><summary><span>京东数据导入</span><small>商品经营 + RDC 库存 → 现有看板</small></summary><div class="order-import-body"><form id="jd-upload-form" class="order-upload-form"><label class="file-picker"><span>选择商品经营 / RDC Excel（.xlsx，可同时上传）</span><input id="jd-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${jdImportMessage ? `<p class="order-import-message">${escapeHtml(jdImportMessage)}</p>` : ""}${preview}</div></details>`;
+}
 function renderCollectionCenter(status, { logMessage = "" } = {}) {
   const slot = $("#collection-center");
   if (!slot) return;
@@ -1567,6 +1663,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
         <div class="collection-modules">
           ${collectionModuleCard("operations", "经营数据", "成交、退款、客单价及转化等近 1 天指标", status)}
           ${collectionModuleCard("channel", "渠道数据", "看流量、看商品和看搜索的渠道洞察", status)}
+          ${collectionModuleCard("douyin", "抖音面板", "直播、短视频和商品卡，逐项验证昨日范围", status)}
         </div>
         <div class="status-actions">
           ${isAdmin() ? `<button id="collection-run-button" class="button button-primary" ${busy || !online ? "disabled" : ""}>${busy ? "采集任务进行中" : online ? "开始日常采集" : "采集服务离线"}</button>` : ""}
@@ -1586,6 +1683,7 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
         </div>
       </section>
     </div>
+    ${jdImportPanel()}
     <details class="panel status-panel" open><summary>采集终端与诊断</summary><div class="status-body">
       <p>状态更新时间：${escapeHtml(status.updated_at || "—")} · 请求模块：${escapeHtml((status.requested_modules || []).join("、") || "—")}${status.requested_date ? ` · 补采日期：${escapeHtml(status.requested_date)}` : ""}${status.requested_shops?.length ? ` · 指定店铺：${escapeHtml(status.requested_shops.join("、"))}` : ""}</p>
       ${status.last_error ? `<p class="collection-error">${escapeHtml(status.last_error)}</p>` : ""}
@@ -1610,6 +1708,41 @@ function renderCollectionCenter(status, { logMessage = "" } = {}) {
   $("#collection-run-button")?.addEventListener("click", startCollection);
   $("#collection-backfill-button")?.addEventListener("click", startHistoricalCollection);
   $("#collection-clear-terminal-button")?.addEventListener("click", clearCollectionTerminal);
+  $("#jd-upload-form")?.addEventListener("submit", previewJdImport);
+  $("[data-commit-jd-import]")?.addEventListener("click", commitJdImport);
+  $("[data-cancel-jd-preview]")?.addEventListener("click", () => {
+    jdPreview = null;
+    jdImportMessage = "已取消本次京东导入预览。";
+    renderCollectionCenter(state.status || {});
+  });
+}
+async function previewJdImport(event) {
+  event.preventDefault();
+  if (!$("#jd-upload-files")?.files?.length) return;
+  jdPreview = null;
+  jdImportMessage = "";
+  try {
+    jdPreview = await request("/api/jd/imports/preview", { method: "POST", body: new FormData(event.currentTarget) });
+    jdImportMessage = "预览完成，请确认后写入经营和库存看板。";
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "京东文件解析失败，请检查模板。");
+    showToast(jdImportMessage, "error");
+  }
+  renderCollectionCenter(state.status || {});
+}
+async function commitJdImport() {
+  if (!jdPreview?.preview_token) return;
+  try {
+    await request("/api/jd/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: jdPreview.preview_token }) });
+    jdPreview = null;
+    jdImportMessage = "已写入 GNC 京东自营的经营记录与 RDC 库存。";
+    showToast(jdImportMessage, "success");
+    window.dispatchEvent(new Event("luopan-jd-imported"));
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "写入失败，请重新预览。");
+    showToast(jdImportMessage, "error");
+  }
+  renderCollectionCenter(state.status || {});
 }
 async function refreshCollectionStatus() {
   window.clearTimeout(statusRefreshTimer ?? void 0);
@@ -1709,6 +1842,8 @@ window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
 window.addEventListener("luopan-jd-imported", () => {
+  loadCompass();
+  loadDouyin();
   loadInventory();
 });
 function activatePage(name) {
@@ -1723,6 +1858,7 @@ function activatePage(name) {
   history.replaceState(null, "", `#${name}`);
   if (name === "collection" && state.currentUser) refreshCollectionStatus();
   else stopCollectionStatusRefresh();
+  if (name === "douyin") renderDouyin();
 }
 function setTableDensity(density) {
   const compact = density === "compact";
@@ -1736,7 +1872,7 @@ function setTableDensity(density) {
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  const pageNames = ["inventory", "operations", "settlement", "collection", "account"];
+  const pageNames = ["inventory", "operations", "douyin", "settlement", "collection", "account"];
   activatePage(desired === "channel" ? "operations" : pageNames.includes(desired) ? desired : "operations");
   $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab) => tab.addEventListener("click", () => activatePage(tab.dataset.page ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
@@ -1763,6 +1899,7 @@ async function initialise() {
       $("#login-error").textContent = "";
       showApp(user);
       loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();
@@ -1776,6 +1913,7 @@ async function initialise() {
     if (me.authenticated && me.username && me.role) {
       showApp({ username: me.username, role: me.role });
       loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();

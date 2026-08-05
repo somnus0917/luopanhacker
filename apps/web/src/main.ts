@@ -11,6 +11,7 @@ import {
 } from "./pages/operations";
 import { loadInventory, renderInventory } from "./pages/inventory";
 import { loadSettlement } from "./pages/settlement";
+import { loadDouyin, renderDouyin } from "./pages/douyin";
 import {
   loadCollectionShops, refreshCollectionStatus, stopCollectionStatusRefresh,
 } from "./pages/collection";
@@ -24,7 +25,7 @@ function buildPlaceholders() {
 window.addEventListener("luopan-api-fallback", () => {
   showToast("SQLite 数据暂不可用，当前展示的是 JSON 回退数据。", "error");
 });
-window.addEventListener("luopan-jd-imported", () => { loadInventory(); });
+window.addEventListener("luopan-jd-imported", () => { loadCompass(); loadDouyin(); loadInventory(); });
 
 function activatePage(name: PageName) {
   state.page = name;
@@ -38,6 +39,7 @@ function activatePage(name: PageName) {
   history.replaceState(null, "", `#${name}`);
   if (name === "collection" && state.currentUser) refreshCollectionStatus();
   else stopCollectionStatusRefresh();
+  if (name === "douyin") renderDouyin();
 }
 
 function setTableDensity(density: string) {
@@ -53,7 +55,7 @@ function setTableDensity(density: string) {
 async function initialise() {
   buildPlaceholders();
   const desired = location.hash.slice(1);
-  const pageNames: PageName[] = ["inventory", "operations", "settlement", "collection", "account"];
+  const pageNames: PageName[] = ["inventory", "operations", "douyin", "settlement", "collection", "account"];
   activatePage(desired === "channel" ? "operations" : pageNames.includes(desired as PageName) ? desired as PageName : "operations");
   $$(".nav-tab[data-page], .topbar-action[data-page]").forEach((tab: HTMLElement) => tab.addEventListener("click", () => activatePage((tab.dataset.page as PageName | undefined) ?? "operations")));
   setTableDensity(localStorage.getItem("luopan-table-density") || "comfortable");
@@ -80,6 +82,7 @@ async function initialise() {
       $("#login-error").textContent = "";
       showApp(user);
       loadCompass();
+      loadDouyin();
       loadOrderImports();
       loadInventory();
       loadSettlement();
@@ -90,7 +93,7 @@ async function initialise() {
   });
   try {
     const me = await request<{ authenticated: boolean; username?: string; role?: "admin" | "viewer" }>("/api/me");
-    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
+    if (me.authenticated && me.username && me.role) { showApp({ username: me.username, role: me.role }); loadCompass(); loadDouyin(); loadOrderImports(); loadInventory(); loadSettlement(); loadCollectionShops().then(refreshCollectionStatus); } else showLogin();
   } catch {
     showLogin();
   }

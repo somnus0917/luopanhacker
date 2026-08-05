@@ -1,5 +1,5 @@
 use axum::{Json, extract::State};
-use luopan_channels::load_channel_dashboard;
+use luopan_channels::{load_channel_dashboard, load_douyin_dashboard};
 use luopan_operations::{apply_shop_aliases, load_operations_records, load_shop_aliases};
 use luopan_runtime::RuntimePaths;
 use luopan_storage::{kv_value_with_updated_at, load_operations_records_from_db};
@@ -67,6 +67,43 @@ pub(crate) async fn channel_dashboard(
         payload.fallback,
         payload.updated_at,
     ))
+}
+
+pub(crate) async fn douyin_dashboard(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiError> {
+    let payload = load_douyin_payload(&state).await?;
+    Ok(api_with_meta(
+        payload.value,
+        payload.source,
+        payload.fallback,
+        payload.updated_at,
+    ))
+}
+
+async fn load_douyin_payload(state: &AppState) -> Result<LoadedPayload, ApiError> {
+    if let Some(pool) = &state.storage_pool {
+        match kv_value_with_updated_at(pool, "douyin_dashboard").await {
+            Ok(Some(payload)) => {
+                return Ok(LoadedPayload {
+                    value: payload.value,
+                    source: "sqlite",
+                    fallback: false,
+                    updated_at: payload.updated_at,
+                });
+            }
+            Ok(None) => tracing::warn!("SQLite Douyin payload is missing; falling back to JSON"),
+            Err(error) => tracing::warn!(%error, "SQLite Douyin read failed; falling back to JSON"),
+        }
+    }
+    let value = load_douyin_dashboard(&state.paths).map_err(ApiError::internal)?;
+    let updated_at = payload_updated_at(&value, &state.paths.output_dir.join("douyin"));
+    Ok(LoadedPayload {
+        value,
+        source: "json",
+        fallback: state.storage_pool.is_some(),
+        updated_at,
+    })
 }
 
 pub(crate) async fn compass_dashboard(

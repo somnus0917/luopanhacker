@@ -567,7 +567,7 @@ fn validates_collection_modules() {
     );
     assert_eq!(
         validate_collection_modules(Vec::new()).unwrap(),
-        ["operations", "channel"]
+        ["operations", "channel", "douyin"]
     );
     assert!(validate_collection_modules(vec!["unknown".into()]).is_err());
     let today = NaiveDate::from_ymd_opt(2026, 7, 27).unwrap();

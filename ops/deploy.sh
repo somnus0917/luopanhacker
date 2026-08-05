@@ -86,7 +86,8 @@ if [[ -z "${admin_password}" ]]; then
 fi
 unset admin_password
 
-LUOPAN_DATA_DIR="${DATA_DIR}" \
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://mirrors.cloud.tencent.com}" \
+  LUOPAN_DATA_DIR="${DATA_DIR}" \
   docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
 
 for container_name in douyin-compass douyin-compass-collector; do

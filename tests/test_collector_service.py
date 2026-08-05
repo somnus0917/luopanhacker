@@ -12,9 +12,10 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from apps.collector_py import channel, compass, scheduler, service, status
+from apps.collector_py import channel, compass, douyin, scheduler, service, status
+from apps.scraper_py import douyin_panel_probe
 
 
 class CollectorServiceTest(unittest.TestCase):
@@ -173,6 +174,47 @@ class CollectorServiceTest(unittest.TestCase):
         )
         self.assertEqual(value, '{"query":"laptop","nested":{"page":2}}')
 
+    def test_douyin_probe_requires_exactly_yesterday(self) -> None:
+        expected = ("2026/08/04", "2026/08/04")
+        self.assertEqual(
+            douyin_panel_probe.assert_yesterday({expected}, today=date(2026, 8, 5)),
+            expected,
+        )
+        with self.assertRaisesRegex(RuntimeError, "与昨天不一致"):
+            douyin_panel_probe.assert_yesterday(
+                {("2026/08/03", "2026/08/03")}, today=date(2026, 8, 5)
+            )
+
+    def test_douyin_probe_accepts_selected_panel_arguments(self) -> None:
+        args = douyin_panel_probe.parse_args(["--panel", "live", "--panel", "video"])
+        self.assertEqual(args.panel, ["live", "video"])
+
+    def test_douyin_probe_uses_bounded_network_settle_window(self) -> None:
+        self.assertEqual(douyin_panel_probe.PAGE_SETTLE_TIMEOUT_MS, 15000)
+
+    def test_douyin_collector_requires_yesterday(self) -> None:
+        self.assertEqual(
+            douyin.expected_yesterday(date(2026, 8, 5)), ("2026/08/04", "2026/08/04")
+        )
+        self.assertEqual(set(douyin.PANEL_SPECS), {"live", "video", "product_card"})
+
+    def test_douyin_collector_uses_the_target_shop_for_each_panel(self) -> None:
+        async def collect_all_panels():
+            with (
+                patch.object(
+                    douyin,
+                    "collect_panel",
+                    new=AsyncMock(return_value={"panel": "live"}),
+                ) as collect_panel,
+                patch.object(douyin, "human_pause", new=AsyncMock()),
+            ):
+                await douyin.collect(object(), "店铺 A")
+            return collect_panel.await_args_list
+
+        calls = asyncio.run(collect_all_panels())
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(call.args[2] == "店铺 A" for call in calls))
+
     def test_worker_command_forwards_selected_modules(self) -> None:
         with (
             patch.dict(
@@ -184,15 +226,16 @@ class CollectorServiceTest(unittest.TestCase):
             ),
         ):
             command = service.worker_command(
-                ["operations", "channel"],
+                ["operations", "channel", "douyin"],
                 "2026-07-25",
                 ["店铺 A"],
             )
 
         self.assertEqual(command[:2], ["luopan-worker-rs", "compass-collect"])
-        self.assertEqual(command.count("--module"), 2)
+        self.assertEqual(command.count("--module"), 3)
         self.assertIn("operations", command)
         self.assertIn("channel", command)
+        self.assertIn("douyin", command)
         self.assertIn("--random-delay-seconds", command)
         self.assertEqual(command[command.index("--date") + 1], "2026-07-25")
         self.assertEqual(

@@ -79,7 +79,7 @@ use error::{ApiError, api, api_with_meta, generate_request_id};
 use health::{healthz, readyz};
 use inventory::{inventory_dashboard, inventory_raw};
 use jd::{commit_jd_import, preview_jd_import};
-use operations::{channel_dashboard, compass_dashboard};
+use operations::{channel_dashboard, compass_dashboard, douyin_dashboard};
 use orders::{commit_order_import, order_imports, preview_order_import, remove_order_import};
 #[cfg(test)]
 use settlement::validate_settlement_date_range;
@@ -148,6 +148,7 @@ async fn main() -> Result<()> {
         .route("/api/compass", get(compass_dashboard))
         .route("/api/inventory", get(inventory_dashboard))
         .route("/api/channel", get(channel_dashboard))
+        .route("/api/douyin", get(douyin_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
         .route("/api/settlement", get(settlement_dashboard))
         .route("/api/orders/imports", get(order_imports))

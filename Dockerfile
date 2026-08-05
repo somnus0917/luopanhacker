@@ -37,15 +37,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM ${PYTHON_IMAGE}
 
 ARG DEBIAN_FRONTEND=noninteractive
+ARG DEBIAN_MIRROR=
 
-# 腾讯云服务器访问官方 Debian 源可能较慢，构建时改用腾讯云镜像源。
-RUN sed -i \
-    -e 's|http://deb.debian.org/debian|http://mirrors.cloud.tencent.com/debian|g' \
-    -e 's|http://deb.debian.org/debian-security|http://mirrors.cloud.tencent.com/debian-security|g' \
-    /etc/apt/sources.list.d/debian.sources
+# 本机默认使用官方 Debian 源。生产部署可传入镜像根地址（例如
+# http://mirrors.cloud.tencent.com），避免将本机 Docker 的构建网络绑定到
+# 单一云厂商镜像。
+RUN if [ -n "${DEBIAN_MIRROR}" ]; then \
+      sed -i \
+        -e "s|http://deb.debian.org/debian-security|${DEBIAN_MIRROR}/debian-security|g" \
+        -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}/debian|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi
 
 # 安装系统依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y \
     curl \
     wget \
     gnupg \
@@ -61,7 +66,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Chromium 依赖
-RUN apt-get update && apt-get install -y \
+RUN apt-get -o Acquire::Retries=3 update && apt-get -o Acquire::Retries=3 install -y \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \

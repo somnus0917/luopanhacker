@@ -71,7 +71,7 @@ enum Commands {
         #[arg(long, default_value_t = 30)]
         login_timeout_minutes: u64,
         /// Collection module to run. Repeat for multiple modules; default is all.
-        #[arg(long = "module", value_parser = ["operations", "channel"])]
+        #[arg(long = "module", value_parser = ["operations", "channel", "douyin"])]
         modules: Vec<String>,
         /// Historical business date to backfill (YYYY-MM-DD).
         #[arg(long)]

@@ -33,6 +33,7 @@
       <nav class="nav-tabs" aria-label="数据看板导航">
         <button class="nav-tab" data-page="inventory" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4 7 8-4 8 4-8 4-8-4Z"/><path d="M4 7v10l8 4 8-4V7"/><path d="M12 11v10"/></svg><span>库存看板</span></button>
         <button class="nav-tab" data-page="operations" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-8"/><path d="M22 19H2"/></svg><span>经营看板</span></button>
+        <button class="nav-tab" data-page="douyin" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.5v10.8a3.2 3.2 0 1 1-2-3"/><path d="M7 6c3.4 2.1 6.7 1.8 10-1v10.3a3.2 3.2 0 1 1-2-3"/><path d="M7 6v4.2c3.4 2.1 6.7 1.8 10-1V5"/></svg><span>抖音面板</span></button>
         <button class="nav-tab" data-page="settlement" type="button"><svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg><span>结算看板</span></button>
       </nav>
 
@@ -47,6 +48,11 @@
           <div id="detail-filters" class="table-filter-container"></div>
           <div id="operations-content"><div class="empty-panel"><strong>正在读取经营数据</strong><span>经营看板将读取罗盘日维度数据与已导入的订单明细汇总。</span></div></div>
           <div id="order-import-panel"></div>
+        </section>
+
+        <section class="dashboard-page" id="page-douyin" data-page="douyin">
+          <div class="page-heading douyin-heading"><p class="eyebrow">DOUYIN COMMERCE · YESTERDAY SNAPSHOT</p><div class="page-heading-title"><h2>抖音面板</h2><span id="douyin-freshness" class="data-freshness">正在读取</span></div><p>直播、短视频与商品卡按“近 1 天”采集；每个快照会校验实际日期为昨天。</p></div>
+          <div id="douyin-content"><div class="empty-panel"><strong>正在同步抖音日快照</strong><span>页面将展示已入库的经营与商品卡渠道数据。</span></div></div>
         </section>
 
         <section class="dashboard-page placeholder-page" id="page-settlement" data-page="settlement">

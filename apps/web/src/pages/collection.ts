@@ -6,12 +6,15 @@ import {
   backfillDateAllowed, COLLECTION_SHOPS, currentLocalMonthStart, isAdmin,
   previousLocalDate, setCollectionShops, state,
 } from "../state";
+import type { AnyRecord } from "../state";
 import { showLogin } from "./account";
 import type { CollectionStatus } from "../types";
 
 let statusRefreshTimer: number | null = null;
 let previousTerminalOutput = "";
 let terminalUnreadLines = 0;
+let jdPreview: AnyRecord | null = null;
+let jdImportMessage = "";
 
 function terminalOutput(status: CollectionStatus | null) {
   return typeof status?.terminal_output === "string" ? status.terminal_output : "";
@@ -90,6 +93,13 @@ function collectionShopOptions() {
   }).join("");
 }
 
+function jdImportPanel() {
+  if (!isAdmin()) return "";
+  const files = jdPreview?.files || [];
+  const preview = jdPreview ? `<div class="import-preview"><div class="import-preview-head"><strong>京东导入预览</strong><span>店铺：GNC 京东自营</span></div><ul class="import-file-list">${files.map((file: AnyRecord) => `<li><span>${escapeHtml(String(file.file_name || ""))}</span><small>${escapeHtml(String(file.kind === "inventory" ? "RDC 库存" : "商品经营"))} · ${whole(file.rows)} 行${file.known_file ? " · 已导入" : ""}</small></li>`).join("")}</ul><div class="status-actions"><button class="button button-primary" type="button" data-commit-jd-import ${jdPreview?.summary?.new_files ? "" : "disabled"}>确认写入现有看板</button><button class="button" type="button" data-cancel-jd-preview>取消</button></div><p class="import-help">商品经营会写入经营看板的京东店铺记录；RDC 会写入库存看板。实体仓有数据时，全国汇总不重复计入总库存。</p></div>` : "";
+  return `<details class="panel collection-control collection-jd-import"><summary><span>京东数据导入</span><small>商品经营 + RDC 库存 → 现有看板</small></summary><div class="order-import-body"><form id="jd-upload-form" class="order-upload-form"><label class="file-picker"><span>选择商品经营 / RDC Excel（.xlsx，可同时上传）</span><input id="jd-upload-files" type="file" name="files" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple required /></label><button class="button" type="submit">解析并预览</button></form>${jdImportMessage ? `<p class="order-import-message">${escapeHtml(jdImportMessage)}</p>` : ""}${preview}</div></details>`;
+}
+
 export function renderCollectionCenter(status: CollectionStatus, { logMessage = "" }: { logMessage?: string } = {}) {
   const slot = $("#collection-center");
   if (!slot) return;
@@ -119,6 +129,7 @@ export function renderCollectionCenter(status: CollectionStatus, { logMessage = 
         <div class="collection-modules">
           ${collectionModuleCard("operations", "经营数据", "成交、退款、客单价及转化等近 1 天指标", status)}
           ${collectionModuleCard("channel", "渠道数据", "看流量、看商品和看搜索的渠道洞察", status)}
+          ${collectionModuleCard("douyin", "抖音面板", "直播、短视频和商品卡，逐项验证昨日范围", status)}
         </div>
         <div class="status-actions">
           ${isAdmin() ? `<button id="collection-run-button" class="button button-primary" ${busy || !online ? "disabled" : ""}>${busy ? "采集任务进行中" : online ? "开始日常采集" : "采集服务离线"}</button>` : ""}
@@ -138,6 +149,7 @@ export function renderCollectionCenter(status: CollectionStatus, { logMessage = 
         </div>
       </section>
     </div>
+    ${jdImportPanel()}
     <details class="panel status-panel" open><summary>采集终端与诊断</summary><div class="status-body">
       <p>状态更新时间：${escapeHtml(status.updated_at || "—")} · 请求模块：${escapeHtml((status.requested_modules || []).join("、") || "—")}${status.requested_date ? ` · 补采日期：${escapeHtml(status.requested_date)}` : ""}${status.requested_shops?.length ? ` · 指定店铺：${escapeHtml(status.requested_shops.join("、"))}` : ""}</p>
       ${status.last_error ? `<p class="collection-error">${escapeHtml(status.last_error)}</p>` : ""}
@@ -162,6 +174,39 @@ export function renderCollectionCenter(status: CollectionStatus, { logMessage = 
   $("#collection-run-button")?.addEventListener("click", startCollection);
   $("#collection-backfill-button")?.addEventListener("click", startHistoricalCollection);
   $("#collection-clear-terminal-button")?.addEventListener("click", clearCollectionTerminal);
+  $("#jd-upload-form")?.addEventListener("submit", previewJdImport);
+  $("[data-commit-jd-import]")?.addEventListener("click", commitJdImport);
+  $("[data-cancel-jd-preview]")?.addEventListener("click", () => { jdPreview = null; jdImportMessage = "已取消本次京东导入预览。"; renderCollectionCenter(state.status || {}); });
+}
+
+async function previewJdImport(event: SubmitEvent) {
+  event.preventDefault();
+  if (!$("#jd-upload-files")?.files?.length) return;
+  jdPreview = null;
+  jdImportMessage = "";
+  try {
+    jdPreview = await request<AnyRecord>("/api/jd/imports/preview", { method: "POST", body: new FormData(event.currentTarget as HTMLFormElement) });
+    jdImportMessage = "预览完成，请确认后写入经营和库存看板。";
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "京东文件解析失败，请检查模板。");
+    showToast(jdImportMessage, "error");
+  }
+  renderCollectionCenter(state.status || {});
+}
+
+async function commitJdImport() {
+  if (!jdPreview?.preview_token) return;
+  try {
+    await request("/api/jd/imports", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preview_token: jdPreview.preview_token }) });
+    jdPreview = null;
+    jdImportMessage = "已写入 GNC 京东自营的经营记录与 RDC 库存。";
+    showToast(jdImportMessage, "success");
+    window.dispatchEvent(new Event("luopan-jd-imported"));
+  } catch (error) {
+    jdImportMessage = errorMessage(error, "写入失败，请重新预览。");
+    showToast(jdImportMessage, "error");
+  }
+  renderCollectionCenter(state.status || {});
 }
 
 export async function refreshCollectionStatus() {

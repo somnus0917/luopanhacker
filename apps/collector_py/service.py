@@ -60,10 +60,12 @@ def worker_command(modules, data_day=None, shops=None):
 
 def run_request(request):
     modules = [
-        name for name in request.get("modules", []) if name in {"operations", "channel"}
+        name
+        for name in request.get("modules", [])
+        if name in {"operations", "channel", "douyin"}
     ]
     if not modules:
-        modules = ["operations", "channel"]
+        modules = ["operations", "channel", "douyin"]
     data_day = request.get("date") if isinstance(request.get("date"), str) else None
     shops = [
         name.strip()
