@@ -21,7 +21,25 @@ function isDouyinRecord(record: OperationRecord) {
 }
 
 function douyinRecords() {
-  return state.records.filter(isDouyinRecord);
+  return state.records.filter((record) => isDouyinRecord(record) && (!state.douyinShop || record.shop_name === state.douyinShop));
+}
+
+function douyinShops() {
+  const shops = [
+    ...(state.douyin?.records || []).map((record) => String(record.shop_name || "")),
+    ...state.records.filter(isDouyinRecord).map((record) => record.shop_name),
+  ].filter(Boolean);
+  return [...new Set(shops)].sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
+function selectedSnapshots() {
+  return (state.douyin?.records || []).filter((record) => !state.douyinShop || String(record.shop_name || "") === state.douyinShop);
+}
+
+function shopFilter() {
+  const shops = douyinShops();
+  if (state.douyinShop && !shops.includes(state.douyinShop)) state.douyinShop = "";
+  return `<label class="douyin-shop-filter"><span>店铺</span><select data-douyin-shop aria-label="筛选店铺"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop)}" ${state.douyinShop === shop ? "selected" : ""}>${escapeHtml(shop)}</option>`).join("")}</select></label>`;
 }
 
 function latestDate(records: OperationRecord[]) {
@@ -88,7 +106,7 @@ function contentSection(records: OperationRecord[], key: "live" | "video", label
 function productCardSection(records: OperationRecord[]) {
   const date = latestDate(records);
   const scoped = records.filter((record) => record.date === date);
-  const channelRecords: AnyRecord[] = (state.channel?.records || []).filter((record: AnyRecord) => record.date === date);
+  const channelRecords: AnyRecord[] = (state.channel?.records || []).filter((record: AnyRecord) => record.date === date && (!state.douyinShop || record.shop_name === state.douyinShop));
   const pay = sum(scoped, "content", "product_card");
   const exposure = sum(scoped, "metrics", "product_show_ucnt");
   const clicks = sum(scoped, "metrics", "product_click_ucnt");
@@ -111,7 +129,7 @@ function productCardSection(records: OperationRecord[]) {
 }
 
 function collectedPanelSection() {
-  const all = state.douyin?.records || [];
+  const all = selectedSnapshots();
   const date = [...new Set(all.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "";
   const panels = all.filter((record) => record.date === date).flatMap((record) => (record.panels || []).map((panel: AnyRecord) => ({ ...panel, shop_name: record.shop_name })));
   const selected = panels.filter((panel) => panel.panel === state.douyinSection);
@@ -149,8 +167,9 @@ export function renderDouyin() {
   const freshness = $("#douyin-freshness");
   if (!target || !freshness) return;
   const records = douyinRecords();
-  const date = state.douyin?.records?.length
-    ? [...new Set(state.douyin.records.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || ""
+  const snapshots = selectedSnapshots();
+  const date = snapshots.length
+    ? [...new Set(snapshots.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || ""
     : latestDate(records);
   freshness.textContent = date ? `${date === yesterdayDate() ? "昨日" : "最近"}快照 · ${date}` : "暂无抖音日快照";
   const content = state.douyin?.records?.length
@@ -160,7 +179,11 @@ export function renderDouyin() {
     : state.douyinSection === "product_card"
       ? productCardSection(records)
       : contentSection(records, state.douyinSection, state.douyinSection === "live" ? "直播" : "短视频");
-  target.innerHTML = `${sectionTabs()}${content}`;
+  target.innerHTML = `${shopFilter()}${sectionTabs()}${content}`;
+  document.querySelector<HTMLSelectElement>("#douyin-content [data-douyin-shop]")?.addEventListener("change", (event) => {
+    state.douyinShop = (event.currentTarget as HTMLSelectElement).value;
+    renderDouyin();
+  });
   document.querySelectorAll<HTMLElement>("#douyin-content [data-douyin-section]").forEach((button) => button.addEventListener("click", () => {
     state.douyinSection = button.dataset.douyinSection as DouyinSection;
     renderDouyin();

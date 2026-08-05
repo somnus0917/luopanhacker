@@ -122,7 +122,7 @@ const previousLocalDate = () => {
 };
 const latestBackfillDate = () => previousLocalDate() >= currentLocalMonthStart() ? previousLocalDate() : "";
 const backfillDateAllowed = (value) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
-const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
+const state = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: /* @__PURE__ */ new Set(), operationPlatforms: /* @__PURE__ */ new Set(), operationShops: /* @__PURE__ */ new Set(), operationSources: /* @__PURE__ */ new Set(), operationFilterOpen: /* @__PURE__ */ new Set(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", douyinShop: "", status: null, collectionModules: /* @__PURE__ */ new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
 const isAdmin = () => state.currentUser?.role === "admin";
 function renderAccount() {
   const target = $("#account-content");
@@ -1436,7 +1436,22 @@ function isDouyinRecord(record) {
   return record.source !== "external_orders" && record.source !== "jd_product_performance";
 }
 function douyinRecords() {
-  return state.records.filter(isDouyinRecord);
+  return state.records.filter((record) => isDouyinRecord(record) && (!state.douyinShop || record.shop_name === state.douyinShop));
+}
+function douyinShops() {
+  const shops = [
+    ...(state.douyin?.records || []).map((record) => String(record.shop_name || "")),
+    ...state.records.filter(isDouyinRecord).map((record) => record.shop_name)
+  ].filter(Boolean);
+  return [...new Set(shops)].sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+function selectedSnapshots() {
+  return (state.douyin?.records || []).filter((record) => !state.douyinShop || String(record.shop_name || "") === state.douyinShop);
+}
+function shopFilter() {
+  const shops = douyinShops();
+  if (state.douyinShop && !shops.includes(state.douyinShop)) state.douyinShop = "";
+  return `<label class="douyin-shop-filter"><span>店铺</span><select data-douyin-shop aria-label="筛选店铺"><option value="">全部店铺</option>${shops.map((shop) => `<option value="${escapeHtml(shop)}" ${state.douyinShop === shop ? "selected" : ""}>${escapeHtml(shop)}</option>`).join("")}</select></label>`;
 }
 function latestDate(records) {
   return [...new Set(records.map((record) => record.date))].sort().at(-1) ?? "";
@@ -1490,7 +1505,7 @@ function contentSection(records, key, label) {
 function productCardSection(records) {
   const date = latestDate(records);
   const scoped = records.filter((record) => record.date === date);
-  const channelRecords = (state.channel?.records || []).filter((record) => record.date === date);
+  const channelRecords = (state.channel?.records || []).filter((record) => record.date === date && (!state.douyinShop || record.shop_name === state.douyinShop));
   const pay = sum(scoped, "content", "product_card");
   const exposure = sum(scoped, "metrics", "product_show_ucnt");
   const clicks = sum(scoped, "metrics", "product_click_ucnt");
@@ -1512,7 +1527,7 @@ function productCardSection(records) {
   ])}<section class="panel"><div class="panel-head"><div><h3>商品卡表现</h3><span>商品卡接口已入库时展示明细</span></div><span class="chart-semantic">转化链路</span></div>${compactTable(["店铺", "商品", "支付金额", "曝光", "点击", "点击率", "点击成交率"], productRows, "暂未采集到商品卡明细；下次渠道采集完成后会在此展示。")}</section>`;
 }
 function collectedPanelSection() {
-  const all = state.douyin?.records || [];
+  const all = selectedSnapshots();
   const date = [...new Set(all.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "";
   const panels = all.filter((record) => record.date === date).flatMap((record) => (record.panels || []).map((panel) => ({ ...panel, shop_name: record.shop_name })));
   const selected = panels.filter((panel) => panel.panel === state.douyinSection);
@@ -1548,10 +1563,15 @@ function renderDouyin() {
   const freshness = $("#douyin-freshness");
   if (!target || !freshness) return;
   const records = douyinRecords();
-  const date = state.douyin?.records?.length ? [...new Set(state.douyin.records.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "" : latestDate(records);
+  const snapshots = selectedSnapshots();
+  const date = snapshots.length ? [...new Set(snapshots.map((record) => String(record.date || "")))].filter(Boolean).sort().at(-1) || "" : latestDate(records);
   freshness.textContent = date ? `${date === yesterdayDate() ? "昨日" : "最近"}快照 · ${date}` : "暂无抖音日快照";
   const content = state.douyin?.records?.length ? collectedPanelSection() : !records.length ? `<div class="empty-panel"><strong>等待首个抖音日快照</strong><span>采集器会先在罗盘选择“近 1 天”，验证为昨天后才写入面板。</span></div>` : state.douyinSection === "product_card" ? productCardSection(records) : contentSection(records, state.douyinSection, state.douyinSection === "live" ? "直播" : "短视频");
-  target.innerHTML = `${sectionTabs()}${content}`;
+  target.innerHTML = `${shopFilter()}${sectionTabs()}${content}`;
+  document.querySelector("#douyin-content [data-douyin-shop]")?.addEventListener("change", (event) => {
+    state.douyinShop = event.currentTarget.value;
+    renderDouyin();
+  });
   document.querySelectorAll("#douyin-content [data-douyin-section]").forEach((button) => button.addEventListener("click", () => {
     state.douyinSection = button.dataset.douyinSection;
     renderDouyin();
