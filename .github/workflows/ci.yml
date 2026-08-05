@@ -2,62 +2,159 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "apps/**"
+      - "web/static/**"
+      - "Dockerfile"
+      - "docker/**"
+      - "docker-compose.yml"
+      - "ops/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".dockerignore"
   push:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "apps/**"
+      - "web/static/**"
+      - "Dockerfile"
+      - "docker/**"
+      - "docker-compose.yml"
+      - "ops/**"
+      - "scripts/**"
+      - ".github/workflows/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"
+      - ".dockerignore"
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
-  check:
-    name: Test, lint and build
+  changes:
+    name: Detect changed areas
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      web: ${{ steps.filter.outputs.web }}
+      python: ${{ steps.filter.outputs.python }}
+      config: ${{ steps.filter.outputs.config }}
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/**'
+              - 'apps/api-rs/**'
+              - 'apps/worker-rs/**'
+            web:
+              - 'apps/web/**'
+              - 'web/static/**'
+            python:
+              - 'apps/**/*.py'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+            config:
+              - 'docker-compose.yml'
+              - 'ops/**'
+              - 'scripts/**'
+              - 'docker/**'
+              - '.github/workflows/**'
+              - 'Makefile'
+              - '.dockerignore'
+            image:
+              - 'Dockerfile'
+              - 'docker/**'
+              - '.dockerignore'
+
+  rust:
+    name: Rust checks
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/0.11.29/install.sh | env UV_UNMANAGED_INSTALL="$HOME/.local/bin" sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Sync locked Python environment
-        run: uv sync --locked
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Check Rust
-        run: |
+      - run: |
           cargo fmt --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
+
+  web:
+    name: Frontend checks
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: "20"
       - uses: pnpm/action-setup@v4
         with:
           version: 10.24.0
-      - name: Install frontend dependencies
-        working-directory: apps/web
-        run: pnpm install --frozen-lockfile
       - name: Check, test and build frontend
         working-directory: apps/web
         run: |
+          pnpm install --frozen-lockfile
           pnpm check
           pnpm test
           pnpm build
-
           changes="$(git -C ../.. status --porcelain -- web/static)"
           if [[ -n "$changes" ]]; then
             echo "Frontend build artifacts are not up to date:"
             git -C ../.. status --short -- web/static
             exit 1
           fi
-      - name: Check Python
+
+  python:
+    name: Python checks
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install uv
         run: |
+          curl -LsSf https://astral.sh/uv/0.11.29/install.sh | env UV_UNMANAGED_INSTALL="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: |
+          uv sync --locked
           uv run ruff check apps tests
           uv run ruff format --check apps tests
           uv run pytest -q
-      - name: Check scripts and deployment configuration
+
+  config:
+    name: Deployment configuration checks
+    needs: changes
+    if: needs.changes.outputs.config == 'true' || needs.changes.outputs.image == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate scripts and Compose configuration
         run: |
           node --check web/static/app.js
           bash -n ops/deploy.sh ops/backup.sh ops/ssh-deploy-wrapper.sh docker/start.sh docker/cron_scrape.sh docker/cron_inventory_sync.sh docker/run_daily.sh docker/test-deploy.sh scripts/run_daily.sh scripts/run_dashboard.sh scripts/run_inventory_sync.sh scripts/deploy_from_github.sh
@@ -65,15 +162,26 @@ jobs:
           LUOPAN_DATA_DIR=/srv/luopan-data docker compose config | grep -q '/srv/luopan-data/state'
           grep -q '^STORAGE_SYNC_AFTER_SCRAPE=true$' docker/crontab
           grep -q 'STORAGE_SYNC_AFTER_SCRAPE:-true' docker/cron_scrape.sh
-      - name: Build Docker frontend stage
+      - name: Smoke-test the frontend Docker stage
+        if: needs.changes.outputs.image == 'true'
+        run: docker build --target web-builder --tag luopan-web-check:${{ github.sha }} .
+
+  quality-gate:
+    name: CI quality gate
+    needs: [rust, web, python, config]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected check to pass
+        env:
+          RUST_RESULT: ${{ needs.rust.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+          PYTHON_RESULT: ${{ needs.python.result }}
+          CONFIG_RESULT: ${{ needs.config.result }}
         run: |
-          docker build \
-            --target web-builder \
-            --tag luopan-web-check:${{ github.sha }} \
-            .
-      - name: Build production Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          docker build \
-            --tag luopan-production-check:${{ github.sha }} \
-            .
+          for result in "$RUST_RESULT" "$WEB_RESULT" "$PYTHON_RESULT" "$CONFIG_RESULT"; do
+            if [[ "$result" != 'success' && "$result" != 'skipped' ]]; then
+              echo "A selected CI job did not pass: $result" >&2
+              exit 1
+            fi
+          done

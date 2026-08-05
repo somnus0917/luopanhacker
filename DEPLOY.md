@@ -32,6 +32,14 @@ docker compose up -d
 
 Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预先存在的外部 Docker 网络。正式部署脚本会在共享 `proxy` 网络存在时自动把容器接入该网络，供 Caddy 等容器反向代理使用。只有配置了防火墙或额外认证时才应设置 `LUOPAN_HOST_BIND=0.0.0.0`。
 
+## GitHub CI/CD 生产发布
+
+生产发布分为三个独立阶段：CI 按变更范围并行校验 Rust、前端、Python 和部署配置；`Release image` 在 CI 通过后构建一次不可变 GHCR 镜像（标签为完整 Git SHA）；`Deploy production` 仅在服务器拉取该镜像、重启容器、同步 SQLite 派生数据并执行健康检查。生产服务器不再编译源码。
+
+首次启用前，请确认 GitHub Actions 对仓库 Packages 有写入权限，并让 GHCR 包继承该仓库的 Actions 访问权限。部署工作流把短期 `GITHUB_TOKEN` 经受限 SSH 通道传给服务器仅用于本次拉取，服务器不会持久化该凭据。若 GHCR 包设为私有，这项仓库权限是必须的。
+
+本地开发与手动运维仍可使用 `docker compose build` / `docker compose up -d`；它们继续构建本地镜像，不经过 GHCR。
+
 ## 首次使用
 
 ### 1. 登录抖音电商罗盘

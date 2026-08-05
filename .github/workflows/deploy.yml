@@ -2,7 +2,7 @@ name: Deploy production
 
 on:
   workflow_run:
-    workflows: [CI]
+    workflows: [Release image]
     branches: [main]
     types: [completed]
 
@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   verify-main-head:
@@ -52,5 +53,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.LUOPAN_DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.LUOPAN_DEPLOY_USER }}
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy ${DEPLOY_SHA}"
+          printf '%s\n' "${REGISTRY_TOKEN}" | \
+            ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${DEPLOY_USER}@${DEPLOY_HOST}" "deploy-image ${DEPLOY_SHA}"

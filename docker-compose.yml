@@ -12,7 +12,7 @@ services:
       dockerfile: Dockerfile
       args:
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-}
-    image: luopan-compass-dashboard
+    image: ${LUOPAN_IMAGE:-luopan-compass-dashboard}
     container_name: douyin-compass
     ports:
       - "${LUOPAN_HOST_BIND:-127.0.0.1}:${LUOPAN_DASHBOARD_PORT:-8501}:8501"
@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
 
   compass-collector:
-    image: luopan-compass-dashboard
+    image: ${LUOPAN_IMAGE:-luopan-compass-dashboard}
     container_name: douyin-compass-collector
     ports:
       - "${LUOPAN_HOST_BIND:-127.0.0.1}:${LUOPAN_NOVNC_PORT:-6080}:6080"
