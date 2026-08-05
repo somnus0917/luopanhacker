@@ -86,7 +86,9 @@ if [[ -z "${admin_password}" ]]; then
 fi
 unset admin_password
 
-DEBIAN_MIRROR="${DEBIAN_MIRROR:-http://mirrors.cloud.tencent.com}" \
+# Official Debian is the reliable default for container builds. A deployment
+# may opt into a regional mirror by setting DEBIAN_MIRROR in deploy.env.
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-}" \
   LUOPAN_DATA_DIR="${DATA_DIR}" \
   docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
 
