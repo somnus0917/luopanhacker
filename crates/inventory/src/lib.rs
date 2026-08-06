@@ -210,7 +210,7 @@ fn build_business_outbound_dashboard(
     sheets: Vec<Value>,
     mut rows: Vec<Value>,
 ) -> Value {
-    rows.sort_by(|left, right| text(right.get("date")).cmp(&text(left.get("date"))));
+    rows.sort_by_key(|row| std::cmp::Reverse(text(row.get("date"))));
     let mut documents = HashSet::new();
     let mut skus = HashSet::new();
     let mut warehouses = HashSet::new();
