@@ -152,6 +152,34 @@ class InventorySyncTest(unittest.TestCase):
         state = json.loads(inventory_sync.STATE_PATH.read_text(encoding="utf-8"))
         self.assertIn("模拟销售接口异常", state["last_failure"]["message"])
 
+    def test_inventory_only_refresh_reuses_last_validated_analytics(self) -> None:
+        full_at = datetime(2026, 7, 2, 3, 0, tzinfo=SHANGHAI)
+        self.set_fetchers([stock("001", "A", 10)])
+        inventory_sync.run_sync(full_at)
+
+        inventory_sync.inventory_rows = lambda now: [stock("001", "A", 6)]
+        inventory_sync.sales_rows = lambda now: (_ for _ in ()).throw(
+            AssertionError("库存小时刷新不应查询出库窗口")
+        )
+        inventory_sync.inbound_rows = lambda now: (_ for _ in ()).throw(
+            AssertionError("库存小时刷新不应查询入库窗口")
+        )
+        refresh_at = full_at.replace(hour=4)
+        result = inventory_sync.run_sync(
+            refresh_at, write_history=False, refresh_analytics=False
+        )
+
+        self.assertFalse(result["analytics_refreshed"])
+        snapshot = json.loads(inventory_sync.SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(
+            snapshot["captured_at"], refresh_at.isoformat(timespec="seconds")
+        )
+        self.assertEqual(
+            snapshot["analytics_captured_at"], full_at.isoformat(timespec="seconds")
+        )
+        self.assertEqual(snapshot["sales_7d"][0]["quantity"], 7)
+        self.assertEqual(snapshot["inventory"][0]["available_num"], 6)
+
     def test_actual_turnover_requires_30_consecutive_close_samples(self) -> None:
         start = datetime(2026, 6, 1, 3, 0, tzinfo=SHANGHAI)
         for offset in range(30):

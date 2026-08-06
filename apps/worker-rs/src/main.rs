@@ -60,6 +60,9 @@ enum Commands {
         /// Only update the latest snapshot; do not write daily history.
         #[arg(long)]
         refresh_only: bool,
+        /// Only refresh inventory; reuse the last validated inbound/outbound analytics.
+        #[arg(long)]
+        inventory_only: bool,
     },
     /// Run the independent Playwright Compass collection service.
     #[command(name = "compass-collect", alias = "compass-scrape")]
@@ -171,10 +174,16 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string(&payload)?);
             Ok(())
         }
-        Commands::InventorySync { refresh_only } => {
+        Commands::InventorySync {
+            refresh_only,
+            inventory_only,
+        } => {
             let mut args = vec!["apps/inventory_py/inventory_sync.py".to_string()];
             if refresh_only {
                 args.push("--refresh-only".to_string());
+            }
+            if inventory_only {
+                args.push("--inventory-only".to_string());
             }
             run_python(&paths, args)
         }

@@ -381,30 +381,53 @@ def validate_snapshot(
 
 
 def build_snapshot(
-    now: datetime | None = None, previous_snapshot: dict[str, Any] | None = None
+    now: datetime | None = None,
+    previous_snapshot: dict[str, Any] | None = None,
+    refresh_analytics: bool = True,
 ) -> dict[str, Any]:
     now = now or datetime.now(SHANGHAI)
     previous_snapshot = previous_snapshot or {}
     inventory, merge = merge_inventory(
         previous_snapshot.get("inventory") or [], inventory_rows(now)
     )
+    # Inventory changes are the time-sensitive signal. Re-reading seven and
+    # thirty day order windows every hour adds API load without materially
+    # improving the stock view, so hourly refreshes retain the last validated
+    # analytical windows. A first snapshot always fetches all three datasets.
+    previous_sales = previous_snapshot.get("sales_7d")
+    previous_inbound = previous_snapshot.get("inbound_30d")
+    analytics_refreshed = (
+        refresh_analytics
+        or not isinstance(previous_sales, list)
+        or not isinstance(previous_inbound, list)
+    )
+    sales = sales_rows(now) if analytics_refreshed else previous_sales
+    inbound = inbound_rows(now) if analytics_refreshed else previous_inbound
+    analytics_captured_at = (
+        now.isoformat(timespec="seconds")
+        if analytics_refreshed
+        else previous_snapshot.get("analytics_captured_at")
+        or previous_snapshot.get("captured_at")
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "captured_at": now.isoformat(timespec="seconds"),
+        "analytics_captured_at": analytics_captured_at,
         "source": {
             "mode": "read_only_standard_apis",
             "apis": list(ALLOWED_APIS.values()),
             "inventory_window_days": 29,
             "sales_window_days": 7,
             "inbound_window_days": 29,
+            "analytics_refreshed": analytics_refreshed,
         },
         "integrity": {
             "inventory_merge": merge,
             "privacy": "outbound recipient and address data are discarded before persistence",
         },
         "inventory": inventory,
-        "sales_7d": sales_rows(now),
-        "inbound_30d": inbound_rows(now),
+        "sales_7d": sales,
+        "inbound_30d": inbound,
     }
 
 
@@ -454,7 +477,11 @@ def record_failure(error: Exception, now: datetime) -> None:
     write_state(state)
 
 
-def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[str, Any]:
+def run_sync(
+    now: datetime | None = None,
+    write_history: bool = True,
+    refresh_analytics: bool = True,
+) -> dict[str, Any]:
     """Run a safe read-only sync and return file/status metadata.
 
     All network work finishes and all validations pass before the current
@@ -466,7 +493,7 @@ def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[st
         with sync_lock(now):
             previous = read_json(SNAPSHOT_PATH, {})
             previous = previous if isinstance(previous, dict) else {}
-            snapshot = build_snapshot(now, previous)
+            snapshot = build_snapshot(now, previous, refresh_analytics)
             validate_snapshot(snapshot, previous)
             history_path: Path | None = None
             history_written = False
@@ -478,6 +505,8 @@ def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[st
             state.update(
                 {
                     "last_success_at": now.isoformat(timespec="seconds"),
+                    "last_inventory_sync_at": snapshot["captured_at"],
+                    "last_analytics_sync_at": snapshot["analytics_captured_at"],
                     "last_inventory_records": len(snapshot["inventory"]),
                     "last_history_date": history_path.stem
                     if history_path
@@ -491,6 +520,7 @@ def run_sync(now: datetime | None = None, write_history: bool = True) -> dict[st
                 "history_path": str(history_path) if history_path else None,
                 "history_written": history_written,
                 "inventory_records": len(snapshot["inventory"]),
+                "analytics_refreshed": snapshot["source"]["analytics_refreshed"],
             }
     except Exception as error:
         record_failure(error, now)
@@ -502,8 +532,16 @@ def main() -> None:
     parser.add_argument(
         "--refresh-only", action="store_true", help="只更新最新快照，不写入日结历史"
     )
+    parser.add_argument(
+        "--inventory-only",
+        action="store_true",
+        help="仅刷新库存；复用最近一次已校验的出库和入库分析数据",
+    )
     args = parser.parse_args()
-    result = run_sync(write_history=not args.refresh_only)
+    result = run_sync(
+        write_history=not args.refresh_only and not args.inventory_only,
+        refresh_analytics=not args.inventory_only,
+    )
     print(json.dumps(result, ensure_ascii=False))
 
 

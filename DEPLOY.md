@@ -40,6 +40,11 @@ Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预�
 
 腾讯云主机应在运行时部署配置中设置 `DEBIAN_MIRROR=http://mirrors.cloud.tencent.com`，使首次构建 Chromium 等系统依赖时使用同地域镜像源。
 
+## 数据刷新频率
+
+- 旺店通库存：每小时第 17 分钟刷新最新库存；出库和入库分析在 09:23、15:23、21:23 刷新，03:00 的完整同步写入不可变日结历史。
+- 罗盘经营、渠道与抖音：每天 09:00 触发并随机等待 0–60 分钟，因当前口径为“近 1 天＝昨天”。若当天采集失败或部分失败，15:37 仅重试失败模块一次。
+
 ## 首次使用
 
 ### 1. 登录抖音电商罗盘
@@ -264,6 +269,7 @@ tail -f /app/logs/dashboard.err
 ### 1. 浏览器无法启动
 
 检查日志：
+
 ```bash
 docker exec -it douyin-compass-collector bash
 cat /app/logs/xvfb.err
@@ -273,12 +279,14 @@ cat /app/logs/x11vnc.err
 ### 2. 登录状态失效
 
 删除 session 目录并重新登录：
+
 ```bash
 rm -rf session/*
 # 然后通过 noVNC 重新登录
 ```
 
 或者通过看板查看登录截图：
+
 - 访问数据看板
 - 查看"采集状态"区域
 - 如果显示"login_required"，会展示登录截图
@@ -287,6 +295,7 @@ rm -rf session/*
 ### 3. 看板无数据
 
 确保已经执行过抓取：
+
 ```bash
 docker exec -it douyin-compass-collector bash
 ./docker/run_daily.sh
@@ -295,12 +304,14 @@ docker exec -it douyin-compass-collector bash
 ### 4. 定时任务未执行
 
 检查 cron 日志：
+
 ```bash
 docker exec -it douyin-compass-collector bash
 cat /app/logs/cron.log
 ```
 
 检查任务状态：
+
 ```bash
 cat /app/output/collection/status.json
 ```

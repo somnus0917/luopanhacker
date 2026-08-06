@@ -242,6 +242,7 @@ pub fn build_dashboard(snapshot: &Value, history_dir: &Path) -> Result<Value> {
 
     Ok(json!({
         "captured_at": snapshot.get("captured_at").cloned().unwrap_or(Value::Null),
+        "analytics_captured_at": snapshot.get("analytics_captured_at").cloned().unwrap_or_else(|| snapshot.get("captured_at").cloned().unwrap_or(Value::Null)),
         "source": snapshot.get("source").cloned().unwrap_or_else(|| json!({})),
         "summary": summary,
         "warehouses": build_group(&rows, "warehouse_name"),

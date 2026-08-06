@@ -1,8 +1,14 @@
-# 每天 9 点（上海时区）触发，脚本内部随机等待 0-60 分钟。
+# 每天 9 点（上海时区）触发罗盘；脚本内部随机等待 0-60 分钟。
 PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin
 CRON_TZ=Asia/Shanghai
 TZ=Asia/Shanghai
 STORAGE_SYNC_AFTER_SCRAPE=true
 0 9 * * * /app/docker/cron_scrape.sh >> /app/logs/cron_scrape.log 2>&1
-# 库存日结：只调用 allow-list 内的标准只读旺店通接口。
+# 当天 15:37 仅在罗盘首次采集失败或部分失败时，重试失败模块一次。
+37 15 * * * /app/docker/cron_scrape_retry.sh >> /app/logs/cron_scrape.log 2>&1
+# 库存日结：只调用 allow-list 内的标准只读旺店通接口，并写入不可变历史。
 0 3 * * * /app/docker/cron_inventory_sync.sh >> /app/logs/inventory_sync.log 2>&1
+# 每小时更新库存；03:00 已执行完整日结，避免重复运行。
+17 0-2,4-23 * * * /app/docker/cron_inventory_sync.sh --inventory-only --refresh-only >> /app/logs/inventory_sync.log 2>&1
+# 每 6 小时刷新出库/入库分析；03:00 完整日结已覆盖首个时点。
+23 9,15,21 * * * /app/docker/cron_inventory_sync.sh --refresh-only >> /app/logs/inventory_sync.log 2>&1
