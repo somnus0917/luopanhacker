@@ -38,6 +38,8 @@ Compose 默认只在宿主机 `127.0.0.1` 映射这两个端口，不依赖预�
 
 锁文件、系统依赖与 Dockerfile 未变时，Chromium、Python、Node 等重型依赖层会复用；代码改动只会重建受影响的应用层。若未来接入与腾讯云同地域的镜像仓库，可再切换到预构建镜像发布。
 
+腾讯云主机应在运行时部署配置中设置 `DEBIAN_MIRROR=http://mirrors.cloud.tencent.com`，使首次构建 Chromium 等系统依赖时使用同地域镜像源。
+
 ## 首次使用
 
 ### 1. 登录抖音电商罗盘

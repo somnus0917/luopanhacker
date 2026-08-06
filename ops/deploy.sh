@@ -93,9 +93,10 @@ unset admin_password
 
 # The production host keeps Docker's layer cache. With unchanged lockfiles and
 # system packages, a code-only release reuses the Chromium, Python, and Node
-# dependency layers; only affected application layers rebuild.
-DEBIAN_MIRROR="${DEBIAN_MIRROR:-}" \
-  LUOPAN_DATA_DIR="${DATA_DIR}" \
+# dependency layers; only affected application layers rebuild. Do not export an
+# empty DEBIAN_MIRROR here: Docker Compose must be able to read its value from
+# the production --env-file and pass it as a build argument.
+LUOPAN_DATA_DIR="${DATA_DIR}" \
   docker compose --env-file "${ENV_FILE}" --project-name luopan up -d --build --remove-orphans
 
 for container_name in douyin-compass douyin-compass-collector; do
