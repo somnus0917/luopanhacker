@@ -1,8 +1,14 @@
-use axum::{Json, extract::State, http::StatusCode};
-use luopan_inventory::load_inventory_dashboard;
+use axum::{
+    Json,
+    extract::{Multipart, State},
+    http::StatusCode,
+};
+use luopan_inventory::{
+    load_business_outbound_dashboard, load_inventory_dashboard, save_business_outbound_upload,
+};
 use luopan_runtime::read_json_file;
 use luopan_storage::kv_value_with_updated_at;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{ApiError, AppState, api_with_meta, payload_updated_at};
 
@@ -57,4 +63,57 @@ pub(crate) async fn inventory_raw(State(state): State<AppState>) -> Result<Json<
             "暂无库存快照",
         )),
     }
+}
+
+pub(crate) async fn business_outbound_dashboard(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiError> {
+    Ok(crate::api(
+        load_business_outbound_dashboard(&state.paths).map_err(ApiError::internal)?,
+    ))
+}
+
+pub(crate) async fn upload_business_outbound(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let mut file_name = String::new();
+    let mut content = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(|_| {
+        ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "INVALID_UPLOAD",
+            "读取上传文件失败",
+        )
+    })? {
+        if field.name() != Some("file") {
+            continue;
+        }
+        file_name = field.file_name().unwrap_or_default().to_string();
+        content = field
+            .bytes()
+            .await
+            .map_err(|_| {
+                ApiError::client(
+                    StatusCode::BAD_REQUEST,
+                    "INVALID_UPLOAD",
+                    "读取上传文件失败",
+                )
+            })?
+            .to_vec();
+        break;
+    }
+    if file_name.is_empty() || content.is_empty() {
+        return Err(ApiError::client(
+            StatusCode::BAD_REQUEST,
+            "MISSING_UPLOAD",
+            "请选择商智出库 Excel 文件",
+        ));
+    }
+    let dashboard = save_business_outbound_upload(&state.paths, &file_name, &content)
+        .map_err(ApiError::bad_request)?;
+    Ok((
+        StatusCode::CREATED,
+        crate::api(json!({ "dashboard": dashboard })),
+    ))
 }

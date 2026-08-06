@@ -2,11 +2,13 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, HashMap, HashSet},
     fs,
+    io::Cursor,
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
-use chrono::NaiveDate;
+use anyhow::{Context, Result, anyhow, bail};
+use calamine::{Data, DataType, Reader, Xlsx};
+use chrono::{Local, NaiveDate, NaiveDateTime};
 use luopan_jd::inventory_snapshot as jd_inventory_snapshot;
 use luopan_runtime::{RuntimePaths, read_json_file};
 use serde_json::{Map, Value, json};
@@ -14,6 +16,9 @@ use serde_json::{Map, Value, json};
 const ACTUAL_TURNOVER_WINDOW_DAYS: usize = 30;
 const TARGET_COVER_DAYS: f64 = 30.0;
 const SAFETY_STOCK_DAYS: f64 = 7.0;
+const BUSINESS_OUTBOUND_FILE: &str = "business_outbound.json";
+const BUSINESS_OUTBOUND_DETAIL_LIMIT: usize = 120;
+const BUSINESS_OUTBOUND_GROUP_LIMIT: usize = 20;
 const HEALTH_ORDER: [&str; 8] = [
     "out_of_stock",
     "urgent",
@@ -40,6 +45,323 @@ pub fn load_inventory_dashboard(paths: &RuntimePaths) -> Result<Option<Value>> {
         .unwrap_or_else(|| paths.output_dir.join("inventory"))
         .join("history");
     Ok(Some(build_dashboard(&snapshot, &history_dir)?))
+}
+
+/// 商智批发单无法通过现有库存 API 同步，管理员上传 Excel 后会被规范化为
+/// 只供看板使用的 JSON；原始工作簿不写入服务器。
+pub fn load_business_outbound_dashboard(paths: &RuntimePaths) -> Result<Value> {
+    let path = business_outbound_path(paths);
+    Ok(read_json_file(&path)?.unwrap_or_else(empty_business_outbound_dashboard))
+}
+
+pub fn save_business_outbound_upload(
+    paths: &RuntimePaths,
+    original_file_name: &str,
+    bytes: &[u8],
+) -> Result<Value> {
+    let filename = Path::new(original_file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if filename.is_empty() || !filename.to_ascii_lowercase().ends_with(".xlsx") {
+        bail!("仅支持上传 .xlsx 格式的商智出库明细");
+    }
+    if bytes.is_empty() {
+        bail!("上传文件为空");
+    }
+
+    let dashboard = parse_business_outbound_workbook(filename, bytes)?;
+    let path = business_outbound_path(paths);
+    let directory = path.parent().ok_or_else(|| anyhow!("商智出库目录无效"))?;
+    fs::create_dir_all(directory).with_context(|| format!("create {}", directory.display()))?;
+    fs::write(&path, serde_json::to_vec_pretty(&dashboard)?)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(dashboard)
+}
+
+fn business_outbound_path(paths: &RuntimePaths) -> PathBuf {
+    paths
+        .output_dir
+        .join("inventory")
+        .join(BUSINESS_OUTBOUND_FILE)
+}
+
+fn empty_business_outbound_dashboard() -> Value {
+    json!({
+        "available": false,
+        "summary": {},
+        "trend": [],
+        "warehouses": [],
+        "products": [],
+        "rows": [],
+    })
+}
+
+fn parse_business_outbound_workbook(filename: &str, bytes: &[u8]) -> Result<Value> {
+    let mut workbook: Xlsx<_> = Xlsx::new(Cursor::new(bytes)).context("读取商智出库 Excel")?;
+    let sheet_count = workbook.sheet_names().len();
+    if sheet_count == 0 {
+        bail!("工作簿没有可读取的工作表");
+    }
+
+    let mut outbound_rows = Vec::new();
+    let mut input_rows = 0usize;
+    let mut sheets = Vec::new();
+    for index in 0..sheet_count {
+        let range = workbook
+            .worksheet_range_at(index)
+            .ok_or_else(|| anyhow!("读取工作表失败"))??;
+        let mut rows = range.rows();
+        let headers: Vec<String> = rows.next().unwrap_or(&[]).iter().map(cell_text).collect();
+        if headers.is_empty() {
+            continue;
+        }
+        let columns = BusinessOutboundColumns::from_headers(&headers)
+            .with_context(|| format!("第 {} 张工作表", index + 1))?;
+        let mut accepted = 0usize;
+        for row in rows {
+            input_rows += 1;
+            let value = |column: usize| row.get(column).unwrap_or(&Data::Empty);
+            let document_type = cell_text(value(columns.document_type)).trim().to_string();
+            if !matches!(document_type.as_str(), "批发" | "批退") {
+                continue;
+            }
+            let Some(date) = parse_business_outbound_date(value(columns.audit_time)) else {
+                continue;
+            };
+            let document_no = cell_text(value(columns.document_no)).trim().to_string();
+            let sku = cell_text(value(columns.sku)).trim().to_string();
+            if document_no.is_empty() || sku.is_empty() {
+                continue;
+            }
+            let direction = if document_type == "批退" { -1.0 } else { 1.0 };
+            outbound_rows.push(json!({
+                "date": date.format("%Y-%m-%d").to_string(),
+                "document_no": document_no,
+                "document_type": document_type,
+                "sku": sku,
+                "product_name": cell_text(value(columns.product_name)).trim(),
+                "brand": cell_text(value(columns.brand)).trim(),
+                "warehouse": cell_text(value(columns.warehouse)).trim(),
+                "customer": cell_text(value(columns.customer)).trim(),
+                "quantity": rounded(cell_number(value(columns.quantity)) * direction),
+                "sales_amount": rounded(cell_number(value(columns.sales_amount)) * direction),
+                "cost_amount": rounded(cell_number(value(columns.cost_amount)) * direction),
+                "gross_profit": rounded(cell_number(value(columns.gross_profit)) * direction),
+            }));
+            accepted += 1;
+        }
+        sheets.push(json!({"index": index + 1, "input_rows": range.height().saturating_sub(1), "accepted_rows": accepted}));
+    }
+    if outbound_rows.is_empty() {
+        bail!("没有读到有效商智出库明细；请确认包含批发/批退、SKU、审核时间、商品数量等列");
+    }
+    Ok(build_business_outbound_dashboard(
+        filename,
+        input_rows,
+        sheets,
+        outbound_rows,
+    ))
+}
+
+struct BusinessOutboundColumns {
+    document_no: usize,
+    customer: usize,
+    document_type: usize,
+    sku: usize,
+    product_name: usize,
+    brand: usize,
+    warehouse: usize,
+    quantity: usize,
+    sales_amount: usize,
+    cost_amount: usize,
+    gross_profit: usize,
+    audit_time: usize,
+}
+
+impl BusinessOutboundColumns {
+    fn from_headers(headers: &[String]) -> Result<Self> {
+        let required = |name: &str| {
+            headers
+                .iter()
+                .position(|header| header.trim() == name)
+                .ok_or_else(|| anyhow!("缺少{name}列，可用列：{}", headers.join("、")))
+        };
+        Ok(Self {
+            document_no: required("单据编号")?,
+            customer: required("客户名称")?,
+            document_type: required("批发单类型")?,
+            sku: required("sku")?,
+            product_name: required("商品名称")?,
+            brand: required("品牌")?,
+            warehouse: required("仓库")?,
+            quantity: required("商品数量")?,
+            sales_amount: required("销售总金额")?,
+            cost_amount: required("成本总金额")?,
+            gross_profit: required("毛利额")?,
+            audit_time: required("审核时间")?,
+        })
+    }
+}
+
+fn build_business_outbound_dashboard(
+    filename: &str,
+    input_rows: usize,
+    sheets: Vec<Value>,
+    mut rows: Vec<Value>,
+) -> Value {
+    rows.sort_by(|left, right| text(right.get("date")).cmp(&text(left.get("date"))));
+    let mut documents = HashSet::new();
+    let mut skus = HashSet::new();
+    let mut warehouses = HashSet::new();
+    let mut wholesale_quantity = 0.0;
+    let mut return_quantity = 0.0;
+    let mut wholesale_sales = 0.0;
+    let mut return_sales = 0.0;
+    let mut net_cost = 0.0;
+    let mut net_profit = 0.0;
+    let mut daily: BTreeMap<String, OutboundAggregate> = BTreeMap::new();
+    let mut warehouse_groups: BTreeMap<String, OutboundAggregate> = BTreeMap::new();
+    let mut product_groups: BTreeMap<(String, String), OutboundAggregate> = BTreeMap::new();
+    for row in &rows {
+        let document_type = text(row.get("document_type"));
+        let quantity = number(row.get("quantity"));
+        let sales = number(row.get("sales_amount"));
+        if document_type == "批退" {
+            return_quantity += quantity.abs();
+            return_sales += sales.abs();
+        } else {
+            wholesale_quantity += quantity;
+            wholesale_sales += sales;
+        }
+        net_cost += number(row.get("cost_amount"));
+        net_profit += number(row.get("gross_profit"));
+        documents.insert(text(row.get("document_no")));
+        skus.insert(text(row.get("sku")));
+        warehouses.insert(text(row.get("warehouse")));
+        aggregate_outbound(daily.entry(text(row.get("date"))).or_default(), row);
+        aggregate_outbound(
+            warehouse_groups
+                .entry(non_empty(row.get("warehouse"), "未标注仓库"))
+                .or_default(),
+            row,
+        );
+        aggregate_outbound(
+            product_groups
+                .entry((
+                    text(row.get("sku")),
+                    non_empty(row.get("product_name"), "未命名商品"),
+                ))
+                .or_default(),
+            row,
+        );
+    }
+    let net_sales = wholesale_sales - return_sales;
+    let latest_date = rows
+        .first()
+        .map(|row| text(row.get("date")))
+        .unwrap_or_default();
+    let earliest_date = rows
+        .last()
+        .map(|row| text(row.get("date")))
+        .unwrap_or_default();
+    let group_json = |groups: Vec<(String, OutboundAggregate)>| {
+        groups
+            .into_iter()
+            .map(|(name, value)| {
+                json!({
+                    "name": name,
+                    "quantity": rounded(value.quantity),
+                    "sales_amount": rounded(value.sales_amount),
+                    "gross_profit": rounded(value.gross_profit),
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut warehouse_values: Vec<_> = warehouse_groups.into_iter().collect();
+    warehouse_values.sort_by(|left, right| {
+        right
+            .1
+            .sales_amount
+            .partial_cmp(&left.1.sales_amount)
+            .unwrap_or(Ordering::Equal)
+    });
+    let mut product_values: Vec<_> = product_groups
+        .into_iter()
+        .map(|((sku, product_name), value)| (format!("{sku}\u{0000}{product_name}"), value))
+        .collect();
+    product_values.sort_by(|left, right| {
+        right
+            .1
+            .quantity
+            .partial_cmp(&left.1.quantity)
+            .unwrap_or(Ordering::Equal)
+    });
+    let products = product_values.into_iter().take(BUSINESS_OUTBOUND_GROUP_LIMIT).map(|(name, value)| {
+        let (sku, product_name) = name.split_once('\u{0000}').unwrap_or((&name, ""));
+        json!({"sku": sku, "product_name": product_name, "quantity": rounded(value.quantity), "sales_amount": rounded(value.sales_amount), "gross_profit": rounded(value.gross_profit)})
+    }).collect::<Vec<_>>();
+
+    json!({
+        "available": true,
+        "source": {"file_name": filename, "updated_at": Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(), "sheets": sheets, "input_rows": input_rows},
+        "summary": {
+            "row_count": rows.len(), "document_count": documents.len(), "sku_count": skus.len(), "warehouse_count": warehouses.len(),
+            "wholesale_quantity": rounded(wholesale_quantity), "return_quantity": rounded(return_quantity), "net_outbound_quantity": rounded(wholesale_quantity - return_quantity),
+            "wholesale_sales_amount": rounded(wholesale_sales), "return_sales_amount": rounded(return_sales), "net_sales_amount": rounded(net_sales),
+            "net_cost_amount": rounded(net_cost), "gross_profit": rounded(net_profit),
+            "gross_margin": if net_sales == 0.0 { Value::Null } else { json!(rounded(net_profit / net_sales)) },
+            "earliest_date": earliest_date, "latest_date": latest_date,
+        },
+        "trend": daily.into_iter().map(|(date, value)| json!({"date": date, "quantity": rounded(value.quantity), "sales_amount": rounded(value.sales_amount)})).collect::<Vec<_>>(),
+        "warehouses": group_json(warehouse_values.into_iter().take(BUSINESS_OUTBOUND_GROUP_LIMIT).collect()),
+        "products": products,
+        "rows": rows.into_iter().take(BUSINESS_OUTBOUND_DETAIL_LIMIT).collect::<Vec<_>>(),
+    })
+}
+
+#[derive(Default)]
+struct OutboundAggregate {
+    quantity: f64,
+    sales_amount: f64,
+    gross_profit: f64,
+}
+
+fn aggregate_outbound(target: &mut OutboundAggregate, row: &Value) {
+    target.quantity += number(row.get("quantity"));
+    target.sales_amount += number(row.get("sales_amount"));
+    target.gross_profit += number(row.get("gross_profit"));
+}
+
+fn non_empty(value: Option<&Value>, fallback: &str) -> String {
+    let text = text(value);
+    if text.is_empty() {
+        fallback.to_string()
+    } else {
+        text
+    }
+}
+
+fn cell_text(cell: &Data) -> String {
+    cell.to_string()
+}
+
+fn cell_number(cell: &Data) -> f64 {
+    cell_text(cell).trim().parse::<f64>().unwrap_or(0.0)
+}
+
+fn parse_business_outbound_date(cell: &Data) -> Option<NaiveDate> {
+    cell.as_datetime().map(|value| value.date()).or_else(|| {
+        let value = cell_text(cell);
+        ["%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]
+            .iter()
+            .find_map(|format| {
+                NaiveDateTime::parse_from_str(&value, format)
+                    .ok()
+                    .map(|date| date.date())
+            })
+            .or_else(|| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok())
+    })
 }
 
 fn merge_jd_snapshot(existing: Option<Value>, jd: Option<Value>) -> Option<Value> {
@@ -722,5 +1044,24 @@ mod tests {
         assert_eq!(dashboard["summary"]["cost_covered_records"], 1);
         assert_eq!(dashboard["summary"]["cost_coverage_rate"], 0.5);
         assert_eq!(dashboard["summary"]["stock_cost_amount"], 125.0);
+    }
+
+    #[test]
+    fn business_outbound_treats_returns_as_negative() {
+        let dashboard = build_business_outbound_dashboard(
+            "商智出库.xlsx",
+            2,
+            vec![json!({"index": 1, "input_rows": 2, "accepted_rows": 2})],
+            vec![
+                json!({"date": "2026-08-02", "document_no": "P-1", "document_type": "批发", "sku": "A", "product_name": "商品 A", "warehouse": "上海仓", "quantity": 10.0, "sales_amount": 100.0, "cost_amount": 70.0, "gross_profit": 30.0}),
+                json!({"date": "2026-08-03", "document_no": "R-1", "document_type": "批退", "sku": "A", "product_name": "商品 A", "warehouse": "上海仓", "quantity": -2.0, "sales_amount": -20.0, "cost_amount": -14.0, "gross_profit": -6.0}),
+            ],
+        );
+
+        assert_eq!(dashboard["summary"]["wholesale_quantity"], 10.0);
+        assert_eq!(dashboard["summary"]["return_quantity"], 2.0);
+        assert_eq!(dashboard["summary"]["net_outbound_quantity"], 8.0);
+        assert_eq!(dashboard["summary"]["net_sales_amount"], 80.0);
+        assert_eq!(dashboard["summary"]["gross_profit"], 24.0);
     }
 }

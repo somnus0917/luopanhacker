@@ -1,7 +1,8 @@
 import { $, $$ } from "../dom";
 import { errorMessage, isApiRequestError, request } from "../api";
-import { escapeHtml, number, settlementMoney, whole } from "../format";
-import { state } from "../state";
+import { showToast } from "../feedback";
+import { escapeHtml, importTime, number, settlementMoney, whole } from "../format";
+import { isAdmin, state } from "../state";
 import type { AnyRecord } from "../state";
 import type { InventoryView } from "../types";
 import { showLogin } from "./account";
@@ -124,12 +125,15 @@ function inventoryGroup(rows: AnyRecord[], keyName: string): AnyRecord[] {
       available_num: 0,
       sales_7d: 0,
       inbound_30d: 0,
+      available_cost_amount: 0,
+      cost_covered_records: 0,
       negative_available: 0,
     };
     group.sku_records += 1;
-    ["stock_num", "available_num", "sales_7d", "inbound_30d"].forEach(
+    ["stock_num", "available_num", "sales_7d", "inbound_30d", "available_cost_amount"].forEach(
       (key) => (group[key] += number(row[key])),
     );
+    group.cost_covered_records += row.cost_covered ? 1 : 0;
     group.negative_available += number(row.available_num) < 0 ? 1 : 0;
     groups.set(name, group);
   });
@@ -267,6 +271,11 @@ function inventoryBarPanel(
   return `<section class="panel"><div class="panel-head"><div><h3>${title}</h3><span>按可发库存排序 · 前 10</span></div></div>${bars || "<span class='metric-delta'>暂无数据</span>"}</section>`;
 }
 
+function warehouseDistributionPanel(items: AnyRecord[]) {
+  const rows = items.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${whole(item.available_num)}</td><td>${item.cost_covered_records ? summaryCostMoney(item.available_cost_amount) : "—"}</td></tr>`).join("");
+  return `<details class="panel detail-table-disclosure warehouse-distribution"><summary><span>仓库分布</span><small>可发库存数量与已覆盖成本金额 · ${whole(items.length)} 个仓库</small></summary><div class="detail-table-content"><div class="table-wrap"><table class="table-freeze-leading"><thead><tr><th>仓库名</th><th>可发库存数量</th><th>可发库存金额</th></tr></thead><tbody>${rows || "<tr><td colspan=\"3\">暂无仓库数据</td></tr>"}</tbody></table></div></div></details>`;
+}
+
 function healthPill(item: AnyRecord) {
   return `<span class="health-pill ${escapeHtml(item.health_key || item.key)}">${escapeHtml(item.health_name || item.name)}</span>`;
 }
@@ -394,6 +403,57 @@ function inventoryTabs(view: string) {
   return `<div class="inventory-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="inventory-tab ${view === key ? "active" : ""}" type="button" data-inventory-view="${key}" role="tab" aria-selected="${view === key}">${label}</button>`).join("")}</div>`;
 }
 
+function businessOutboundTable(headers: string[], rows: string[][], empty: string) {
+  const body = rows.length
+    ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${headers.length}">${escapeHtml(empty)}</td></tr>`;
+  return `<div class="table-wrap"><table class="table-freeze-leading"><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function businessOutboundPanel() {
+  const payload = state.businessOutbound;
+  const upload = isAdmin()
+    ? `<form id="business-outbound-upload-form" class="order-upload-form business-outbound-upload"><label class="file-picker"><span>上传商智批发单明细（.xlsx）</span><input id="business-outbound-upload-file" type="file" name="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required /></label><button class="button button-primary" type="submit">更新商智出库</button></form>`
+    : `<p class="import-help">当前账户仅可查看商智出库数据，上传更新需管理员权限。</p>`;
+  const message = state.businessOutboundMessage ? `<p class="order-import-message">${escapeHtml(state.businessOutboundMessage)}</p>` : "";
+  if (!payload?.available) {
+    return `<section class="panel business-outbound-panel"><div class="panel-head"><div><h3>商智出库</h3><span>独立数据源 · 通过上传商智批发单明细更新，不参与 API 库存同步</span></div></div>${upload}${message}<div class="empty-panel compact-empty"><strong>尚未上传商智出库明细</strong><span>上传后会按审核时间汇总批发、批退和净出库，原始 Excel 不会保存在服务器。</span></div></section>`;
+  }
+  const summary = payload.summary || {};
+  const source = payload.source || {};
+  const metrics = [
+    ["净出库数量", whole(summary.net_outbound_quantity), `批发 ${whole(summary.wholesale_quantity)} · 批退 ${whole(summary.return_quantity)}`],
+    ["净销售金额", settlementMoney(summary.net_sales_amount), `批发 ${settlementMoney(summary.wholesale_sales_amount)} · 批退 ${settlementMoney(summary.return_sales_amount)}`],
+    ["毛利额", settlementMoney(summary.gross_profit), summary.gross_margin === null || summary.gross_margin === undefined ? "净销售额为 0，暂不计算毛利率" : `毛利率 ${(number(summary.gross_margin) * 100).toFixed(2)}%`],
+    ["单据 / SKU", `${whole(summary.document_count)} / ${whole(summary.sku_count)}`, `${whole(summary.warehouse_count)} 个仓库 · ${whole(summary.row_count)} 条明细`],
+  ];
+  const trendRows = [...(payload.trend || [])].slice(-14).reverse().map((item: AnyRecord) => [escapeHtml(item.date), whole(item.quantity), settlementMoney(item.sales_amount)]);
+  const warehouseRows = (payload.warehouses || []).map((item: AnyRecord) => [escapeHtml(item.name), whole(item.quantity), settlementMoney(item.sales_amount), settlementMoney(item.gross_profit)]);
+  const detailRows = (payload.rows || []).map((item: AnyRecord) => [escapeHtml(item.date), escapeHtml(item.document_type), escapeHtml(item.document_no), escapeHtml(item.warehouse || "—"), `<span class="table-primary">${escapeHtml(item.product_name || item.sku)}</span><small>${escapeHtml(item.sku)}</small>`, whole(item.quantity), settlementMoney(item.sales_amount)]);
+  return `<section class="panel business-outbound-panel"><div class="panel-head"><div><h3>商智出库</h3><span>批发、批退按审核时间汇总；批退已作为负向冲减</span></div><span class="chart-semantic">${escapeHtml(summary.earliest_date || "—")} 至 ${escapeHtml(summary.latest_date || "—")}</span></div>${upload}${message}<div class="metric-grid four business-outbound-metrics">${metrics.map(([label, value, note]) => `<article class="metric-card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-delta">${note}</div></article>`).join("")}</div><div class="chart-grid"><section class="panel"><div class="panel-head"><div><h3>近 14 个审核日出库</h3><span>净出库数量与净销售金额</span></div></div>${businessOutboundTable(["审核日期", "净出库数量", "净销售金额"], trendRows, "暂无近期审核日数据")}</section><section class="panel"><div class="panel-head"><div><h3>仓库出库分布</h3><span>按净销售金额排序</span></div></div>${businessOutboundTable(["仓库", "净出库数量", "净销售金额", "毛利额"], warehouseRows, "暂无仓库数据")}</section></div><details class="detail-table-disclosure"><summary><span>商智出库明细</span><small>最近 ${whole((payload.rows || []).length)} 条 · 文件：${escapeHtml(source.file_name || "—")} · 更新于 ${escapeHtml(importTime(source.updated_at))}</small></summary><div class="detail-table-content">${businessOutboundTable(["审核日期", "类型", "单据编号", "仓库", "商品", "数量", "销售金额"], detailRows, "暂无明细")}</div></details></section>`;
+}
+
+async function uploadBusinessOutbound(event: SubmitEvent) {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const file = new FormData(form).get("file");
+  if (!(file instanceof File)) return;
+  const button = $("button", form);
+  button.disabled = true;
+  button.textContent = "正在解析并更新…";
+  state.businessOutboundMessage = "";
+  try {
+    const payload = await request<{ dashboard: AnyRecord }>("/api/inventory/business-outbound/upload", { method: "POST", body: new FormData(form) });
+    state.businessOutbound = payload.dashboard;
+    state.businessOutboundMessage = `已更新商智出库：${whole(payload.dashboard?.summary?.row_count)} 条有效明细。`;
+    showToast(state.businessOutboundMessage, "success");
+  } catch (error) {
+    state.businessOutboundMessage = errorMessage(error, "商智出库文件解析失败，请检查列名与文件格式。");
+    showToast(state.businessOutboundMessage, "error");
+  }
+  if (state.inventory) renderInventory(state.inventory);
+}
+
 export function renderInventory(
   payload: AnyRecord | null,
   view: InventoryView = state.inventoryView,
@@ -423,17 +483,18 @@ export function renderInventory(
       : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
   const metrics = [
     [
-      "可发库存",
+      "可发库存数量",
       whole(summary.available_num),
       `可售 SKU：${whole(summary.salable_skus)}`,
     ],
     [
-      "已覆盖库存成本",
-      summaryCostMoney(summary.stock_cost_amount),
+      "可发库存金额",
+      summaryCostMoney(summary.available_cost_amount),
       costCoverage,
       summary.cost_coverage_rate !== 1 ? "attention" : "",
     ],
-    ["近 7 天出库", whole(summary.sales_7d), "用于估算近期日均需求"],
+    ["近 7 天出库数量", whole(summary.sales_7d), "用于估算近期日均需求"],
+    ["近 7 天出库金额", "—", "当前出库明细未提供金额口径"],
     [
       "预计可售天数",
       inventoryDays(summary.turnover_days),
@@ -470,7 +531,7 @@ export function renderInventory(
   const overstock = analysisRows.filter((item) =>
     ["high", "overstock", "no_movement"].includes(item.health_key),
   );
-  const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">优先处理 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
+  const overview = `${cards}<div class="chart-grid"><div class="chart-stack">${healthDistribution(health)}${salesTrendPanel(salesTrend)}</div><div class="chart-stack">${warehouseDistributionPanel(warehouses)}${inventoryBarPanel(warehouses, "仓库可发库存排行", "available_num")}</div></div><h3 class="section-title">补货清单 <small>先补货，再处理库存偏高与未动销</small></h3>${inventoryTable(replenishment, "replenish")}`;
   const content =
     view === "replenish"
       ? `<h3 class="section-title inventory-first-title">补货优先级 <small>按缺货与预计可售天数排序，显示前 200 条</small></h3>${inventoryTable(replenishment, "replenish")}`
@@ -480,7 +541,7 @@ export function renderInventory(
           ? `<h3 class="section-title inventory-first-title">单品维度<small>按风险优先级排序，显示前 200 条</small></h3>${inventoryTable(rows)}`
           : overview;
   $("#inventory-content").innerHTML =
-    `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}`;
+    `${inventoryWarehouseFilter(payload)}${inventoryTabs(view)}${content}${businessOutboundPanel()}`;
   $('[data-inventory-filter="warehouse"]')?.addEventListener(
     "change",
     (event: Event) => {
@@ -507,12 +568,17 @@ export function renderInventory(
       renderInventory(payload, button.dataset.inventoryView as InventoryView),
     ),
   );
+  $("#business-outbound-upload-form")?.addEventListener("submit", uploadBusinessOutbound);
 }
 
 export async function loadInventory() {
   const target = $("#inventory-content");
   try {
-    const payload = await request<AnyRecord>("/api/inventory");
+    const [payload, businessOutbound] = await Promise.all([
+      request<AnyRecord>("/api/inventory"),
+      request<AnyRecord>("/api/inventory/business-outbound").catch(() => null),
+    ]);
+    state.businessOutbound = businessOutbound;
     renderInventory(payload);
   } catch (error) {
     if (isApiRequestError(error) && error.status === 401) return showLogin();

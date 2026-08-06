@@ -103,6 +103,7 @@ function resetOperationFilters() {
   });
   state.operationCalendarRangeStart = "";
   state.operationCalendarOpen = false;
+  state.operationDatePreset = "all";
 }
 
 function applySingleOperationFilter(kind: string, value: string) {
@@ -264,6 +265,8 @@ function selectedDateBounds() {
 }
 
 function operationDateLabel() {
+  const presetLabels = { realtime: "实时", day: "近 1 日", week: "近 7 日", month: "近 30 天" };
+  if (state.operationDatePreset in presetLabels) return presetLabels[state.operationDatePreset as keyof typeof presetLabels];
   const available = operationFilterItems("date");
   const selected = [...state.operationDates].sort();
   if (!selected.length) return "请选择日期";
@@ -271,6 +274,23 @@ function operationDateLabel() {
   if (selected.length === 1) return selected[0];
   const isRange = available.filter((date) => date >= (selected[0] ?? "") && date <= (selected.at(-1) ?? "")).every((date) => state.operationDates.has(date));
   return isRange ? `${selected[0]} 至 ${selected.at(-1)}` : `已选择 ${selected.length} 天`;
+}
+
+function selectOperationDatePreset(preset: "realtime" | "day" | "week" | "month" | "all") {
+  const dates = operationFilterItems("date");
+  if (preset === "all") {
+    state.operationDates = new Set(dates);
+  } else {
+    const days = preset === "realtime" || preset === "day" ? 1 : preset === "week" ? 7 : 30;
+    const latest = dates[0];
+    const earliest = latest ? new Date(`${latest}T00:00:00`): null;
+    if (earliest) earliest.setDate(earliest.getDate() - days + 1);
+    const minDate = earliest ? `${earliest.getFullYear()}-${String(earliest.getMonth() + 1).padStart(2, "0")}-${String(earliest.getDate()).padStart(2, "0")}` : "";
+    state.operationDates = new Set(dates.filter((date) => date >= minDate));
+  }
+  state.operationDatePreset = preset;
+  state.operationCalendarRangeStart = "";
+  state.operationCalendarOpen = false;
 }
 
 function calendarMonthMarkup(monthValue: string, availableDates: Set<string>, rangeStart: string, rangeEnd: string) {
@@ -305,7 +325,9 @@ function operationCalendarMarkup() {
   const rangeStart = state.operationCalendarRangeStart || selected.start;
   const rangeEnd = state.operationCalendarRangeStart ? state.operationCalendarRangeStart : selected.end;
   const hint = state.operationCalendarRangeStart ? `已选择 ${state.operationCalendarRangeStart}，可再选结束日期或直接确定单日` : "点击一天选择单日，或依次点击开始和结束日期";
-  return `<div class="date-filter-field"><span>业务日期</span><details class="date-range-picker" ${state.operationCalendarOpen ? "open" : ""}><summary class="date-picker-trigger"><span>${escapeHtml(operationDateLabel())}</span><i aria-hidden="true"></i></summary><div class="calendar-popover"><div class="calendar-toolbar"><button type="button" data-calendar-shift="-12" aria-label="上一年">«</button><button type="button" data-calendar-shift="-1" aria-label="上个月">‹</button><span>${escapeHtml(hint)}</span><button type="button" data-calendar-shift="1" aria-label="下个月">›</button><button type="button" data-calendar-shift="12" aria-label="下一年">»</button></div><div class="calendar-months">${calendarMonthMarkup(cursor, availableDates, rangeStart, rangeEnd)}${calendarMonthMarkup(shiftCalendarMonth(cursor, 1), availableDates, rangeStart, rangeEnd)}</div><div class="calendar-footer"><span>${state.operationDates.size} 个业务日</span><div><button type="button" data-calendar-all>全部日期</button><button class="calendar-confirm" type="button" data-calendar-confirm>确定</button></div></div></div></details></div>`;
+  const presets: Array<["realtime" | "day" | "week" | "month" | "custom", string]> = [["realtime", "实时"], ["day", "近 1 日"], ["week", "近 7 日"], ["month", "近 30 天"], ["custom", "自定义日期"]];
+  const shortcutMarkup = `<div class="date-shortcuts" role="group" aria-label="日期快捷筛选">${presets.map(([key, label]) => `<button class="date-shortcut ${state.operationDatePreset === key ? "active" : ""}" type="button" data-operation-date-preset="${key}">${label}</button>`).join("")}</div>`;
+  return `<div class="date-filter-field operation-date-filter"><span>日期</span>${shortcutMarkup}<details class="date-range-picker" ${state.operationCalendarOpen ? "open" : ""}><summary class="date-picker-trigger"><span>${escapeHtml(state.operationDatePreset === "custom" ? operationDateLabel() : "选择自定义日期")}</span><i aria-hidden="true"></i></summary><div class="calendar-popover"><div class="calendar-toolbar"><button type="button" data-calendar-shift="-12" aria-label="上一年">«</button><button type="button" data-calendar-shift="-1" aria-label="上个月">‹</button><span>${escapeHtml(hint)}</span><button type="button" data-calendar-shift="1" aria-label="下个月">›</button><button type="button" data-calendar-shift="12" aria-label="下一年">»</button></div><div class="calendar-months">${calendarMonthMarkup(cursor, availableDates, rangeStart, rangeEnd)}${calendarMonthMarkup(shiftCalendarMonth(cursor, 1), availableDates, rangeStart, rangeEnd)}</div><div class="calendar-footer"><span>${state.operationDates.size} 个业务日</span><div><button type="button" data-calendar-all>全部日期</button><button class="calendar-confirm" type="button" data-calendar-confirm>确定</button></div></div></div></details></div>`;
 }
 
 function positionOperationCalendar() {
@@ -343,6 +365,16 @@ function bindDetailTableFilters() {
     resetOperationFilters();
     renderOperations();
   });
+  $$('[data-operation-date-preset]').forEach((button) => button.addEventListener("click", () => {
+    const preset = button.dataset.operationDatePreset as "realtime" | "day" | "week" | "month" | "custom";
+    if (preset === "custom") {
+      state.operationDatePreset = "custom";
+      state.operationCalendarOpen = true;
+    } else {
+      selectOperationDatePreset(preset);
+    }
+    renderOperations();
+  }));
   const picker = $(".date-range-picker");
   picker?.addEventListener("toggle", () => {
     state.operationCalendarOpen = picker.open;
@@ -359,20 +391,20 @@ function bindDetailTableFilters() {
     if (!state.operationCalendarRangeStart) {
       state.operationDates = new Set([value]);
       state.operationCalendarRangeStart = value;
+      state.operationDatePreset = "custom";
       state.operationCalendarOpen = true;
     } else {
       const start = value < state.operationCalendarRangeStart ? value : state.operationCalendarRangeStart;
       const end = value < state.operationCalendarRangeStart ? state.operationCalendarRangeStart : value;
       state.operationDates = new Set(operationFilterItems("date").filter((date) => date >= start && date <= end));
       state.operationCalendarRangeStart = "";
+      state.operationDatePreset = "custom";
       state.operationCalendarOpen = false;
     }
     renderOperations();
   }));
   $("[data-calendar-all]")?.addEventListener("click", () => {
-    state.operationDates = new Set(operationFilterItems("date"));
-    state.operationCalendarRangeStart = "";
-    state.operationCalendarOpen = false;
+    selectOperationDatePreset("all");
     renderOperations();
   });
   $("[data-calendar-confirm]")?.addEventListener("click", () => {
@@ -514,7 +546,7 @@ function adsTrendRecords(records: OperationRecord[]): OperationRecord[] {
 }
 
 function operationTabsMarkup() {
-  const tabs = [["overview", "经营总览", "跨模块概览"], ["sales", "销售", "成交与退款"], ["traffic", "流量", "曝光、商品与搜索"], ["ads", "投放", "消耗与投产"]];
+  const tabs = [["overview", "经营概览", "核心经营指标"], ["sales", "交易概况", "成交、退款与载体"], ["traffic", "流量概况", "曝光、商品与来源"], ["ads", "投放概况", "消耗与投产"]];
   return `<div class="operations-tabs" role="tablist" aria-label="经营分类">${tabs.map(([key, label, note]) => `<button class="operations-tab ${state.operationSection === key ? "active" : ""}" type="button" data-operation-section="${key}" role="tab" aria-selected="${state.operationSection === key}"><span>${label}</span><small>${note}</small></button>`).join("")}</div>`;
 }
 
@@ -541,7 +573,6 @@ function platformMatrixMarkup(records: OperationRecord[], channelRecords: AnyRec
 
 function overviewSectionMarkup(records: OperationRecord[], channelRecords: AnyRecord[]) {
   const totals = aggregate(records);
-  const organic = channelGroup(channelRecords, "organic_search");
   const ads = attributedAdMetrics(records);
   const allDates = operationFilterItems("date");
   const prevDates = previousPeriodDates(state.operationDates, allDates);
@@ -552,16 +583,14 @@ function overviewSectionMarkup(records: OperationRecord[], channelRecords: AnyRe
     state.operationSources.has(recordSourceLabel(item))
   );
   const prevTotals = aggregate(prevRecords);
-  const prevChannelRecords: AnyRecord[] = channelRecords.length ? (state.channel?.records || []).filter((record: AnyRecord) => prevDates.has(record.date) && state.operationShops.has(record.shop_name)) : [];
-  const prevOrganic = channelGroup(prevChannelRecords, "organic_search");
-  const prevAds = attributedAdMetrics(prevRecords);
   const metrics = [
     ["成交金额", money(totals.income_amt), deltaNote(totals.income_amt, prevTotals.income_amt, money), deltaTrend(totals.income_amt, prevTotals.income_amt)],
     ["去退后成交", money(Math.max(totals.income_amt - totals.refund_amt, 0)), deltaNote(Math.max(totals.income_amt - totals.refund_amt, 0), Math.max(prevTotals.income_amt - prevTotals.refund_amt, 0), money), deltaTrend(Math.max(totals.income_amt - totals.refund_amt, 0), Math.max(prevTotals.income_amt - prevTotals.refund_amt, 0))],
     ["成交订单", whole(totals.pay_cnt), deltaNote(totals.pay_cnt, prevTotals.pay_cnt, whole), deltaTrend(totals.pay_cnt, prevTotals.pay_cnt)],
     ["商品曝光人数", whole(totals.product_show_ucnt), deltaNote(totals.product_show_ucnt, prevTotals.product_show_ucnt, whole), deltaTrend(totals.product_show_ucnt, prevTotals.product_show_ucnt)],
-    ["自然搜索曝光", wholeOrDash(organic.value), deltaNote(number(organic.value), number(prevOrganic.value), whole), deltaTrend(number(organic.value), number(prevOrganic.value))],
-    ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? `${[...ads.platforms].join("、")} · 投放消耗 ${money(ads.spend)}` : "尚无投放消耗口径"],
+    ["商品点击人数", whole(totals.product_click_ucnt), deltaNote(totals.product_click_ucnt, prevTotals.product_click_ucnt, whole), deltaTrend(totals.product_click_ucnt, prevTotals.product_click_ucnt)],
+    ["投放金额", ads.spend ? money(ads.spend) : "—", ads.spend ? `${[...ads.platforms].join("、")}投放消耗` : "尚无投放消耗口径"],
+    ["投放 ROI", operatingRatio(ads.spend ? ads.pay / ads.spend : null), ads.spend ? "成交金额 ÷ 投放金额" : "尚无投放消耗口径"],
   ];
   const charts = records.length ? `<div class="chart-grid"><div class="chart-stack">${lineChart(records, "income_amt", "成交金额趋势")}${lineChart(records, "pay_cnt", "成交订单趋势")}</div><div class="chart-stack">${barPanel(records, "income_amt", "店铺成交金额对比")}${platformMatrixMarkup(records, channelRecords)}</div></div>` : platformMatrixMarkup(records, channelRecords);
   return `${metricCards(metrics)}${charts}`;
@@ -690,6 +719,7 @@ export async function loadCompass() {
     state.operationCalendarCursor = operationFilterItems("date")[0] ? `${operationFilterItems("date")[0].slice(0, 7)}-01` : "";
     state.operationCalendarRangeStart = "";
     state.operationCalendarOpen = false;
+    state.operationDatePreset = "all";
     state.operationPlatforms = new Set(operationFilterItems("platform"));
     state.operationShops = new Set(operationFilterItems("shop"));
     state.operationSources = new Set(state.records.map(recordSourceLabel));

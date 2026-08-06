@@ -1020,6 +1020,7 @@ name = "luopan-inventory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "calamine",
  "chrono",
  "luopan-jd",
  "luopan-runtime",

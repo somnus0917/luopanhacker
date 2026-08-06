@@ -77,7 +77,9 @@ use collection::{
 };
 use error::{ApiError, api, api_with_meta, generate_request_id};
 use health::{healthz, readyz};
-use inventory::{inventory_dashboard, inventory_raw};
+use inventory::{
+    business_outbound_dashboard, inventory_dashboard, inventory_raw, upload_business_outbound,
+};
 use jd::{commit_jd_import, preview_jd_import};
 use operations::{channel_dashboard, compass_dashboard, douyin_dashboard};
 use orders::{commit_order_import, order_imports, preview_order_import, remove_order_import};
@@ -147,6 +149,10 @@ async fn main() -> Result<()> {
     let protected = Router::new()
         .route("/api/compass", get(compass_dashboard))
         .route("/api/inventory", get(inventory_dashboard))
+        .route(
+            "/api/inventory/business-outbound",
+            get(business_outbound_dashboard),
+        )
         .route("/api/channel", get(channel_dashboard))
         .route("/api/douyin", get(douyin_dashboard))
         .route("/api/inventory/raw", get(inventory_raw))
@@ -166,6 +172,10 @@ async fn main() -> Result<()> {
         .route_layer(from_fn_with_state(state.clone(), require_auth));
     let admin_only = Router::new()
         .route("/api/settlement/uploads", post(upload_settlement))
+        .route(
+            "/api/inventory/business-outbound/upload",
+            post(upload_business_outbound),
+        )
         .route("/api/orders/preview", post(preview_order_import))
         .route("/api/jd/imports/preview", post(preview_jd_import))
         .route("/api/jd/imports", post(commit_jd_import))
