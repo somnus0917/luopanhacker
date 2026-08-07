@@ -217,6 +217,7 @@ pub fn inventory_snapshot(paths: &RuntimePaths) -> Result<Option<Value>> {
                     "date": snapshot_date,
                     "quantity": sold,
                     "is_rollup": is_rollup,
+                    "source": "jd_rdc",
                 }));
                 inbound_30d.push(json!({
                     "warehouse_no": format!("jd:{warehouse}"),
@@ -224,6 +225,7 @@ pub fn inventory_snapshot(paths: &RuntimePaths) -> Result<Option<Value>> {
                     "date": snapshot_date,
                     "quantity": inbound,
                     "is_rollup": is_rollup,
+                    "source": "jd_rdc",
                 }));
             }
         }
@@ -378,6 +380,9 @@ mod tests {
         assert_eq!(snapshot["inventory"].as_array().unwrap().len(), 1);
         assert_eq!(snapshot["inventory"][0]["warehouse_name"], "全国");
         assert_eq!(snapshot["inventory"][0]["is_rollup"], false);
+        assert_eq!(snapshot["sales_7d"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot["sales_7d"][0]["source"], "jd_rdc");
+        assert_eq!(snapshot["inbound_30d"][0]["source"], "jd_rdc");
         let _ = fs::remove_dir_all(root);
     }
 }

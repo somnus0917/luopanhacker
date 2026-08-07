@@ -789,6 +789,11 @@ fn build_sales_trend(
         BTreeMap::new();
 
     for row in sales_rows {
+        // 京东 RDC 报表的“近7日出库商品件数”是 7 日累计口径，且整批钉在报表日期上，
+        // 没有真实按日拆分，不应进入按日趋势；7 日汇总与库存健康度仍保留该口径。
+        if text(row.get("source")) == "jd_rdc" {
+            continue;
+        }
         let date = text(row.get("date"));
         if date.is_empty() {
             continue;
@@ -1063,5 +1068,52 @@ mod tests {
         assert_eq!(dashboard["summary"]["net_outbound_quantity"], 8.0);
         assert_eq!(dashboard["summary"]["net_sales_amount"], 80.0);
         assert_eq!(dashboard["summary"]["gross_profit"], 24.0);
+    }
+
+    #[test]
+    fn sales_trend_excludes_jd_cumulative_rows_but_keeps_them_in_summary() {
+        let snapshot = json!({
+            "inventory": [
+                {"warehouse_no": "001", "spec_no": "A", "stock_num": 10, "available_num": 8, "cost_price": 1.0},
+                {"warehouse_no": "jd:全国", "spec_no": "J", "stock_num": 100, "available_num": 80, "cost_price": 1.0, "is_rollup": false, "source": "jd_rdc"}
+            ],
+            "sales_7d": [
+                {"warehouse_no": "001", "spec_no": "A", "date": "2026-08-05", "quantity": 5.0},
+                {"warehouse_no": "001", "spec_no": "A", "date": "2026-08-06", "quantity": 7.0},
+                {"warehouse_no": "jd:全国", "spec_no": "J", "date": "2026-07-30", "quantity": 60645.0, "is_rollup": false, "source": "jd_rdc"}
+            ],
+            "inbound_30d": []
+        });
+
+        let dashboard = build_dashboard(&snapshot, Path::new("/tmp/luopan-inventory-sales-trend-test"))
+            .expect("dashboard should build");
+
+        // JD 7-day cumulative rows must not leak into the daily sales trend.
+        let trend = dashboard["sales_trend_7d"]
+            .as_array()
+            .expect("sales_trend_7d should be an array");
+        assert_eq!(trend.len(), 2, "unexpected trend rows: {trend:?}");
+        assert_eq!(trend[0]["date"], "2026-08-05");
+        assert_eq!(trend[0]["quantity"], 5.0);
+        assert_eq!(trend[1]["date"], "2026-08-06");
+        assert_eq!(trend[1]["quantity"], 7.0);
+        assert!(
+            !trend.iter().any(|row| row["date"] == "2026-07-30"),
+            "JD cumulative row leaked into the daily trend: {trend:?}"
+        );
+
+        // The 7-day total and per-SKU sales keep the JD figure.
+        assert_eq!(dashboard["summary"]["sales_7d"], 60657.0);
+        let rows = dashboard["rows"].as_array().expect("rows should be an array");
+        let jd_row = rows
+            .iter()
+            .find(|row| row["spec_no"] == "J")
+            .expect("JD row should be present");
+        assert_eq!(jd_row["sales_7d"], 60645.0);
+        let normal_row = rows
+            .iter()
+            .find(|row| row["spec_no"] == "A")
+            .expect("normal row should be present");
+        assert_eq!(normal_row["sales_7d"], 12.0);
     }
 }
