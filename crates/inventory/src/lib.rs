@@ -1085,8 +1085,11 @@ mod tests {
             "inbound_30d": []
         });
 
-        let dashboard = build_dashboard(&snapshot, Path::new("/tmp/luopan-inventory-sales-trend-test"))
-            .expect("dashboard should build");
+        let dashboard = build_dashboard(
+            &snapshot,
+            Path::new("/tmp/luopan-inventory-sales-trend-test"),
+        )
+        .expect("dashboard should build");
 
         // JD 7-day cumulative rows must not leak into the daily sales trend.
         let trend = dashboard["sales_trend_7d"]
@@ -1104,7 +1107,9 @@ mod tests {
 
         // The 7-day total and per-SKU sales keep the JD figure.
         assert_eq!(dashboard["summary"]["sales_7d"], 60657.0);
-        let rows = dashboard["rows"].as_array().expect("rows should be an array");
+        let rows = dashboard["rows"]
+            .as_array()
+            .expect("rows should be an array");
         let jd_row = rows
             .iter()
             .find(|row| row["spec_no"] == "J")
