@@ -507,7 +507,8 @@ function channelInsightsMarkup(records: AnyRecord[]): string {
 }
 
 function metricCards(metrics: string[][], columns = "six") {
-  return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => {
+  const layout = `balanced-${metrics.length}`;
+  return `<div class="metric-grid ${layout}">${metrics.map(([label, value, note, trend]) => {
     const status = trend === "up" ? "positive" : trend === "down" ? "negative" : "";
     const statusText = trend === "up" ? "环比上升" : trend === "down" ? "环比下降" : "";
     return `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">${statusText}</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status}">${note}</div></article>`;

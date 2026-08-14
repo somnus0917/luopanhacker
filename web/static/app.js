@@ -789,7 +789,8 @@ function channelInsightsMarkup(records) {
   return `${context}${cardHtml}${charts}${details}`;
 }
 function metricCards$1(metrics, columns = "six") {
-  return `<div class="metric-grid ${columns}">${metrics.map(([label, value, note, trend]) => {
+  const layout = `balanced-${metrics.length}`;
+  return `<div class="metric-grid ${layout}">${metrics.map(([label, value, note, trend]) => {
     const status = trend === "up" ? "positive" : trend === "down" ? "negative" : "";
     const statusText = trend === "up" ? "环比上升" : trend === "down" ? "环比下降" : "";
     return `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">${statusText}</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status}">${note}</div></article>`;
@@ -1015,11 +1016,17 @@ function costMoney(value) {
 function summaryCostMoney(value) {
   if (value === null || value === void 0) return "—";
   const amount = number(value);
+  if (Math.abs(amount) >= 1e8) {
+    return `¥${(amount / 1e8).toLocaleString("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}亿`;
+  }
   if (Math.abs(amount) >= 1e4) {
     return `¥${(amount / 1e4).toLocaleString("zh-CN", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    })} 万`;
+    })}万`;
   }
   return settlementMoney(amount);
 }
@@ -1347,7 +1354,7 @@ function renderInventory(payload, view = state.inventoryView) {
   const analyticsCapturedAt = payload.analytics_captured_at || inventoryCapturedAt;
   $("#inventory-freshness").textContent = inventoryCapturedAt ? analyticsCapturedAt && analyticsCapturedAt !== inventoryCapturedAt ? `库存 · ${inventoryCapturedAt} · 出入库分析 · ${analyticsCapturedAt}` : `库存与分析 · ${inventoryCapturedAt}` : "本地快照";
   const costCoverage = summary.cost_coverage_rate === null ? "暂无库存记录" : `成本已维护：${whole(summary.cost_covered_records)}/${whole(summary.sku_records)} 条（${(summary.cost_coverage_rate * 100).toFixed(1)}%）`;
-  const metrics = [
+  const primaryMetrics = [
     [
       "可发库存数量",
       whole(summary.available_num),
@@ -1370,27 +1377,15 @@ function renderInventory(payload, view = state.inventoryView) {
       "库存周转天数",
       inventoryDays(summary.inventory_turnover_days),
       "总库存 ÷ 近 7 天日均出库"
-    ],
-    [
-      "需补货记录",
-      whole(summary.replenishment_records),
-      "已缺货、紧急补货与需补货",
-      "attention"
-    ],
-    [
-      "偏高 / 积压",
-      whole(summary.overstock_records),
-      "可售超过 45 天的动销记录",
-      "attention"
-    ],
-    [
-      "近 7 日未动销",
-      whole(summary.no_movement_records),
-      "有可发库存、近 7 日无出库",
-      "attention"
     ]
   ];
-  const cards = `<div class="metric-grid eight">${metrics.map(([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`).join("")}</div>`;
+  const riskMetrics = [
+    ["需补货记录", whole(summary.replenishment_records), "已缺货、紧急补货与需补货", "attention"],
+    ["偏高 / 积压", whole(summary.overstock_records), "可售超过 45 天的动销记录", "attention"],
+    ["近 7 日未动销", whole(summary.no_movement_records), "有可发库存、近 7 日无出库", "attention"]
+  ];
+  const metricCard = ([label, value, note, status]) => `<article class="metric-card"><div class="metric-label">${label}</div>${status ? `<span class="metric-status ${status}">需关注</span>` : ""}<div class="metric-value">${value}</div><div class="metric-delta ${status || ""}">${note}</div></article>`;
+  const cards = `<div class="metric-grid inventory-summary-grid">${primaryMetrics.map(metricCard).join("")}</div><section class="inventory-risk-overview" aria-labelledby="inventory-risk-title"><div class="inventory-risk-heading"><div><p class="eyebrow">ACTION REQUIRED</p><h3 id="inventory-risk-title">库存风险概览</h3></div><p>优先处理补货、积压与近 7 日未动销。</p></div><div class="metric-grid inventory-risk-metrics">${riskMetrics.map(metricCard).join("")}</div></section>`;
   const replenishment = analysisRows.filter(
     (item) => ["out_of_stock", "urgent", "replenish"].includes(item.health_key)
   );
