@@ -49,6 +49,23 @@ fi
 # Chromium writes parts of the session as root.  sudo is intentionally
 # non-interactive; the migration provisions this narrow requirement first.
 tar_args=(--xattrs --acls --numeric-owner -C "${DATA_DIR}" -czf "${TEMP_ARCHIVE}")
+# Exclude volatile Chromium cache (Service Worker CacheStorage can reach
+# hundreds of MB and churns daily).  Login state is kept: Cookies, Local
+# Storage, IndexedDB, Login Data and the Service Worker registration
+# database are all outside these patterns.
+cache_excludes=(
+  --exclude='session/Default/Service Worker/CacheStorage'
+  --exclude='session/Default/Service Worker/ScriptCache'
+  --exclude='session/Default/Cache'
+  --exclude='session/Default/Code Cache'
+  --exclude='session/Default/GPUCache'
+  --exclude='session/Default/DawnWebGPUCache'
+  --exclude='session/Default/DawnGraphiteCache'
+  --exclude='session/GraphiteDawnCache'
+  --exclude='session/GPUPersistentCache'
+  --exclude='session/BrowserMetrics*'
+)
+tar_args+=("${cache_excludes[@]}")
 if [[ -f "${SQLITE_SNAPSHOT}" ]]; then
   tar_args+=(
     --exclude='state/luopan.db'
@@ -69,7 +86,8 @@ if [[ "$(date +%u)" == "7" ]]; then
   cp -f "${ARCHIVE}" "${WEEKLY_DIR}/$(basename "${ARCHIVE}")"
 fi
 
-find "${DAILY_DIR}" -type f -name 'luopan-data-*.tar.gz' -mtime +30 -delete
+# Daily retention: 14 days; weekly snapshots (Sundays) keep 84 days (~12 weeks).
+find "${DAILY_DIR}" -type f -name 'luopan-data-*.tar.gz' -mtime +14 -delete
 find "${WEEKLY_DIR}" -type f -name 'luopan-data-*.tar.gz' -mtime +84 -delete
 if [[ -n "${BACKUP_SYNC_TARGET}" ]]; then
   rsync -a --protect-args "${ARCHIVE}" "${BACKUP_SYNC_TARGET}"
