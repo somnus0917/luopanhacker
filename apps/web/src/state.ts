@@ -23,6 +23,12 @@ export type AppState = {
   operationSection: "overview" | "sales" | "traffic" | "ads";
   douyinSection: "live" | "video" | "product_card";
   douyinShop: string;
+  douyinStartDate: string;
+  douyinEndDate: string;
+  douyinCalendarOpen: boolean;
+  douyinCalendarCursor: string;
+  douyinCalendarRangeStart: string;
+  douyinDatePreset: "day" | "week" | "month" | "custom" | "all";
   status: AnyRecord | null;
   collectionModules: Set<string>;
   collectionBackfillDate: string;
@@ -78,6 +84,6 @@ export const latestBackfillDate = () => previousLocalDate() >= currentLocalMonth
 
 export const backfillDateAllowed = (value: string) => Boolean(value && value >= currentLocalMonthStart() && value <= previousLocalDate());
 
-export const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", operationDatePreset: "all", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", douyinShop: "", status: null, collectionModules: new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", businessOutbound: null, businessOutboundMessage: "", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
+export const state: AppState = { currentUser: null, users: [], accountMessage: "", records: [], operationDates: new Set<string>(), operationPlatforms: new Set<string>(), operationShops: new Set<string>(), operationSources: new Set<string>(), operationFilterOpen: new Set<string>(), operationCalendarOpen: false, operationCalendarCursor: "", operationCalendarRangeStart: "", operationDatePreset: "all", tablePlatform: "", tableShop: "", operationSection: "overview", douyinSection: "live", douyinShop: "", douyinStartDate: "", douyinEndDate: "", douyinCalendarOpen: false, douyinCalendarCursor: "", douyinCalendarRangeStart: "", douyinDatePreset: "day", status: null, collectionModules: new Set(["operations", "channel", "douyin"]), collectionBackfillDate: latestBackfillDate(), collectionBackfillShops: new Set(COLLECTION_SHOPS), collectionMessage: "", page: "operations", inventory: null, inventoryView: "overview", inventoryWarehouse: "", inventoryBrand: "", inventorySortKey: "", inventorySortDir: "desc", businessOutbound: null, businessOutboundMessage: "", settlement: null, settlementShop: "", settlementAvailableDates: [], settlementStartDate: "", settlementEndDate: "", settlementCalendarOpen: false, settlementCalendarCursor: "", settlementCalendarRangeStart: "", settlementUploadMessage: "", orderImports: { batches: [], summary: {} }, orderPreview: null, orderImportMessage: "", channel: null, douyin: null };
 
 export const isAdmin = () => state.currentUser?.role === "admin";

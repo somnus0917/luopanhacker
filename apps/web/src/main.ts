@@ -35,7 +35,7 @@ function activatePage(name: PageName) {
     tab.classList.toggle("active", active);
     if (tab.dataset.page) tab.setAttribute("aria-current", active ? "page" : "false");
   });
-  $("#filter-quick-action")?.classList.toggle("hidden", !["inventory", "operations", "settlement"].includes(name));
+  $("#filter-quick-action")?.classList.toggle("hidden", !["inventory", "operations", "douyin", "settlement"].includes(name));
   history.replaceState(null, "", `#${name}`);
   if (name === "collection" && state.currentUser) refreshCollectionStatus();
   else stopCollectionStatusRefresh();

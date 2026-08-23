@@ -227,6 +227,8 @@ main { padding-top: 20px; }
 .operations-tab.active { color: #fff; border-color: rgba(240, 70, 105, .64); background: linear-gradient(135deg, rgba(240, 70, 105, .22), rgba(61, 167, 245, .12)); box-shadow: inset 3px 0 var(--pink); }
 .operations-tab.active small { color: #b8c3df; }
 .douyin-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:0 0 18px; }
+.douyin-filter-panel { margin:0 0 18px; }
+.douyin-filter-panel .operation-date-filter { margin-right:0; }
 .douyin-shop-filter { display:inline-flex; align-items:center; gap:9px; min-height:36px; margin:0 0 14px; padding:0 10px; color:var(--muted); border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.025); font-size:12px; font-weight:720; }
 .douyin-shop-filter select { min-width:176px; padding:5px 22px 5px 0; color:var(--text); border:0; outline:0; background:transparent; font:inherit; font-weight:700; }
 .douyin-shop-filter option { color:#172019; }
